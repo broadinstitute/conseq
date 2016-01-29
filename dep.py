@@ -6,24 +6,22 @@ COMPLETED="completed"
 
 class Obj:
     "Models an any input or output artifact by a set of key-value pairs"
-    def __init__(self, id, props):
+    def __init__(self, id, timestamp, props):
         """
         :param id:
         :param props: either a dictionary or a sequence of (key, value) tuples
         :return:
         """
         self.id = id
+        self.timestamp = timestamp
         self.props = dict(props)
 
-    def is_instance_of(self, other):
+    def __eq__(self, other):
         """
         :param other: an instance of Obj to compare to
-        :return: true of this object has _at_least_ the same properties as "other" does
+        :return: true of this object has the same properties as "other" does
         """
-        for k, v in other.props.items():
-            if not (k in self.props and self.props[k] == v):
-                return False
-        return True
+        return self.props == other.props
 
     def get(self, prop_name):
         """
@@ -35,85 +33,94 @@ class Obj:
     def __repr__(self):
         return "<{} {}>".format(self.id, repr(self.props))
 
-
-
 class ObjSet:
     """
-    Models the universe of all known artifacts.  Presence in the set does not imply that
-    the artifact exists, only that it is used in some rule.
+    Models the universe of all known artifacts.
 
     This prototype implementation does everything in memory but is intended to be replaced with one that read/writes to a persistent DB
     """
     def __init__(self):
         self.objects = {}
         self.next_id = 0
+        self.add_listeners = []
+        self.remove_listeners = []
 
     def get(self, id):
         return self.objects[id]
 
-    def add(self, props):
+    def remove(self, id):
+        del self.objects[id]
+        for remove_listener in self.remove_listeners:
+            remove_listener(id)
+
+    def add(self, timestamp, props):
         # first check to see if this already exists
-        matches = self.query(props, is_instance=False)
+        matches = self.find(props)
+        matches = [m for m in matches if m.props == props]
         assert len(matches) <= 1
         if len(matches) == 1:
+            if matches[0].timestamp != timestamp:
+                self.remove(matches[0].id)
             return matches[0].id
 
         id = self.next_id
         self.next_id += 1
 
-        obj = Obj(id, props)
+        obj = Obj(id, timestamp, props)
         self.objects[id] = obj
+
+        for add_listener in self.add_listeners:
+            add_listener(obj)
+
         return id
 
-    def query(self, properties, is_instance=True):
+    def find(self, properties):
         result = []
-        ref_obj = Obj(None, properties)
         for o in self.objects.values():
-            if is_instance:
-                if o.is_instance_of(ref_obj):
-                    result.append(o)
-            else:
-                if ref_obj.is_instance_of(o):
-                    result.append(o)
+            skip = False
+            for k, v in properties.items():
+                if not ((k in o.props) and (o.props[k] == v)):
+                    skip = True
+                    break
+            if not skip:
+                result.append(o)
         return result
 
-    def clone_with(self, id, **props):
-        obj = self.objects[id]
-        new_props = dict(obj.props)
-        new_props.update(props)
-        new_id = self.add(new_props)
-        return self.get(new_id)
+def assertInputsValid(inputs):
+    for x in inputs:
+        assert isinstance(x, tuple) and len(x) == 2
+        name, value = x
+        assert isinstance(value, Obj) or (isinstance(value, tuple) and isinstance(value[0], Obj))
 
 class Rule:
     """
     Represents a statement describing what transform to run to generate a set of Objs (outputs) from a different set of Objs (inputs)
     """
-    def __init__(self, id, inputs, outputs, transform):
-        for x in inputs:
-            assert isinstance(x, Obj)
-        for x in outputs:
-            assert isinstance(x, Obj)
+    def __init__(self, id, inputs, transform):
+        assertInputsValid(inputs)
 
         self.inputs = inputs
-        self.outputs = outputs
         self.transform = transform
         self.id = id
 
     def __repr__(self):
         return "<Rule in:{} out:{} transform:{}>".format(self.inputs, self.outputs, self.transform)
 
+
 class RuleSet:
     """
-        The universe of all known rules
+        The all active rules
 
         This prototype implementation does everything in memory but is intended to be replaced with one that read/writes to a persistent DB
     """
     def __init__(self):
         # map of rule_id -> state.  If missing entry, state is assumed to be WAITING
-        self.rule_state = {}
-        self.output_to_rule = {}
+        self.input_to_rule = {}
         self.rule_by_id = {}
         self.next_rule_id = 0
+        self.remove_rule_listeners = []
+        self.add_rule_listeners = []
+        self.rule_to_id = {}
 
     def __iter__(self):
         return iter(self.rule_by_id.values())
@@ -121,107 +128,207 @@ class RuleSet:
     def get(self, id):
         return self.rule_by_id[id]
 
-    def remove_rule(self, rule):
-        for output in rule.outputs:
-            del self.output_to_rule[output]
-        del self.rule_by_id[rule.id]
+    def remove_rule(self, rule_id):
+        rule = self.rule_to_id[rule_id]
+        key = self._mk_rule_natural_key(rule.inputs, rule.transform)
+        del self.rule_by_id[rule_id]
+        del self.rule_to_id[key]
+        for remove_rule_listener in self.remove_rule_listeners:
+            remove_rule_listener(rule_id)
 
-    def add_rule(self, inputs, outputs, transform):
+    def _mk_rule_natural_key(self, inputs, transform):
+        flattened_inputs = []
+        for n, vs in inputs:
+            if not isinstance(vs, tuple):
+                vs = (vs,)
+            flattened_inputs.append( (n, tuple([x.id for x in vs]))  )
+        return (tuple(flattened_inputs), transform)
+
+    def add_rule(self, inputs, transform):
+        # first check to make sure rule isn't duplicated
+        key = self._mk_rule_natural_key(inputs, transform)
+        if key in self.rule_to_id:
+            return self.rule_to_id[key]
+
         rule_id = self.next_rule_id
         self.next_rule_id += 1
 
-        rule = Rule(rule_id, inputs, outputs, transform)
+        rule = Rule(rule_id, inputs, transform)
         self.rule_by_id[rule_id] = rule
+        self.rule_to_id[key] = rule_id
 
-        for output in outputs:
-            if (output in self.output_to_rule):
-                # if this output was already generated by some rule, drop that rule and replace it
-                rule_to_drop = self.output_to_rule[output]
-                self.remove_rule(rule_to_drop)
-            self.output_to_rule[output] = rule
+        for add_rule_listener in self.add_rule_listeners:
+            add_rule_listener(rule)
 
         return rule_id
 
-    def find_finished_rules(self, output_object, timestamps):
-        result = []
-        for rule in self.rule_by_id.values():
-            if self._get_state(rule, timestamps) == COMPLETED:
-                result.append(rule.id)
-        return result
+STATUS_READY = "ready"
+STATUS_CANCELED = "canceled"
+STATUS_COMPLETED = "completed"
+STATUS_FAILED = "failed"
 
-    def _get_state(self, rule, timestamps):
-        max_input_timestamp = None
-        for input in rule.inputs:
-            t = timestamps.get(input.id)
-            if t == None:
-                return WAITING
-            if max_input_timestamp == None or max_input_timestamp < t:
-                max_input_timestamp = t
+class RulePending:
+    def __init__(self, id, rule_id, inputs, transform):
+        assertInputsValid(inputs)
 
-        min_output_timestamp = None
-        for output in rule.outputs:
-            t = timestamps.get(output.id)
-            if t == None:
-                continue
-            if min_output_timestamp == None or min_output_timestamp > t:
-                min_output_timestamp = t
+        self.id = id
+        self.transform = transform
+        self.inputs = inputs
+        self.rule_id = rule_id
+        self.status = STATUS_READY
+        self.outputs = []
 
-        if min_output_timestamp == None or max_input_timestamp > min_output_timestamp:
-            return READY
+    def __repr__(self):
+        return "<Rule id:{} rule_id:{} inputs:{} transform:{}>".format(self.id, self.rule_id, self.inputs, self.transform)
 
-        return COMPLETED
 
-    def find_ready_to_start(self, timestamps, rules_to_consider):
-        """
-        :param timestamps: a map of object_id -> timestamp the object was created.  (Objects not in the map do not exists)
-        :param rules_to_consider: sequence of rule ids to limit ourselves to
-        :return: list of rule ids which are ready to execute
-        """
-        rules_to_start = set()
+class ExecutionLog:
+    def __init__(self):
+        self.obj_history = ObjSet()
+        self.execution_by_rule_id = {}
+        self.execution_by_id = {}
+        self.next_exec_id = 0
 
-        for rule_id in rules_to_consider:
-            rule = self.rule_by_id[rule_id]
-            if self._get_state(rule, timestamps) == READY:
-                rules_to_start.add(rule_id)
+    def cancel_execution(self, rule_id):
+        e = self.execution_by_rule_id[rule_id]
+        e.setCanceled()
 
-        return rules_to_start
+    def _copy_obj(self, x):
+        if isinstance(x, tuple):
+            return tuple([self._copy_obj(o) for o in x])
+        else:
+            id = self.obj_history.add(x.timestamp, x.props)
+            return self.obj_history.get(id)
 
-    def get_rule_state(self, rule_id):
-        if rule_id in self.rule_state:
-            return self.rule_state[rule_id]
-        return WAITING
+    def add_execution(self, rule):
+        id = self.next_exec_id
+        self.next_exec_id += 1
 
-    def set_rule_state(self, rule_id, state):
-        self.rule_state[rule_id] = state
+        e = RulePending(id, rule.id, [(name, self._copy_obj(x)) for name, x in rule.inputs], rule.transform)
+        self.execution_by_id[id] = e
+        return id
 
-    def get_rules_by_state(self, state):
-        result = []
-        for rule in self.rule_by_id.values():
-            if self.get_rule_state(rule.id) == state:
-                result.append(rule)
-        return result
+    def get_pending(self):
+        return [x for x in self.execution_by_id.values() if x.status == STATUS_READY]
+
+    def record_completed(self, timestamp, execution_id, new_status, outputs):
+        e = self.execution_by_id[execution_id]
+        e.status = new_status
+        e.outputs = [self._copy_obj(x) for x in outputs]
 
     def to_dot(self):
         """
         :return: a graphviz graph in dot syntax of all objects and rules created
         """
         stmts = []
-        objs = set()
-        state_color = {WAITING:"gray", READY:"red", STARTED:"blue", FAILED:"green", COMPLETED:"turquoise"}
-        for rule in self:
-            for input in rule.inputs:
-                stmts.append("o{} -> r{}".format(input.id, rule.id))
-                objs.add(input)
-            for output in rule.outputs:
-                stmts.append("r{} -> o{}".format(rule.id, output.id))
-                objs.add(output)
+        objs = {}
+        #state_color = {WAITING:"gray", READY:"red", STARTED:"blue", FAILED:"green", COMPLETED:"turquoise"}
+        for rule in self.execution_by_id.values():
+            for name, value in rule.inputs:
+                if not isinstance(value, tuple):
+                    value = [value]
+                for v in value:
+                    stmts.append("o{} -> r{} [label=\"{}\"]".format(v.id, rule.id, name))
+                    objs[v.id] = v
+                for output in rule.outputs:
+                   stmts.append("r{} -> o{}".format(rule.id, output.id))
+                   objs[output.id] = output
 
-            color=state_color[self.get_rule_state(rule.id)]
+            #color=state_color[self.get_rule_state(rule.id)]
+            color="gray"
 
-            stmts.append("r{} [shape=box, label=\"{}\", style=\"filled\" fillcolor=\"{}\"]".format(rule.id, rule.transform.__name__, color))
-        for obj in objs:
-            stmts.append("o{} [label=\"{}\"]".format(obj.id, obj.get("name")))
+            stmts.append("r{} [shape=box, label=\"{}\", style=\"filled\" fillcolor=\"{}\"]".format(rule.id, rule.transform, color))
+        for obj in objs.values():
+            label = "\\n".join([ "{}: {}".format(k, v) for k,v in obj.props.items() ])
+            stmts.append("o{} [label=\"{}\"]".format(obj.id, label))
         return "digraph { " + (";\n".join(stmts)) + " } "
+
+class ForEach:
+    def __init__(self, variable, const_constraints = {}):
+        self.variable = variable
+        self.const_constraints = const_constraints
+
+class ForAll:
+    def __init__(self, variable, const_constraints = {}):
+        self.variable = variable
+        self.const_constraints = const_constraints
+
+class PropEqualsConstant:
+    def __init__(self, variable, property, constant):
+        self.variable = variable
+        self.property = property
+        self.constant = constant
+
+    def satisfied(self, bindings):
+        return bindings[self.variable][self.property] == self.constant
+
+class Template:
+    def __init__(self, queries, predicates, transform, expected=None):
+        self.foreach_queries = []
+        self.forall_queries = []
+        for q in queries:
+            if isinstance(q, ForEach):
+                self.foreach_queries.append(q)
+            elif isinstance(q, ForAll):
+                self.forall_queries.append(q)
+            else:
+                raise Exception("Bad query type: {}".format(q))
+        self.predicates = predicates
+        self.transform = transform
+
+    def _predicate_satisifed(self, bindings):
+        for p in self.predicates:
+            if not p.satisified(bindings):
+                return False
+        return True
+
+    def _create_rules(self, obj_set, bindings, queries):
+        if len(queries) == 0:
+            if self._predicate_satisifed(bindings):
+                return [bindings]
+            else:
+                return []
+
+        q_rest = queries[:-1]
+        q = queries[-1]
+
+        results = []
+        for obj in obj_set.find(q.const_constraints):
+            new_binding = dict(bindings)
+            new_binding[q.variable] = obj
+
+            results.extend(self._create_rules(obj_set, new_binding, q_rest))
+        return results
+
+    def _execute_forall_queries(self, bindings, obj_set):
+        bindings = dict(bindings)
+        for q in self.forall_queries:
+            objs = tuple(obj_set.find(q.const_constraints))
+            if len(objs) == 0:
+                return None
+            bindings[q.variable] = objs
+        return bindings
+
+    def create_rules(self, obj_set):
+        bindings = self._create_rules(obj_set, {}, self.foreach_queries)
+
+        results = []
+        for b in bindings:
+            b = self._execute_forall_queries(b, obj_set)
+            if b == None:
+                continue
+            results.append( (tuple(b.items()), self.transform) )
+
+        return results
+
+class Wildcard:
+    pass
+
+WILDCARD = Wildcard()
+
+class InstanceTemplate:
+    def __init__(self, props):
+        pass
 
 class Jobs:
     """
@@ -231,46 +338,40 @@ class Jobs:
         self.rule_set = RuleSet()
         self.rule_templates = []
         self.objects = ObjSet()
-        self.object_timestamps = {}
+        self.objects.add_listeners.append(self._object_added)
+        self.log = ExecutionLog()
+        self.rule_set.add_rule_listeners.append(self.log.add_execution)
+        self.rule_set.remove_rule_listeners.append(self.log.cancel_execution)
+
+    def _object_added(self, obj):
+        new_rules = []
+        for template in self.rule_templates:
+            new_rules.extend(template.create_rules(self.objects))
+
+        for rule in new_rules:
+            self.rule_set.add_rule(*rule)
 
     def to_dot(self):
-        return self.rule_set.to_dot()
+        return self.log.to_dot()
 
     def add_template(self, template):
         self.rule_templates.append(template)
 
-    def set_rule_state(self, rule_id, state):
-        self.rule_set.set_rule_state(rule_id, state)
-
-    def add_obj(self, obj_props, timestamp):
+    def add_obj(self, timestamp, obj_props):
         """
         Used to record the creation of an object with a given timestamp
 
         :param obj_props: either a dict or sequence of (key, value) tuples
         :param timestamp:
         """
-        obj_id = self.objects.add(obj_props)
-        obj = self.objects.get(obj_id)
-        self.object_timestamps[obj_id] = timestamp
+        return self.objects.add(timestamp, obj_props)
 
-        new_rules = set()
-        for template in self.rule_templates:
-            new_rules.update(template(obj, self.objects))
+    def get_pending(self):
+        return self.log.get_pending()
 
-        new_rule_ids = []
-        for rule in new_rules:
-            new_rule_ids.append(self.rule_set.add_rule(*rule))
-
-        # update those rules where the object is an input.  May transition rules to "READY"
-        start_rule_ids = self.rule_set.find_ready_to_start(self.object_timestamps, rules_to_consider=new_rule_ids)
-        for rule_id in start_rule_ids:
-            self.set_rule_state(rule_id, READY)
-
-        # now find all rules where object is an output.  May transition rules to "COMPLETE"
-        for rule_id in self.rule_set.find_finished_rules(obj, self.object_timestamps):
-            self.set_rule_state(rule_id, COMPLETED)
-
-    def get_rules_by_state(self, state):
-        return self.rule_set.get_rules_by_state(state)
-
-
+    def record_completed(self, timestamp, execution_id, new_status, outputs):
+        interned_outputs = []
+        for output in outputs:
+            obj_id = self.add_obj(timestamp, output)
+            interned_outputs.append( self.objects.get(obj_id) )
+        self.log.record_completed(timestamp, execution_id, new_status, interned_outputs)
