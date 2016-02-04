@@ -1,0 +1,252 @@
+import json
+import datetime
+import dep
+import subprocess
+import jinja2
+import os
+import time
+import depfile
+import textwrap
+
+class Execution:
+    def __init__(self, id, job_dir, results_path, proc):
+        self.id = id
+        self.proc = proc
+        self.results_path = results_path
+        self.job_dir = job_dir
+
+    def _resolve_filenames(self, props):
+        props_copy = {}
+        for k, v in props.items():
+            if isinstance(v, dict) and "$filename" in v:
+                v = {"$filename": self.job_dir + "/" + v["$filename"]}
+            props_copy[k] = v
+        return props_copy
+
+    def get_completion(self):
+        retcode = self.proc.poll()
+   
+        if retcode == None:
+            return None
+        
+        if retcode != 0:
+            raise Exception("failed with {}".format(retcode))
+
+        with open(self.results_path) as fd:
+            results = json.load(fd)
+        print("----> results", results)
+        outputs = [self._resolve_filenames(o) for o in results['outputs']]
+        return outputs
+
+def exec_script(id, language, job_dir, script_name, stdout_path, stderr_path, results_path):
+    script_name = os.path.abspath(script_name)
+    stdout_path = os.path.abspath(stdout_path)
+    stderr_path = os.path.abspath(stderr_path)
+    if language in ['python']:
+        cmd = "cd {job_dir} ; {language} {script_name} > {stdout_path} 2> {stderr_path}".format(**locals())
+    elif language in ['shell']:
+        cmd = "cd {job_dir} ; bash {script_name} > {stdout_path} 2> {stderr_path}".format(**locals())
+    elif language in ['R']:
+        cmd = "cd {job_dir} ; Rscript {script_name} > {stdout_path} 2> {stderr_path}".format(**locals())
+    else:
+        raise Exception("unknown language: {}".format(language))
+    print("executing:", cmd)
+    env = os.environ.copy()
+    env['PYTHONPATH'] = os.path.abspath(".")
+    proc = subprocess.Popen(['bash', '-c', cmd], env=env)
+    return Execution(id, job_dir, results_path, proc)
+
+def localize_filenames(job_dir, props):
+    props_copy = {}
+    for k, v in props.items():
+        if isinstance(v, dict) and "$filename" in v:
+            v = os.path.relpath(v["$filename"], job_dir)
+        props_copy[k] = v
+    return props_copy
+
+
+def execute(id, language, job_dir, script_body, inputs):
+    assert isinstance(inputs, dict)
+    inputs = dict([(k, localize_filenames(job_dir, v.props)) for k,v in inputs.items()])
+
+    formatted_script_body = jinja2.Template(script_body).render(inputs=inputs)
+    formatted_script_body = textwrap.dedent(formatted_script_body)
+
+    os.makedirs(job_dir)
+    script_name = os.path.join(job_dir, "script")
+    with open(script_name, "w") as fd:
+        fd.write(formatted_script_body)
+    return exec_script(id,
+                       language,
+                       job_dir,
+                       script_name,
+                       os.path.join(job_dir, "stdout.txt"),
+                       os.path.join(job_dir, "stderr.txt"),
+                       os.path.join(job_dir, "results.json"))
+
+def main_loop(j, new_object_listener, script_by_name):
+    run_dir = "run-" + datetime.datetime.now().isoformat()
+    os.makedirs(run_dir)
+    executing = []
+    active_job_ids = set()
+
+    while True:
+        pending_jobs = j.get_pending()
+        if len(executing) == 0 and len(pending_jobs) == 0:
+            break
+        print("executing", len(executing), "pending", len(pending_jobs))
+
+        did_useful_work = False
+        for job in pending_jobs:
+            assert isinstance(job, dep.RulePending)
+            if job.id in active_job_ids:
+                continue
+            active_job_ids.add(job.id)
+            did_useful_work = True
+
+            job_dir = run_dir + "/"+str(job.id)
+            language, script = script_by_name[job.transform]
+            e = execute(job.id, language, job_dir, script, dict(job.inputs))
+            executing.append(e)
+
+        for i, e in reversed(list(enumerate(executing))):
+            completion = e.get_completion()
+            if completion == None:
+                continue
+
+            del executing[i]
+            timestamp = datetime.datetime.now().isoformat()
+            j.record_completed(timestamp, e.id, dep.COMPLETED, completion)
+            did_useful_work = True
+        
+        if not did_useful_work:
+            time.sleep(0.5)
+    j.dump()
+
+def to_template(rule):
+    queries = []
+    for name, spec in rule.inputs:
+        queries.append(dep.ForEach(name, spec))
+    return dep.Template(queries, [], rule.name)
+
+def parse(filename):
+    with open(filename) as f:
+        text = f.read()
+    parser = depfile.depfileParser(parseinfo=False)
+    return parser.parse(
+        text,
+        "rules",
+        filename=filename,
+        trace=False,
+        whitespace="",
+        nameguard=None,
+        semantics = Semantics())
+
+def read_deps(filename, j):
+    script_by_name = {}
+    p = parse(filename)
+    print(repr(p))
+    for rule in p:
+        script_by_name[rule.name] = (rule.language, rule.script)
+    for rule in p:
+        j.add_template(to_template(rule))
+    return script_by_name
+
+def main(depfile):
+    j = dep.Jobs()
+    script_by_name = read_deps(depfile, j)
+    def new_object_listener(obj):
+        timestamp = datetime.datetime.now().isoformat()
+        j.add_obj(timestamp, obj)
+    main_loop(j, new_object_listener, script_by_name)
+
+class Rule:
+    def __init__(self, name):
+        self.name = name
+        self.inputs = []
+        self.outputs = []
+        self.options = []
+        self.script = None
+
+    @property
+    def language(self):
+        if "exec-python" in self.options:
+            return "python"
+        elif "exec-R" in self.options:
+            return "R"
+        else:
+            return "shell"
+
+    def __repr__(self):
+        return "<Rule {} inputs={} options={}>".format(self.name, self.inputs, self.options)
+
+def unquote(s):
+    if len(s) > 0 and s[:3] == '"""':
+        assert s[-3:] == '"""'
+        return s[3:-3]
+    assert s[0] == '"'
+    assert s[-1] == '"'
+    return s[1:-1]
+
+class Semantics(object):
+    def statement(self, ast):
+#        print("statement:", repr(ast))
+        return tuple(ast)
+
+    def statements(self, ast):
+#        print("statements:", repr(ast))
+        return ast
+
+    def json_name_value_pair(self, ast):
+        return (ast[0], ast[4])
+
+    def json_obj(self, ast):
+        rest = ast[4]
+        obj = dict( [ast[2]] + [rest[x] for x in range(1, len(rest), 3)] )
+        print("json_obj", obj)
+        return obj
+
+    def rule(self, ast):
+        rule_name = ast[3]
+        statements = ast[7]
+        print("rule: {}".format(repr(ast)))
+        rule = Rule(rule_name)
+        for statement in statements:
+            if statement[0] == "inputs":
+                rule.inputs = statement[4]
+            elif statement[0] == "outputs":
+                rule.outputs = statement[4]
+            elif statement[0] == "script":
+                rule.script = statement[4]
+            elif statement[0] == "options":
+                print("----> options", statement)
+                rule.options = [statement[4]] + list(statement[5])
+            else:
+                raise Exception("unknown {}".format(statement[0]))
+        print("rule:", repr(rule))
+        return rule
+
+    def quoted_string(self, ast):
+        return unquote(ast)
+
+    def input_specs(self, ast):
+        print("input_specs", repr(ast))
+        ast = [ast[0:5]] + ast[5]
+        return [ (name, value) for name, _, _, _, value in ast]
+
+    def output_specs(self, ast):
+        ast = [ast[0:5]] + ast[5]
+        return [ (name, value) for name, _, _, _, value in ast]
+
+if __name__ == "__main__":
+    import argparse
+    import string
+    import sys
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('file', metavar="FILE", help="the input file to parse")
+    args = parser.parse_args()
+    main(args.file)
+
+#textwrap.dedent(text)
+

@@ -45,6 +45,9 @@ class ObjSet:
         self.add_listeners = []
         self.remove_listeners = []
 
+    def __iter__(self):
+        return iter(self.objects.values())
+
     def get(self, id):
         return self.objects[id]
 
@@ -211,7 +214,7 @@ class ExecutionLog:
     def get_pending(self):
         return [x for x in self.execution_by_id.values() if x.status == STATUS_READY]
 
-    def record_completed(self, timestamp, execution_id, new_status, outputs):
+    def record_completed(self, execution_id, new_status, outputs):
         e = self.execution_by_id[execution_id]
         e.status = new_status
         e.outputs = [self._copy_obj(x) for x in outputs]
@@ -247,6 +250,11 @@ class ForEach:
     def __init__(self, variable, const_constraints = {}):
         self.variable = variable
         self.const_constraints = const_constraints
+#        for k, v in self.const_constraints.items():
+#            assert isinstance(k, str)
+#            assert isinstance(v, str)
+    def __repr__(self):
+        return "<ForEach {} where {}>".format(self.variable, self.const_constraints)
 
 class ForAll:
     def __init__(self, variable, const_constraints = {}):
@@ -310,7 +318,11 @@ class Template:
         return bindings
 
     def create_rules(self, obj_set):
-        bindings = self._create_rules(obj_set, {}, self.foreach_queries)
+        print ("create_rules, transform:",self.transform,", queries: ", self.foreach_queries)
+        if len(self.foreach_queries) == 0:
+            bindings = [{}]
+        else:
+            bindings = self._create_rules(obj_set, {}, self.foreach_queries)
 
         results = []
         for b in bindings:
@@ -319,6 +331,7 @@ class Template:
                 continue
             results.append( (tuple(b.items()), self.transform) )
 
+        print ("Created rules for ",self.transform,": ", repr(results), repr(bindings))
         return results
 
 class Wildcard:
@@ -356,6 +369,9 @@ class Jobs:
 
     def add_template(self, template):
         self.rule_templates.append(template)
+        new_rules = template.create_rules(self.objects)
+        for rule in new_rules:
+            self.rule_set.add_rule(*rule)
 
     def add_obj(self, timestamp, obj_props):
         """
@@ -374,4 +390,8 @@ class Jobs:
         for output in outputs:
             obj_id = self.add_obj(timestamp, output)
             interned_outputs.append( self.objects.get(obj_id) )
-        self.log.record_completed(timestamp, execution_id, new_status, interned_outputs)
+        self.log.record_completed(execution_id, new_status, interned_outputs)
+
+    def dump(self):
+        for obj in self.objects:
+            print("obj:", obj)

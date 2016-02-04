@@ -1,0 +1,18 @@
+ws = /\s*/ ;
+triple_quoted_string = /"""(?:[^"]|"{1,2}(?!"))+"""/;
+single_quoted_string = /"[^"]*"/ ;
+quoted_string = triple_quoted_string | single_quoted_string ;
+identifier = /[A-Za-z_]+[A-Za-z0-9_-]*/ ;
+json_name_value_pair = quoted_string ws ":" ws quoted_string ;
+json_obj = "{" ws json_name_value_pair ws {"," ws json_name_value_pair ws}* "}" ;
+input_specs = identifier ws "=" ws json_obj { ws "," ws identifier "=" ws json_obj }* ;
+output_specs = identifier ws "=" ws quoted_string { ws "," ws identifier ws "=" ws quoted_string }* ;
+statement = ( "inputs" ws ":" ws input_specs |
+  "outputs" ws ":" ws output_specs |
+  "script" ws ":" ws quoted_string | 
+  "options" ws ":" ws identifier { ws "," ws identifier }* ) ws ;
+statements = { statement }+ ;
+rule = ws "rule" ws identifier ws ":" ws statements ws ;
+rules = { rule }+  $ ;
+
+

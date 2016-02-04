@@ -1,0 +1,29 @@
+rule make_inputs:
+    outputs: o="numbers"
+    options: exec-python
+    script: """
+    with open("{{outputs.o}}", "w") as fd:
+        fd.write("1,2,3,4")
+    """
+
+rule square:
+    inputs: n="numbers"
+    outputs: out="squared"
+    options: exec-python
+    script: """
+    with open("{{inputs.n}}") as fd:
+        numbers = [int(x) for x in fd.read().split(",")]
+    with open("{{outputs.out}}", "w") as fd:
+        fd.write(",".join([str(x) for x in numbers]))
+    """
+
+rule sum_of_squares:
+    inputs: n="squared"
+    outputs: out="final_result"
+    options: exec-python
+    script: """
+    with open("{{inputs.n}}") as fd:
+        numbers = [int(x) for x in fd.read().split(",")]
+    with open("{{outputs.out}}", "w") as fd:
+        fd.write(str(sum(number)))    
+    """

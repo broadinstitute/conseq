@@ -1,5 +1,8 @@
 import dep
 
+# foreach context where context.type = "context" and context.name exists execute MakeContext yielding (type="context", name exists)
+# foreach avana_lib where avana_lib.type = "crispr_dataset" and avana_lib.library = "Avana" withall gecko_libs where gecko_libs.library = "Gecko"
+
 templates = [
     dep.Template([dep.ForEach("contexts", dict(type="contexts"))],
                  [],
@@ -41,6 +44,5 @@ def execute(execution_id, transform, inputs):
 
 for pending in j.get_pending():
     execute(pending.id, pending.transform, pending.inputs)
-
 
 print(j.to_dot())
