@@ -2,6 +2,7 @@ import six
 from urllib.parse import urlparse
 import paramiko
 import logging
+import os
 
 log = logging.getLogger(__name__)
 
@@ -11,8 +12,18 @@ class Pull:
 
     def _get_ssh_client(self, host):
         client = paramiko.SSHClient()
-        client.load_system_host_keys()
-        client.connect(host)
+        #client.load_system_host_keys()
+        client.set_missing_host_key_policy(paramiko.client.AutoAddPolicy())
+
+        sshconfig = paramiko.config.SSHConfig()
+        config_name = os.path.expanduser("~/.ssh/config")
+        sshconfig.parse(open(config_name))
+        host_config = sshconfig.lookup(host)
+        if host_config != None:
+            client.connect(host_config["hostname"], username=host_config['user'], key_filename=host_config['identityfile'])
+        else:
+            client.connect(host)
+
         self.ssh_client_cache[host] = client
         return client
 
@@ -26,7 +37,7 @@ class Pull:
             sftp = transport.open_sftp_client()
             sftp.get(parts.path, dest_path)
         else:
-            raise Exception("unrecognized url: {}".format(url))
+            raise Exception("unrecognized url: {}, {}".format(url, parts))
 
     def dispose(self):
         for client in self.ssh_client_cache.values():

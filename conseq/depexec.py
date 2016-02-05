@@ -61,6 +61,8 @@ def exec_script(id, language, job_dir, script_name, stdout_path, stderr_path, re
     proc = subprocess.Popen(['bash', '-c', cmd], env=env)
     return Execution(id, job_dir, results_path, proc)
 
+import tempfile
+
 def localize_filenames(pull, job_dir, props):
     props_copy = {}
     for k, v in props.items():
@@ -69,7 +71,7 @@ def localize_filenames(pull, job_dir, props):
                 v = os.path.relpath(v["$filename"], job_dir)
             elif "$xref_url" in v:
                 url = v["$xref_url"]
-                v = pull(url, dest_filename)
+                v = pull(url)
         props_copy[k] = v
 
     return props_copy
@@ -97,6 +99,10 @@ def main_loop(j, new_object_listener, script_by_name):
     jinja2_env = jinja2.Environment(undefined=jinja2.StrictUndefined)
     puller = pull_url.Pull()
 
+    def pull(url):
+        dest_filename = tempfile.NamedTemporaryFile(delete=False).name
+        return puller.pull(url, dest_filename)
+
     run_dir = "run-" + datetime.datetime.now().isoformat()
     os.makedirs(run_dir)
     executing = []
@@ -118,7 +124,7 @@ def main_loop(j, new_object_listener, script_by_name):
 
             job_dir = run_dir + "/"+str(job.id)
             language, script = script_by_name[job.transform]
-            e = execute(puller.pull, jinja2_env, job.id, language, job_dir, script, dict(job.inputs))
+            e = execute(pull, jinja2_env, job.id, language, job_dir, script, dict(job.inputs))
             executing.append(e)
 
         for i, e in reversed(list(enumerate(executing))):
@@ -149,7 +155,7 @@ def parse(filename):
         text,
         "declarations",
         filename=filename,
-        trace=False,
+        trace=True,
         whitespace="",
         nameguard=None,
         semantics = Semantics())
@@ -264,10 +270,11 @@ class Semantics(object):
 
     def input_specs(self, ast):
         print("input_specs", repr(ast))
-        ast = [ast[0:5]] + ast[5]
-        return [ (name, value) for name, _, _, _, value in ast]
+        ast = ast[0:5] + ast[5]
+        print("input_specs appened", repr(ast))
+        return [ (ast[i], ast[i+4]) for i in range(0, len(ast), 7)]
 
     def output_specs(self, ast):
-        ast = [ast[0:5]] + ast[5]
-        return [ (name, value) for name, _, _, _, value in ast]
+        ast = ast[0:5] + ast[5]
+        return [ (ast[i], ast[i+4]) for i in range(0, len(ast), 7)]
 
