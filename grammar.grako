@@ -1,0 +1,9 @@
+identifier = /[A-Za-z_]+[A-Za-z0-9_]*/ ;
+var_list = identifier | identifier "," var_list ;
+quoted_string = /"[^"]*"/ ;
+predicate = identifier "." identifier "=" quoted_string |
+ identifier "." identifier "exists" |
+ identifier "." identifier "=" identifier "." identifier ;
+conj_predicate = predicate { "and" predicate }* ;
+statement = "foreach" var_list [ "where" conj_predicate ] [ "withall" var_list [ "where" conj_predicate ] ] ";" ;
+

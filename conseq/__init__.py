@@ -1,4 +1,4 @@
-import json, os
+import json
 
 def Local(name):
     return {"$filename": name}

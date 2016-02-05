@@ -17,7 +17,7 @@ from grako.parsing import graken, Parser
 from grako.util import re, RE_FLAGS  # noqa
 
 
-__version__ = (2016, 2, 3, 20, 13, 21, 2)
+__version__ = (2016, 2, 4, 15, 35, 23, 3)
 
 __all__ = [
     'depfileParser',
@@ -31,7 +31,7 @@ class depfileParser(Parser):
                  whitespace=None,
                  nameguard=None,
                  comments_re=None,
-                 eol_comments_re=None,
+                 eol_comments_re='#.*?$',
                  ignorecase=None,
                  left_recursion=True,
                  **kwargs):
@@ -69,6 +69,10 @@ class depfileParser(Parser):
     @graken()
     def _identifier_(self):
         self._pattern(r'[A-Za-z_]+[A-Za-z0-9_-]*')
+
+    @graken()
+    def _url_(self):
+        self._pattern(r'\S+')
 
     @graken()
     def _json_name_value_pair_(self):
@@ -188,10 +192,24 @@ class depfileParser(Parser):
         self._ws_()
 
     @graken()
-    def _rules_(self):
+    def _xref_(self):
+        self._ws_()
+        self._token('xref')
+        self._ws_()
+        self._url_()
+        self._ws_()
+        self._json_obj_()
+
+    @graken()
+    def _declarations_(self):
 
         def block0():
-            self._rule_()
+            with self._choice():
+                with self._option():
+                    self._rule_()
+                with self._option():
+                    self._xref_()
+                self._error('no available options')
         self._positive_closure(block0)
 
         self._check_eof()
@@ -211,6 +229,9 @@ class depfileSemantics(object):
         return ast
 
     def identifier(self, ast):
+        return ast
+
+    def url(self, ast):
         return ast
 
     def json_name_value_pair(self, ast):
@@ -234,7 +255,10 @@ class depfileSemantics(object):
     def rule(self, ast):
         return ast
 
-    def rules(self, ast):
+    def xref(self, ast):
+        return ast
+
+    def declarations(self, ast):
         return ast
 
 

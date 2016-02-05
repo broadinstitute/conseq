@@ -1,12 +1,14 @@
 import json
 import datetime
-import dep
 import subprocess
 import jinja2
 import os
 import time
-import depfile
 import textwrap
+
+from . import dep
+from . import depfile
+from . import pull_url
 
 class Execution:
     def __init__(self, id, job_dir, results_path, proc):
@@ -52,24 +54,31 @@ def exec_script(id, language, job_dir, script_name, stdout_path, stderr_path, re
         raise Exception("unknown language: {}".format(language))
     print("executing:", cmd)
     env = os.environ.copy()
-    env['PYTHONPATH'] = os.path.abspath(".")
+    if ("PYTHONPATH" in env):
+        env['PYTHONPATH'] = env['PYTHONPATH'] + ":" + os.path.abspath(".")
+    else:
+        env['PYTHONPATH'] = os.path.abspath(".")
     proc = subprocess.Popen(['bash', '-c', cmd], env=env)
     return Execution(id, job_dir, results_path, proc)
 
-def localize_filenames(job_dir, props):
+def localize_filenames(pull, job_dir, props):
     props_copy = {}
     for k, v in props.items():
-        if isinstance(v, dict) and "$filename" in v:
-            v = os.path.relpath(v["$filename"], job_dir)
+        if isinstance(v, dict):
+            if "$filename" in v:
+                v = os.path.relpath(v["$filename"], job_dir)
+            elif "$xref_url" in v:
+                url = v["$xref_url"]
+                v = pull(url, dest_filename)
         props_copy[k] = v
+
     return props_copy
 
-
-def execute(id, language, job_dir, script_body, inputs):
+def execute(pull, jinja2_env, id, language, job_dir, script_body, inputs):
     assert isinstance(inputs, dict)
-    inputs = dict([(k, localize_filenames(job_dir, v.props)) for k,v in inputs.items()])
+    inputs = dict([(k, localize_filenames(pull, job_dir, v.props)) for k,v in inputs.items()])
 
-    formatted_script_body = jinja2.Template(script_body).render(inputs=inputs)
+    formatted_script_body = jinja2_env.from_string(script_body).render(inputs=inputs)
     formatted_script_body = textwrap.dedent(formatted_script_body)
 
     os.makedirs(job_dir)
@@ -85,6 +94,9 @@ def execute(id, language, job_dir, script_body, inputs):
                        os.path.join(job_dir, "results.json"))
 
 def main_loop(j, new_object_listener, script_by_name):
+    jinja2_env = jinja2.Environment(undefined=jinja2.StrictUndefined)
+    puller = pull_url.Pull()
+
     run_dir = "run-" + datetime.datetime.now().isoformat()
     os.makedirs(run_dir)
     executing = []
@@ -106,7 +118,7 @@ def main_loop(j, new_object_listener, script_by_name):
 
             job_dir = run_dir + "/"+str(job.id)
             language, script = script_by_name[job.transform]
-            e = execute(job.id, language, job_dir, script, dict(job.inputs))
+            e = execute(puller.pull, jinja2_env, job.id, language, job_dir, script, dict(job.inputs))
             executing.append(e)
 
         for i, e in reversed(list(enumerate(executing))):
@@ -135,21 +147,33 @@ def parse(filename):
     parser = depfile.depfileParser(parseinfo=False)
     return parser.parse(
         text,
-        "rules",
+        "declarations",
         filename=filename,
         trace=False,
         whitespace="",
         nameguard=None,
         semantics = Semantics())
 
+def add_xref(j, xref):
+    timestamp = datetime.datetime.now().isoformat()
+    d = dict(xref.obj)
+    d["filename"] = {"$xref_url": xref.url}
+    return j.add_obj(timestamp, d, overwrite=False)
+
 def read_deps(filename, j):
     script_by_name = {}
     p = parse(filename)
-    print(repr(p))
-    for rule in p:
-        script_by_name[rule.name] = (rule.language, rule.script)
-    for rule in p:
-        j.add_template(to_template(rule))
+    print("------>", repr(p))
+    for dec in p:
+        if isinstance(dec, XRef):
+            add_xref(j, dec)
+        else:
+            assert isinstance(dec, Rule)
+            script_by_name[dec.name] = (dec.language, dec.script)
+    for dec in p:
+        if not (isinstance(dec, Rule)):
+            continue
+        j.add_template(to_template(dec))
     return script_by_name
 
 def main(depfile):
@@ -159,6 +183,11 @@ def main(depfile):
         timestamp = datetime.datetime.now().isoformat()
         j.add_obj(timestamp, obj)
     main_loop(j, new_object_listener, script_by_name)
+
+class XRef:
+    def __init__(self, url, obj):
+        self.url = url
+        self.obj = obj
 
 class Rule:
     def __init__(self, name):
@@ -206,7 +235,11 @@ class Semantics(object):
         print("json_obj", obj)
         return obj
 
+    def xref(self, ast):
+        return XRef(ast[3],ast[5])
+
     def rule(self, ast):
+        print("rule", repr(ast))
         rule_name = ast[3]
         statements = ast[7]
         print("rule: {}".format(repr(ast)))
@@ -237,16 +270,4 @@ class Semantics(object):
     def output_specs(self, ast):
         ast = [ast[0:5]] + ast[5]
         return [ (name, value) for name, _, _, _, value in ast]
-
-if __name__ == "__main__":
-    import argparse
-    import string
-    import sys
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument('file', metavar="FILE", help="the input file to parse")
-    args = parser.parse_args()
-    main(args.file)
-
-#textwrap.dedent(text)
 

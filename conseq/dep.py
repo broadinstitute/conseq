@@ -373,13 +373,18 @@ class Jobs:
         for rule in new_rules:
             self.rule_set.add_rule(*rule)
 
-    def add_obj(self, timestamp, obj_props):
+    def add_obj(self, timestamp, obj_props, overwrite=True):
         """
         Used to record the creation of an object with a given timestamp
 
         :param obj_props: either a dict or sequence of (key, value) tuples
         :param timestamp:
         """
+        if not overwrite:
+            existing = self.objects.find(obj_props)
+            if len(existing) == 1:
+                return existing[0].id
+
         return self.objects.add(timestamp, obj_props)
 
     def get_pending(self):
