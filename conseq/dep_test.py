@@ -5,7 +5,8 @@ from . import dep
 
 
 
-def test_stuff():
+def test_stuff(tmpdir):
+    jobdb = str(tmpdir.join("db"))
     templates = [
         dep.Template([dep.ForEach("contexts", dict(type="contexts"))],
                      [],
@@ -31,7 +32,7 @@ def test_stuff():
                      )
     ]
 
-    j = dep.Jobs()
+    j = dep.open_job_db(jobdb)
     for t in templates:
         j.add_template(t)
 
