@@ -4,6 +4,7 @@ import os
 class Cache:
     def __init__(self, db):
         self.db = db
+
     def get(self, url):
         c = self.db.cursor()
         c.execute("select local_path from entry where url = ?", [url])
@@ -14,7 +15,7 @@ class Cache:
         else:
             return row[0]
 
-    def set(self, url, dest):
+    def put(self, url, dest):
         c = self.db.cursor()
         c.execute("insert into entry (url, local_path) values (?, ?)", [url, dest])
         c.close()
@@ -30,4 +31,4 @@ def open_dl_db(filename):
         for stmt in stmts:
             db.execute(stmt)
 
-    return db
+    return Cache(db)

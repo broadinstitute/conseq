@@ -17,7 +17,7 @@ from grako.parsing import graken, Parser
 from grako.util import re, RE_FLAGS  # noqa
 
 
-__version__ = (2016, 2, 4, 15, 35, 23, 3)
+__version__ = (2016, 2, 6, 3, 52, 45, 5)
 
 __all__ = [
     'depfileParser',
@@ -110,6 +110,7 @@ class depfileParser(Parser):
             self._token(',')
             self._ws_()
             self._identifier_()
+            self._ws_()
             self._token('=')
             self._ws_()
             self._json_obj_()
@@ -181,7 +182,6 @@ class depfileParser(Parser):
 
     @graken()
     def _rule_(self):
-        self._ws_()
         self._token('rule')
         self._ws_()
         self._identifier_()
@@ -193,12 +193,12 @@ class depfileParser(Parser):
 
     @graken()
     def _xref_(self):
-        self._ws_()
         self._token('xref')
         self._ws_()
         self._url_()
         self._ws_()
         self._json_obj_()
+        self._ws_()
 
     @graken()
     def _declarations_(self):

@@ -63,7 +63,7 @@ def exec_script(id, language, job_dir, script_name, stdout_path, stderr_path, re
 
 import tempfile
 
-def localize_filenames(pull, job_dir, props):
+def _localize_filenames(pull, job_dir, props):
     props_copy = {}
     for k, v in props.items():
         if isinstance(v, dict):
@@ -76,9 +76,16 @@ def localize_filenames(pull, job_dir, props):
 
     return props_copy
 
+def localize_filenames(pull, job_dir, v):
+    if isinstance(v, dep.Obj):
+        return _localize_filenames(pull, job_dir, v.props)
+    assert isinstance(v, tuple)
+    return [_localize_filenames(pull, job_dir, x.props) for x in v]
+
+
 def execute(pull, jinja2_env, id, language, job_dir, script_body, inputs):
     assert isinstance(inputs, dict)
-    inputs = dict([(k, localize_filenames(pull, job_dir, v.props)) for k,v in inputs.items()])
+    inputs = dict([(k, localize_filenames(pull, job_dir, v)) for k,v in inputs.items()])
 
     formatted_script_body = jinja2_env.from_string(script_body).render(inputs=inputs)
     formatted_script_body = textwrap.dedent(formatted_script_body)
@@ -103,7 +110,6 @@ def main_loop(j, new_object_listener, script_by_name, working_dir):
     cache = dlcache.open_dl_db(working_dir+"/cache.sqlite3")
 
     def pull(url):
-        print("pull ----------------------------")
         dest_filename = cache.get(url)
         if dest_filename == None:
             dest_filename = tempfile.NamedTemporaryFile(delete=False, dir=working_dir).name
@@ -151,6 +157,7 @@ def main_loop(j, new_object_listener, script_by_name, working_dir):
 def to_template(rule):
     queries = []
     for name, spec in rule.inputs:
+        assert name != ""
         queries.append(dep.ForEach(name, spec))
     return dep.Template(queries, [], rule.name)
 
@@ -176,12 +183,12 @@ def add_xref(j, xref):
 def read_deps(filename, j):
     script_by_name = {}
     p = parse(filename)
-    print("------>", repr(p))
     for dec in p:
         if isinstance(dec, XRef):
             add_xref(j, dec)
         else:
             assert isinstance(dec, Rule)
+            print("adding transform", dec.name)
             script_by_name[dec.name] = (dec.language, dec.script)
     for dec in p:
         if not (isinstance(dec, Rule)):
@@ -190,26 +197,21 @@ def read_deps(filename, j):
     return script_by_name
 
 def dot_cmd(state_dir):
-    print("dot")
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
     print(j.to_dot())
 
 def list_cmd(state_dir):
-    print("list")
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
     j.dump()
 
 def main(depfile, state_dir):
-    print("state", state_dir)
     if not os.path.exists(state_dir):
         os.makedirs(state_dir)
     working_dir = os.path.join(state_dir, "working")
     if not os.path.exists(working_dir):
         os.makedirs(working_dir)
     db_path = os.path.join(state_dir, "db.sqlite3")
-    print("db_path", db_path)
     j = dep.open_job_db(db_path)
-    print('x')
     script_by_name = read_deps(depfile, j)
     def new_object_listener(obj):
         timestamp = datetime.datetime.now().isoformat()
@@ -228,6 +230,7 @@ class Rule:
         self.outputs = []
         self.options = []
         self.script = None
+        assert self.name != "" and self.name != " "
 
     @property
     def language(self):
@@ -268,13 +271,14 @@ class Semantics(object):
         return obj
 
     def xref(self, ast):
-        return XRef(ast[3],ast[5])
+        print("xref ast", ast)
+        return XRef(ast[2],ast[4])
 
     def rule(self, ast):
         #print("rule", repr(ast))
-        rule_name = ast[3]
-        statements = ast[7]
-        #print("rule: {}".format(repr(ast)))
+        rule_name = ast[2]
+        statements = ast[6]
+        print("rule: {}".format(repr(ast)))
         rule = Rule(rule_name)
         for statement in statements:
             if statement[0] == "inputs":
@@ -298,7 +302,13 @@ class Semantics(object):
         #print("input_specs", repr(ast))
         ast = ast[0:5] + ast[5]
         #print("input_specs appened", repr(ast))
-        return [ (ast[i], ast[i+4]) for i in range(0, len(ast), 7)]
+        print("ast", ast)
+        r = [ (ast[i], ast[i+4]) for i in range(0, len(ast), 8)]
+        print("r", r)
+        for n, v in r:
+            print("n", n, v)
+            assert n != "" and n != " "
+        return r
 
     def output_specs(self, ast):
         ast = ast[0:5] + ast[5]

@@ -100,7 +100,6 @@ class ObjSet:
         return iter(objs)
 
     def get(self, id):
-        print("get", id)
         c = get_cursor()
         c.execute("select id, timestamp, json from {} where id = ?".format(self.table_name), [id])
         id, timestamp, _json = c.fetchone()
@@ -114,13 +113,10 @@ class ObjSet:
 
     def add(self, timestamp, props):
         # first check to see if this already exists
-        #print("add", props)
         matches = self.find(props)
         matches = [m for m in matches if m.props == props]
-        #print("matches", matches)
         assert len(matches) <= 1
         if len(matches) == 1:
-            #print("Replacing", matches[0].timestamp, timestamp)
             if matches[0].timestamp != timestamp:
                 self.remove(matches[0].id)
             else:
@@ -132,7 +128,6 @@ class ObjSet:
 
         obj = Obj(id, timestamp, props)
 
-        #print("added", obj)
         for add_listener in self.add_listeners:
             add_listener(obj)
 
@@ -154,7 +149,6 @@ def assertInputsValid(inputs):
     for x in inputs:
         assert isinstance(x, tuple) and len(x) == 2
         name, value = x
-        print("assertInputs", value.__class__, value, Obj)
         assert isinstance(value, Obj) or (isinstance(value, tuple) and isinstance(value[0], Obj))
 
 class Rule:
@@ -254,7 +248,6 @@ class ExecutionLog:
         return self.obj_history.add(x.timestamp, x.props)
 
     def add_execution(self, rule):
-        print("add_execution -----------------------------------------")
         c = get_cursor()
         c.execute("insert into execution (rule_id, transform, status) values (?, ?, ?)", [rule.id, rule.transform, STATUS_READY])
         exec_id = c.lastrowid
@@ -263,7 +256,6 @@ class ExecutionLog:
                 objs = [objs]
             for obj in objs:
                 obj_id = self._make_copy_get_id(obj)
-                print("name",name, obj_id)
                 c.execute("insert into execution_input (execution_id, name, obj_id) values (?, ?, ?)", [exec_id, name, obj_id])
         return exec_id
 
@@ -284,7 +276,6 @@ class ExecutionLog:
             for obj_id, in c.fetchall():
                 outputs.append(self.obj_history.get(obj_id))
             pending.append(RulePending(exec_id, rule_id, tuple(in_name_values), outputs, transform))
-        print("_as_RuleList", pending)
         return pending
 
     def get_pending(self):
@@ -333,6 +324,7 @@ class ExecutionLog:
 
 class ForEach:
     def __init__(self, variable, const_constraints = {}):
+        assert variable != ""
         self.variable = variable
         self.const_constraints = const_constraints
 #        for k, v in self.const_constraints.items():
@@ -487,7 +479,6 @@ class Jobs:
                 print("obj:", obj)
 
 def open_job_db(filename):
-    print("filename1", filename)
     needs_create = not os.path.exists(filename)
 
     db = sqlite3.connect(filename)
