@@ -1,0 +1,26 @@
+rule create_numbers:
+    options: exec-python
+    script: """
+        import conseq
+        conseq.publish({"value": "2", "type": "number"}, {"value": "2", "type": "number"})
+        """
+
+rule square:
+    inputs: n={"type": "number"}
+    options: exec-python
+    script: """
+        import conseq
+        result = {{inputs.n.value}} ** 2
+        conseq.publish(dict(type="squared", value=str(result)))
+        """
+
+rule sum:
+    inputs: a={"value": "2", "type": "number"}, b={"value": "3", "type": "number"}
+    options: exec-python
+    script: """
+        import conseq
+        result = {{inputs.a.value}} + {{inputs.b.value}}
+        conseq.publish(dict(type="summed", value=str(result)))
+        """
+
+            

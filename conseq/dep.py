@@ -252,24 +252,33 @@ class ExecutionLog:
         c.execute("insert into execution (rule_id, transform, status) values (?, ?, ?)", [rule.id, rule.transform, STATUS_READY])
         exec_id = c.lastrowid
         for name, objs in rule.inputs:
+            is_list = True
             if isinstance(objs, Obj):
                 objs = [objs]
+                is_list = False
             for obj in objs:
                 obj_id = self._make_copy_get_id(obj)
-                c.execute("insert into execution_input (execution_id, name, obj_id) values (?, ?, ?)", [exec_id, name, obj_id])
+                c.execute("insert into execution_input (execution_id, name, obj_id, is_list) values (?, ?, ?, ?)", [exec_id, name, obj_id, is_list])
         return exec_id
 
     def _as_RuleList(self, c):
         pending = []
         for exec_id, rule_id, transform in c.fetchall():
-            c.execute("select name, obj_id from execution_input where execution_id = ?", [exec_id])
             inputs = collections.defaultdict(lambda: [])
-            for name, obj_id in c.fetchall():
+            var_is_list = {}
+            c.execute("select name, obj_id, is_list from execution_input where execution_id = ?", [exec_id])
+            for name, obj_id, is_list in c.fetchall():
+                if name in var_is_list:
+                    assert is_list
+                var_is_list[name] = is_list
                 inputs[name].append(self.obj_history.get(obj_id))
             in_name_values = []
             for name, values in inputs.items():
-                if isinstance(values, list):
+                if var_is_list[name]:
                     values = tuple(values)
+                else:
+                    assert len(values) == 1
+                    values = values[0]
                 in_name_values.append( (name, values) )
             c.execute("select obj_id from execution_output where execution_id = ?", [exec_id])
             outputs = []
@@ -490,7 +499,7 @@ def open_job_db(filename):
             "create table cur_obj (id INTEGER PRIMARY KEY   AUTOINCREMENT, timestamp STRING, json STRING)",
             "create table past_obj (id INTEGER PRIMARY KEY   AUTOINCREMENT, timestamp STRING, json STRING)",
             "create table execution (id INTEGER PRIMARY KEY   AUTOINCREMENT, rule_id INTEGER, transform STRING, status STRING)",
-            "create table execution_input (id INTEGER PRIMARY KEY   AUTOINCREMENT, execution_id INTEGER, name STRING, obj_id INTEGER)",
+            "create table execution_input (id INTEGER PRIMARY KEY   AUTOINCREMENT, execution_id INTEGER, name STRING, obj_id INTEGER, is_list INTEGER)",
             "create table execution_output (id INTEGER PRIMARY KEY   AUTOINCREMENT, execution_id INTEGER, obj_id INTEGER)",
             ]
         for stmt in stmts:

@@ -87,6 +87,8 @@ def execute(pull, jinja2_env, id, language, job_dir, script_body, inputs):
     assert isinstance(inputs, dict)
     inputs = dict([(k, localize_filenames(pull, job_dir, v)) for k,v in inputs.items()])
 
+    print("Executing {} with inputs {}".format(script_body, inputs))
+
     formatted_script_body = jinja2_env.from_string(script_body).render(inputs=inputs)
     formatted_script_body = textwrap.dedent(formatted_script_body)
 
@@ -148,7 +150,7 @@ def main_loop(j, new_object_listener, script_by_name, working_dir):
 
             del executing[i]
             timestamp = datetime.datetime.now().isoformat()
-            j.record_completed(timestamp, e.id, dep.COMPLETED, completion)
+            j.record_completed(timestamp, e.id, dep.STATUS_COMPLETED, completion)
             did_useful_work = True
         
         if not did_useful_work:
@@ -265,10 +267,13 @@ class Semantics(object):
         return (ast[0], ast[4])
 
     def json_obj(self, ast):
+        print("json_obj", ast)
+        pairs = [ast[2]]
         rest = ast[4]
-        obj = dict( [ast[2]] + [rest[x] for x in range(1, len(rest), 3)] )
-        #print("json_obj", obj)
-        return obj
+        for x in range(0, len(rest), 4):
+            pairs.append(rest[x+2])
+        print("after json_obj", pairs)
+        return dict(pairs)
 
     def xref(self, ast):
         print("xref ast", ast)

@@ -8,7 +8,7 @@ identifier = /[A-Za-z_]+[A-Za-z0-9_-]*/ ;
 url = /\S+/ ;
 json_name_value_pair = quoted_string ws ":" ws quoted_string ;
 json_obj = "{" ws json_name_value_pair ws {"," ws json_name_value_pair ws}* "}" ;
-input_specs = identifier ws "=" ws json_obj { ws "," ws identifier "=" ws json_obj }* ;
+input_specs = identifier ws "=" ws json_obj { ws "," ws identifier ws "=" ws json_obj }* ;
 output_specs = identifier ws "=" ws quoted_string { ws "," ws identifier ws "=" ws quoted_string }* ;
 statement = ( "inputs" ws ":" ws input_specs |
   "outputs" ws ":" ws output_specs |
@@ -16,7 +16,7 @@ statement = ( "inputs" ws ":" ws input_specs |
   "options" ws ":" ws identifier { ws "," ws identifier }* ) ws ;
 statements = { statement }+ ;
 rule = "rule" ws identifier ws ":" ws statements ws ;
-xref = "xref" ws url ws json_obj ;
+xref = "xref" ws url ws json_obj ws ;
 declarations =  { rule | xref }+  $ ;
 
 
