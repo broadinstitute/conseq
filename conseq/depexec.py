@@ -95,13 +95,21 @@ def execute(pull, jinja2_env, id, language, job_dir, script_body, inputs):
                        os.path.join(job_dir, "stderr.txt"),
                        os.path.join(job_dir, "results.json"))
 
-def main_loop(j, new_object_listener, script_by_name):
+from . import dlcache
+
+def main_loop(j, new_object_listener, script_by_name, working_dir):
     jinja2_env = jinja2.Environment(undefined=jinja2.StrictUndefined)
     puller = pull_url.Pull()
+    cache = dlcache.open_dl_db(working_dir+"/cache.sqlite3")
 
     def pull(url):
-        dest_filename = tempfile.NamedTemporaryFile(delete=False).name
-        return puller.pull(url, dest_filename)
+        print("pull ----------------------------")
+        dest_filename = cache.get(url)
+        if dest_filename == None:
+            dest_filename = tempfile.NamedTemporaryFile(delete=False, dir=working_dir).name
+            puller.pull(url, dest_filename)
+            cache.put(url, dest_filename)
+        return dest_filename
 
     run_dir = "run-" + datetime.datetime.now().isoformat()
     os.makedirs(run_dir)
@@ -139,7 +147,6 @@ def main_loop(j, new_object_listener, script_by_name):
         
         if not did_useful_work:
             time.sleep(0.5)
-    j.dump()
 
 def to_template(rule):
     queries = []
@@ -155,7 +162,7 @@ def parse(filename):
         text,
         "declarations",
         filename=filename,
-        trace=True,
+        trace=False,
         whitespace="",
         nameguard=None,
         semantics = Semantics())
@@ -182,13 +189,32 @@ def read_deps(filename, j):
         j.add_template(to_template(dec))
     return script_by_name
 
-def main(depfile):
-    j = dep.Jobs()
+def dot_cmd(state_dir):
+    print("dot")
+    j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
+    print(j.to_dot())
+
+def list_cmd(state_dir):
+    print("list")
+    j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
+    j.dump()
+
+def main(depfile, state_dir):
+    print("state", state_dir)
+    if not os.path.exists(state_dir):
+        os.makedirs(state_dir)
+    working_dir = os.path.join(state_dir, "working")
+    if not os.path.exists(working_dir):
+        os.makedirs(working_dir)
+    db_path = os.path.join(state_dir, "db.sqlite3")
+    print("db_path", db_path)
+    j = dep.open_job_db(db_path)
+    print('x')
     script_by_name = read_deps(depfile, j)
     def new_object_listener(obj):
         timestamp = datetime.datetime.now().isoformat()
         j.add_obj(timestamp, obj)
-    main_loop(j, new_object_listener, script_by_name)
+    main_loop(j, new_object_listener, script_by_name, working_dir)
 
 class XRef:
     def __init__(self, url, obj):
@@ -238,17 +264,17 @@ class Semantics(object):
     def json_obj(self, ast):
         rest = ast[4]
         obj = dict( [ast[2]] + [rest[x] for x in range(1, len(rest), 3)] )
-        print("json_obj", obj)
+        #print("json_obj", obj)
         return obj
 
     def xref(self, ast):
         return XRef(ast[3],ast[5])
 
     def rule(self, ast):
-        print("rule", repr(ast))
+        #print("rule", repr(ast))
         rule_name = ast[3]
         statements = ast[7]
-        print("rule: {}".format(repr(ast)))
+        #print("rule: {}".format(repr(ast)))
         rule = Rule(rule_name)
         for statement in statements:
             if statement[0] == "inputs":
@@ -258,7 +284,7 @@ class Semantics(object):
             elif statement[0] == "script":
                 rule.script = statement[4]
             elif statement[0] == "options":
-                print("----> options", statement)
+                #print("----> options", statement)
                 rule.options = [statement[4]] + list(statement[5])
             else:
                 raise Exception("unknown {}".format(statement[0]))
@@ -269,9 +295,9 @@ class Semantics(object):
         return unquote(ast)
 
     def input_specs(self, ast):
-        print("input_specs", repr(ast))
+        #print("input_specs", repr(ast))
         ast = ast[0:5] + ast[5]
-        print("input_specs appened", repr(ast))
+        #print("input_specs appened", repr(ast))
         return [ (ast[i], ast[i+4]) for i in range(0, len(ast), 7)]
 
     def output_specs(self, ast):

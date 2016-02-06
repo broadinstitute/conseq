@@ -1,6 +1,8 @@
 import json
 import sqlite3
 import os
+import collections
+
 #WAITING="waiting"
 #READY="ready"
 #STARTED="started"
@@ -20,6 +22,34 @@ STATUS_READY = "ready"
 STATUS_CANCELED = "canceled"
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
+
+from contextlib import contextmanager
+import threading
+
+current_db_cursor_state = threading.local()
+
+@contextmanager
+def transaction(db):
+    cursor = None
+    depth = 0
+    if hasattr(current_db_cursor_state, "cursor"):
+        cursor = current_db_cursor_state.cursor
+        depth = current_db_cursor_state.depth
+    if cursor == None:
+        cursor = db.cursor()
+        current_db_cursor_state.cursor = cursor
+    depth += 1
+    current_db_cursor_state.depth = depth
+    yield
+    current_db_cursor_state.depth -= 1
+    if current_db_cursor_state.depth == 0:
+        current_db_cursor_state.cursor.close()
+        current_db_cursor_state.cursor = None
+    db.commit()
+
+def get_cursor():
+    assert current_db_cursor_state.cursor != None
+    return current_db_cursor_state.cursor
 
 class Obj:
     "Models an any input or output artifact by a set of key-value pairs"
@@ -56,52 +86,53 @@ class ObjSet:
 
     This prototype implementation does everything in memory but is intended to be replaced with one that read/writes to a persistent DB
     """
-    def __init__(self, db, table_name):
-        self.db = db
+    def __init__(self, table_name):
         self.table_name = table_name
         self.add_listeners = []
         self.remove_listeners = []
 
     def __iter__(self):
-        c = self.db.cursor()
+        c = get_cursor()
         c.execute("select id, timestamp, json from {}".format(self.table_name))
         objs = []
         for id, timestamp, _json in c.fetchall():
             objs.append( Obj(id, timestamp, json.loads(_json)) )
-        c.close()
         return iter(objs)
 
     def get(self, id):
-        c = self.db.cursor()
+        print("get", id)
+        c = get_cursor()
         c.execute("select id, timestamp, json from {} where id = ?".format(self.table_name), [id])
         id, timestamp, _json = c.fetchone()
-        c.close()
         return Obj(id, timestamp, json.loads(_json))
 
     def remove(self, id):
-        self.db.execute("delete from {} where id = ?".format(self.table_name), [id])
-        self.db.commit()
+        c = get_cursor()
+        c.execute("delete from {} where id = ?".format(self.table_name), [id])
         for remove_listener in self.remove_listeners:
             remove_listener(id)
 
     def add(self, timestamp, props):
         # first check to see if this already exists
+        #print("add", props)
         matches = self.find(props)
         matches = [m for m in matches if m.props == props]
+        #print("matches", matches)
         assert len(matches) <= 1
         if len(matches) == 1:
+            #print("Replacing", matches[0].timestamp, timestamp)
             if matches[0].timestamp != timestamp:
                 self.remove(matches[0].id)
-            return matches[0].id
+            else:
+                return matches[0].id
 
-        c = self.db.cursor()
+        c = get_cursor()
         c.execute("insert into {} (timestamp, json) values (?, ?)".format(self.table_name), [timestamp, json.dumps(props)])
         id = c.lastrowid
-        c.close()
 
-        self.db.commit()
         obj = Obj(id, timestamp, props)
 
+        #print("added", obj)
         for add_listener in self.add_listeners:
             add_listener(obj)
 
@@ -123,6 +154,7 @@ def assertInputsValid(inputs):
     for x in inputs:
         assert isinstance(x, tuple) and len(x) == 2
         name, value = x
+        print("assertInputs", value.__class__, value, Obj)
         assert isinstance(value, Obj) or (isinstance(value, tuple) and isinstance(value[0], Obj))
 
 class Rule:
@@ -146,10 +178,9 @@ class RuleSet:
 
         This prototype implementation does everything in memory but is intended to be replaced with one that read/writes to a persistent DB
     """
-    def __init__(self, db):
+    def __init__(self):
         self.remove_rule_listeners = []
         self.add_rule_listeners = []
-        self.db = db
 
     def __iter__(self):
         return iter(self.rule_by_id.values())
@@ -158,7 +189,7 @@ class RuleSet:
         return self.rule_by_id[id]
 
     def remove_rule(self, rule_id):
-        self.db.execute("delete from rule where id = ?", [rule_id])
+        get_cursor().execute("delete from rule where id = ?", [rule_id])
         for remove_rule_listener in self.remove_rule_listeners:
             remove_rule_listener(rule_id)
 
@@ -174,7 +205,7 @@ class RuleSet:
         # first check to make sure rule isn't duplicated
         key = self._mk_rule_natural_key(inputs, transform)
 
-        c = self.db.cursor()
+        c = get_cursor()
         c.execute("select id from rule where key = ?", [key])
         rule_id = c.fetchone()
         if rule_id != None:
@@ -186,7 +217,7 @@ class RuleSet:
             if not isinstance(objs, tuple):
                 objs = [objs]
             for obj in objs:
-                self.db.execute("insert into rule_input (rule_id, name, obj_id) values (?, ?, ?)", [rule_id, name, obj.id])
+                c.execute("insert into rule_input (rule_id, name, obj_id) values (?, ?, ?)", [rule_id, name, obj.id])
 
         rule = Rule(rule_id, inputs, transform)
 
@@ -197,7 +228,7 @@ class RuleSet:
 
 
 class RulePending:
-    def __init__(self, id, rule_id, inputs, transform):
+    def __init__(self, id, rule_id, inputs, outputs, transform):
         assertInputsValid(inputs)
 
         self.id = id
@@ -205,45 +236,73 @@ class RulePending:
         self.inputs = inputs
         self.rule_id = rule_id
         self.status = STATUS_READY
-        self.outputs = []
+        self.outputs = outputs
 
     def __repr__(self):
-        return "<Rule id:{} rule_id:{} inputs:{} transform:{}>".format(self.id, self.rule_id, self.inputs, self.transform)
+        return "<Rule id:{} rule_id:{} inputs:{} outputs:{} transform:{}>".format(self.id, self.rule_id, self.inputs, self.outputs, self.transform)
 
 
 class ExecutionLog:
     def __init__(self, obj_history):
         self.obj_history = obj_history
-        self.execution_by_rule_id = {}
-        self.execution_by_id = {}
-        self.next_exec_id = 0
 
     def cancel_execution(self, rule_id):
-        e = self.execution_by_rule_id[rule_id]
-        e.setCanceled()
+        c = get_cursor()
+        c.execute("update execution set status = ? where rule_id = ?", [STATUS_CANCELED, rule_id])
 
-    def _copy_obj(self, x):
-        if isinstance(x, tuple):
-            return tuple([self._copy_obj(o) for o in x])
-        else:
-            id = self.obj_history.add(x.timestamp, x.props)
-            return self.obj_history.get(id)
+    def _make_copy_get_id(self, x):
+        return self.obj_history.add(x.timestamp, x.props)
 
     def add_execution(self, rule):
-        id = self.next_exec_id
-        self.next_exec_id += 1
+        print("add_execution -----------------------------------------")
+        c = get_cursor()
+        c.execute("insert into execution (rule_id, transform, status) values (?, ?, ?)", [rule.id, rule.transform, STATUS_READY])
+        exec_id = c.lastrowid
+        for name, objs in rule.inputs:
+            if isinstance(objs, Obj):
+                objs = [objs]
+            for obj in objs:
+                obj_id = self._make_copy_get_id(obj)
+                print("name",name, obj_id)
+                c.execute("insert into execution_input (execution_id, name, obj_id) values (?, ?, ?)", [exec_id, name, obj_id])
+        return exec_id
 
-        e = RulePending(id, rule.id, [(name, self._copy_obj(x)) for name, x in rule.inputs], rule.transform)
-        self.execution_by_id[id] = e
-        return id
+    def _as_RuleList(self, c):
+        pending = []
+        for exec_id, rule_id, transform in c.fetchall():
+            c.execute("select name, obj_id from execution_input where execution_id = ?", [exec_id])
+            inputs = collections.defaultdict(lambda: [])
+            for name, obj_id in c.fetchall():
+                inputs[name].append(self.obj_history.get(obj_id))
+            in_name_values = []
+            for name, values in inputs.items():
+                if isinstance(values, list):
+                    values = tuple(values)
+                in_name_values.append( (name, values) )
+            c.execute("select obj_id from execution_output where execution_id = ?", [exec_id])
+            outputs = []
+            for obj_id, in c.fetchall():
+                outputs.append(self.obj_history.get(obj_id))
+            pending.append(RulePending(exec_id, rule_id, tuple(in_name_values), outputs, transform))
+        print("_as_RuleList", pending)
+        return pending
 
     def get_pending(self):
-        return [x for x in self.execution_by_id.values() if x.status == STATUS_READY]
+        c = get_cursor()
+        c.execute("select id, rule_id, transform from execution where status = ?", [STATUS_READY])
+        return self._as_RuleList(c)
+
+    def get_all(self):
+        c = get_cursor()
+        c.execute("select id, rule_id, transform from execution")
+        return self._as_RuleList(c)
 
     def record_completed(self, execution_id, new_status, outputs):
-        e = self.execution_by_id[execution_id]
-        e.status = new_status
-        e.outputs = [self._copy_obj(x) for x in outputs]
+        c = get_cursor()
+        c.execute("update execution set status = ? where id = ?", [new_status, execution_id])
+        for x in outputs:
+            obj_id = self._make_copy_get_id(x)
+            c.execute("insert into execution_output (execution_id, obj_id) values (?, ?)", [execution_id, obj_id])
 
     def to_dot(self):
         """
@@ -252,7 +311,7 @@ class ExecutionLog:
         stmts = []
         objs = {}
         #state_color = {WAITING:"gray", READY:"red", STARTED:"blue", FAILED:"green", COMPLETED:"turquoise"}
-        for rule in self.execution_by_id.values():
+        for rule in self.get_all():
             for name, value in rule.inputs:
                 if not isinstance(value, tuple):
                     value = [value]
@@ -360,16 +419,18 @@ class Template:
         print ("Created rules for ",self.transform,": ", repr(results), repr(bindings))
         return results
 
+
 class Jobs:
     """
         Top level class gluing everything together
     """
     def __init__(self, db):
-        self.rule_set = RuleSet(db)
+        self.db = db
+        self.rule_set = RuleSet()
         self.rule_templates = []
-        self.objects = ObjSet(db, "cur_obj")
+        self.objects = ObjSet("cur_obj")
         self.objects.add_listeners.append(self._object_added)
-        self.log = ExecutionLog(ObjSet(db, "past_obj"))
+        self.log = ExecutionLog(ObjSet("past_obj"))
         self.rule_set.add_rule_listeners.append(self.log.add_execution)
         self.rule_set.remove_rule_listeners.append(self.log.cancel_execution)
 
@@ -382,13 +443,15 @@ class Jobs:
             self.rule_set.add_rule(*rule)
 
     def to_dot(self):
-        return self.log.to_dot()
+        with transaction(self.db):
+            return self.log.to_dot()
 
     def add_template(self, template):
-        self.rule_templates.append(template)
-        new_rules = template.create_rules(self.objects)
-        for rule in new_rules:
-            self.rule_set.add_rule(*rule)
+        with transaction(self.db):
+            self.rule_templates.append(template)
+            new_rules = template.create_rules(self.objects)
+            for rule in new_rules:
+                self.rule_set.add_rule(*rule)
 
     def add_obj(self, timestamp, obj_props, overwrite=True):
         """
@@ -397,38 +460,50 @@ class Jobs:
         :param obj_props: either a dict or sequence of (key, value) tuples
         :param timestamp:
         """
-        if not overwrite:
-            existing = self.objects.find(obj_props)
-            if len(existing) == 1:
-                return existing[0].id
 
-        return self.objects.add(timestamp, obj_props)
+        with transaction(self.db):
+            if not overwrite:
+                existing = self.objects.find(obj_props)
+                if len(existing) == 1:
+                    return existing[0].id
+
+            return self.objects.add(timestamp, obj_props)
 
     def get_pending(self):
-        return self.log.get_pending()
+        with transaction(self.db):
+            return self.log.get_pending()
 
     def record_completed(self, timestamp, execution_id, new_status, outputs):
-        interned_outputs = []
-        for output in outputs:
-            obj_id = self.add_obj(timestamp, output)
-            interned_outputs.append( self.objects.get(obj_id) )
-        self.log.record_completed(execution_id, new_status, interned_outputs)
+        with transaction(self.db):
+            interned_outputs = []
+            for output in outputs:
+                obj_id = self.add_obj(timestamp, output)
+                interned_outputs.append( self.objects.get(obj_id) )
+            self.log.record_completed(execution_id, new_status, interned_outputs)
 
     def dump(self):
-        for obj in self.objects:
-            print("obj:", obj)
+        with transaction(self.db):
+            for obj in self.objects:
+                print("obj:", obj)
 
 def open_job_db(filename):
+    print("filename1", filename)
     needs_create = not os.path.exists(filename)
 
     db = sqlite3.connect(filename)
 
     if needs_create:
-        stmts = ["create table rule (id INTEGER PRIMARY KEY   AUTOINCREMENT, transform STRING, key STRING)",
+        stmts = [
+            "create table rule (id INTEGER PRIMARY KEY   AUTOINCREMENT, transform STRING, key STRING)",
             "create table rule_input (id INTEGER PRIMARY KEY   AUTOINCREMENT, rule_id INTEGER, name string, obj_id INTEGER)",
             "create table cur_obj (id INTEGER PRIMARY KEY   AUTOINCREMENT, timestamp STRING, json STRING)",
-            "create table past_obj (id INTEGER PRIMARY KEY   AUTOINCREMENT, timestamp STRING, json STRING)"]
+            "create table past_obj (id INTEGER PRIMARY KEY   AUTOINCREMENT, timestamp STRING, json STRING)",
+            "create table execution (id INTEGER PRIMARY KEY   AUTOINCREMENT, rule_id INTEGER, transform STRING, status STRING)",
+            "create table execution_input (id INTEGER PRIMARY KEY   AUTOINCREMENT, execution_id INTEGER, name STRING, obj_id INTEGER)",
+            "create table execution_output (id INTEGER PRIMARY KEY   AUTOINCREMENT, execution_id INTEGER, obj_id INTEGER)",
+            ]
         for stmt in stmts:
             db.execute(stmt)
 
     return Jobs(db)
+
