@@ -2,7 +2,7 @@ rule create_numbers:
     options: exec-python
     script: """
         import conseq
-        conseq.publish({"value": "2", "type": "number"}, {"value": "2", "type": "number"})
+        conseq.publish({"value": "2", "type": "number"}, {"value": "3", "type": "number"})
         """
 
 rule square:

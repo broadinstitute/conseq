@@ -318,14 +318,15 @@ class ExecutionLog:
                 for v in value:
                     stmts.append("o{} -> r{} [label=\"{}\"]".format(v.id, rule.id, name))
                     objs[v.id] = v
-                for output in rule.outputs:
-                   stmts.append("r{} -> o{}".format(rule.id, output.id))
-                   objs[output.id] = output
+            for output in rule.outputs:
+               stmts.append("r{} -> o{}".format(rule.id, output.id))
+               objs[output.id] = output
 
             #color=state_color[self.get_rule_state(rule.id)]
             color="gray"
 
             stmts.append("r{} [shape=box, label=\"{}\", style=\"filled\" fillcolor=\"{}\"]".format(rule.id, rule.transform, color))
+
         for obj in objs.values():
             label = "\\n".join([ "{}: {}".format(k, v) for k,v in obj.props.items() ])
             stmts.append("o{} [label=\"{}\"]".format(obj.id, label))
