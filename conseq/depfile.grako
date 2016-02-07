@@ -9,7 +9,7 @@ url = /\S+/ ;
 json_name_value_pair = quoted_string ws ":" ws quoted_string ;
 json_obj = "{" ws json_name_value_pair ws {"," ws json_name_value_pair ws}* "}" ;
 input_specs = identifier ws "=" ws json_obj { ws "," ws identifier ws "=" ws json_obj }* ;
-output_specs = identifier ws "=" ws quoted_string { ws "," ws identifier ws "=" ws quoted_string }* ;
+output_specs = json_obj { ws "," json_obj }
 statement = ( "inputs" ws ":" ws input_specs |
   "outputs" ws ":" ws output_specs |
   "script" ws ":" ws quoted_string | 

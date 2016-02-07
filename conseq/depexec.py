@@ -10,8 +10,12 @@ from . import dep
 from . import depfile
 from . import pull_url
 
+class FatalUserError(Exception):
+    pass
+
 class Execution:
-    def __init__(self, id, job_dir, results_path, proc):
+    def __init__(self, transform, id, job_dir, results_path, proc):
+        self.transform = transform
         self.id = id
         self.proc = proc
         self.results_path = results_path
@@ -34,13 +38,16 @@ class Execution:
         if retcode != 0:
             raise Exception("failed with {}".format(retcode))
 
+        if not os.path.exists(self.results_path):
+            raise FatalUserError("rule {} completed successfully, but no results.json file written to working directory".format(self.transform))
+
         with open(self.results_path) as fd:
             results = json.load(fd)
         print("----> results", results)
         outputs = [self._resolve_filenames(o) for o in results['outputs']]
         return outputs
 
-def exec_script(id, language, job_dir, script_name, stdout_path, stderr_path, results_path):
+def exec_script(name, id, language, job_dir, script_name, stdout_path, stderr_path, results_path):
     script_name = os.path.abspath(script_name)
     stdout_path = os.path.abspath(stdout_path)
     stderr_path = os.path.abspath(stderr_path)
@@ -59,7 +66,7 @@ def exec_script(id, language, job_dir, script_name, stdout_path, stderr_path, re
     else:
         env['PYTHONPATH'] = os.path.abspath(".")
     proc = subprocess.Popen(['bash', '-c', cmd], env=env)
-    return Execution(id, job_dir, results_path, proc)
+    return Execution(name, id, job_dir, results_path, proc)
 
 import tempfile
 
@@ -92,11 +99,11 @@ def execute(name, pull, jinja2_env, id, language, job_dir, script_body, inputs):
     formatted_script_body = jinja2_env.from_string(script_body).render(inputs=inputs)
     formatted_script_body = textwrap.dedent(formatted_script_body)
 
-    os.makedirs(job_dir)
     script_name = os.path.join(job_dir, "script")
     with open(script_name, "w") as fd:
         fd.write(formatted_script_body)
-    return exec_script(id,
+    return exec_script(name,
+                       id,
                        language,
                        job_dir,
                        script_name,
@@ -119,8 +126,6 @@ def main_loop(j, new_object_listener, script_by_name, working_dir):
             cache.put(url, dest_filename)
         return dest_filename
 
-    run_dir = "run-" + datetime.datetime.now().isoformat()
-    os.makedirs(run_dir)
     executing = []
     active_job_ids = set()
 
@@ -138,7 +143,10 @@ def main_loop(j, new_object_listener, script_by_name, working_dir):
             active_job_ids.add(job.id)
             did_useful_work = True
 
-            job_dir = run_dir + "/"+str(job.id)
+            job_dir = working_dir + "/run-" + datetime.datetime.now().isoformat() + "-" + str(job.id)
+            if not os.path.exists(job_dir):
+                os.makedirs(job_dir)
+
             language, script = script_by_name[job.transform]
             e = execute(job.transform, pull, jinja2_env, job.id, language, job_dir, script, dict(job.inputs))
             executing.append(e)
@@ -226,7 +234,10 @@ def main(depfile, state_dir):
     def new_object_listener(obj):
         timestamp = datetime.datetime.now().isoformat()
         j.add_obj(timestamp, obj)
-    main_loop(j, new_object_listener, script_by_name, working_dir)
+    try:
+        main_loop(j, new_object_listener, script_by_name, working_dir)
+    except FatalUserError as e:
+        print("Error: {}".format(e))
 
 class XRef:
     def __init__(self, url, obj):
