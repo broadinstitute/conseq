@@ -83,11 +83,11 @@ def localize_filenames(pull, job_dir, v):
     return [_localize_filenames(pull, job_dir, x.props) for x in v]
 
 
-def execute(pull, jinja2_env, id, language, job_dir, script_body, inputs):
+def execute(name, pull, jinja2_env, id, language, job_dir, script_body, inputs):
     assert isinstance(inputs, dict)
     inputs = dict([(k, localize_filenames(pull, job_dir, v)) for k,v in inputs.items()])
 
-    print("Executing {} with inputs {}".format(script_body, inputs))
+    print("Executing {} with inputs {}".format(name, inputs))
 
     formatted_script_body = jinja2_env.from_string(script_body).render(inputs=inputs)
     formatted_script_body = textwrap.dedent(formatted_script_body)
@@ -140,7 +140,7 @@ def main_loop(j, new_object_listener, script_by_name, working_dir):
 
             job_dir = run_dir + "/"+str(job.id)
             language, script = script_by_name[job.transform]
-            e = execute(pull, jinja2_env, job.id, language, job_dir, script, dict(job.inputs))
+            e = execute(job.transform, pull, jinja2_env, job.id, language, job_dir, script, dict(job.inputs))
             executing.append(e)
 
         for i, e in reversed(list(enumerate(executing))):
@@ -190,13 +190,21 @@ def read_deps(filename, j):
             add_xref(j, dec)
         else:
             assert isinstance(dec, Rule)
-            print("adding transform", dec.name)
+            #print("adding transform", dec.name)
             script_by_name[dec.name] = (dec.language, dec.script)
     for dec in p:
         if not (isinstance(dec, Rule)):
             continue
         j.add_template(to_template(dec))
     return script_by_name
+
+def rm_cmd(state_dir, dry_run, json_query, with_invalidate):
+    query = json.loads(json_query)
+    j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
+    for o in j.find_objs(query):
+        print("rm", o)
+        if not dry_run:
+            j.remove_obj(o.id, with_invalidate)
 
 def dot_cmd(state_dir):
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
@@ -267,23 +275,23 @@ class Semantics(object):
         return (ast[0], ast[4])
 
     def json_obj(self, ast):
-        print("json_obj", ast)
+        #print("json_obj", ast)
         pairs = [ast[2]]
         rest = ast[4]
         for x in range(0, len(rest), 4):
             pairs.append(rest[x+2])
-        print("after json_obj", pairs)
+        #print("after json_obj", pairs)
         return dict(pairs)
 
     def xref(self, ast):
-        print("xref ast", ast)
+        #print("xref ast", ast)
         return XRef(ast[2],ast[4])
 
     def rule(self, ast):
         #print("rule", repr(ast))
         rule_name = ast[2]
         statements = ast[6]
-        print("rule: {}".format(repr(ast)))
+        #print("rule: {}".format(repr(ast)))
         rule = Rule(rule_name)
         for statement in statements:
             if statement[0] == "inputs":
@@ -297,7 +305,7 @@ class Semantics(object):
                 rule.options = [statement[4]] + list(statement[5])
             else:
                 raise Exception("unknown {}".format(statement[0]))
-        print("rule:", repr(rule))
+        #print("rule:", repr(rule))
         return rule
 
     def quoted_string(self, ast):
@@ -307,11 +315,11 @@ class Semantics(object):
         #print("input_specs", repr(ast))
         ast = ast[0:5] + ast[5]
         #print("input_specs appened", repr(ast))
-        print("ast", ast)
+        #print("ast", ast)
         r = [ (ast[i], ast[i+4]) for i in range(0, len(ast), 8)]
-        print("r", r)
+        #print("r", r)
         for n, v in r:
-            print("n", n, v)
+            #print("n", n, v)
             assert n != "" and n != " "
         return r
 

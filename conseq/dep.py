@@ -86,10 +86,11 @@ class ObjSet:
 
     This prototype implementation does everything in memory but is intended to be replaced with one that read/writes to a persistent DB
     """
-    def __init__(self, table_name):
+    def __init__(self, table_name, replace_if_exists):
         self.table_name = table_name
         self.add_listeners = []
         self.remove_listeners = []
+        self.replace_if_exists = replace_if_exists
 
     def __iter__(self):
         c = get_cursor()
@@ -115,12 +116,16 @@ class ObjSet:
         # first check to see if this already exists
         matches = self.find(props)
         matches = [m for m in matches if m.props == props]
-        assert len(matches) <= 1
-        if len(matches) == 1:
-            if matches[0].timestamp != timestamp:
+
+        if len(matches) > 0:
+            for m in matches:
+                if m.timestamp == timestamp:
+                    return m.id
+
+            if self.replace_if_exists:
+                assert len(matches) == 1
+                print("removing obj {} from {}".format(matches[0].id, self.table_name))
                 self.remove(matches[0].id)
-            else:
-                return matches[0].id
 
         c = get_cursor()
         c.execute("insert into {} (timestamp, json) values (?, ?)".format(self.table_name), [timestamp, json.dumps(props)])
@@ -193,6 +198,7 @@ class RuleSet:
             if not isinstance(vs, tuple):
                 vs = (vs,)
             flattened_inputs.append( (n, tuple([x.id for x in vs]))  )
+        flattened_inputs.sort()
         return repr((tuple(flattened_inputs), transform))
 
     def add_rule(self, inputs, transform):
@@ -280,10 +286,12 @@ class ExecutionLog:
                     assert len(values) == 1
                     values = values[0]
                 in_name_values.append( (name, values) )
-            c.execute("select obj_id from execution_output where execution_id = ?", [exec_id])
+
             outputs = []
+            c.execute("select obj_id from execution_output where execution_id = ?", [exec_id])
             for obj_id, in c.fetchall():
                 outputs.append(self.obj_history.get(obj_id))
+
             pending.append(RulePending(exec_id, rule_id, tuple(in_name_values), outputs, transform))
         return pending
 
@@ -292,10 +300,21 @@ class ExecutionLog:
         c.execute("select id, rule_id, transform from execution where status = ?", [STATUS_READY])
         return self._as_RuleList(c)
 
+    def get_by_output(self, obj):
+        # probably won't really make a copy, just want to get the corresponding id
+        obj_id = self._make_copy_get_id(obj)
+        c = get_cursor()
+        c.execute("select id, rule_id, transform from execution e where exists (select 1 from execution_output o where o.execution_id = e.id and obj_id = ?)", [obj_id])
+        return self._as_RuleList(c)
+
     def get_all(self):
         c = get_cursor()
         c.execute("select id, rule_id, transform from execution")
         return self._as_RuleList(c)
+
+#    def mark_stale(self, execution_id):
+#        c = get_cursor()
+#        c.execute("update execution set status = ? where id = ?", [STATUS_CANCELED, execution_id])
 
     def record_completed(self, execution_id, new_status, outputs):
         c = get_cursor()
@@ -405,7 +424,7 @@ class Template:
         return bindings
 
     def create_rules(self, obj_set):
-        print ("create_rules, transform:",self.transform,", queries: ", self.foreach_queries)
+        #print ("create_rules, transform:",self.transform,", queries: ", self.foreach_queries)
         if len(self.foreach_queries) == 0:
             bindings = [{}]
         else:
@@ -418,7 +437,10 @@ class Template:
                 continue
             results.append( (tuple(b.items()), self.transform) )
 
-        print ("Created rules for ",self.transform,": ", repr(results), repr(bindings))
+        print ("Created rules for",self.transform,":")
+        for r in results:
+            print(" ",bindings)
+#               , repr(results), repr(bindings))
         return results
 
 
@@ -430,9 +452,9 @@ class Jobs:
         self.db = db
         self.rule_set = RuleSet()
         self.rule_templates = []
-        self.objects = ObjSet("cur_obj")
+        self.objects = ObjSet("cur_obj", True)
         self.objects.add_listeners.append(self._object_added)
-        self.log = ExecutionLog(ObjSet("past_obj"))
+        self.log = ExecutionLog(ObjSet("past_obj", False))
         self.rule_set.add_rule_listeners.append(self.log.add_execution)
         self.rule_set.remove_rule_listeners.append(self.log.cancel_execution)
 
@@ -471,9 +493,23 @@ class Jobs:
 
             return self.objects.add(timestamp, obj_props)
 
+    def remove_obj(self, obj_id, with_invalidate):
+        with transaction(self.db):
+            obj = self.objects.get(obj_id)
+            for x in self.log.get_by_output(obj):
+                self.rule_set.remove_rule(x.rule_id)
+            self.objects.remove(obj_id)
+
+    def find_objs(self, query):
+        with transaction(self.db):
+            return self.objects.find(query)
+
     def get_pending(self):
         with transaction(self.db):
             return self.log.get_pending()
+
+    def mark_stale(self, execution_id):
+        self.log.mark_stale(execution_id)
 
     def record_completed(self, timestamp, execution_id, new_status, outputs):
         with transaction(self.db):
