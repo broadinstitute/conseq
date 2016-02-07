@@ -166,6 +166,7 @@ def main_loop(j, new_object_listener, script_by_name, working_dir):
 
 def to_template(rule):
     queries = []
+    print("to_template", rule.inputs)
     for name, spec in rule.inputs:
         assert name != ""
         queries.append(dep.ForEach(name, spec))
@@ -180,7 +181,6 @@ def parse(filename):
         "declarations",
         filename=filename,
         trace=False,
-        whitespace="",
         nameguard=None,
         semantics = Semantics())
 
@@ -273,47 +273,57 @@ def unquote(s):
     assert s[-1] == '"'
     return s[1:-1]
 
+from collections import namedtuple
+InputSpec = namedtuple("InputSpec", ["variable", "json_obj"])
+
 class Semantics(object):
     def statement(self, ast):
 #        print("statement:", repr(ast))
         return tuple(ast)
+
+    def input_spec(self, ast):
+        return InputSpec(ast[0], ast[2])
 
     def statements(self, ast):
 #        print("statements:", repr(ast))
         return ast
 
     def json_name_value_pair(self, ast):
-        return (ast[0], ast[4])
+        return (ast[0], ast[2])
 
     def json_obj(self, ast):
         #print("json_obj", ast)
-        pairs = [ast[2]]
-        rest = ast[4]
-        for x in range(0, len(rest), 4):
-            pairs.append(rest[x+2])
+        pairs = [ast[1]]
+        rest = ast[2]
+        for x in range(0, len(rest), 2):
+            pairs.append(rest[x+1])
         #print("after json_obj", pairs)
         return dict(pairs)
 
     def xref(self, ast):
         #print("xref ast", ast)
-        return XRef(ast[2],ast[4])
+        return XRef(ast[1],ast[2])
 
     def rule(self, ast):
         #print("rule", repr(ast))
-        rule_name = ast[2]
-        statements = ast[6]
+        rule_name = ast[1]
+        statements = ast[3]
         #print("rule: {}".format(repr(ast)))
         rule = Rule(rule_name)
         for statement in statements:
             if statement[0] == "inputs":
-                rule.inputs = statement[4]
+                rule.inputs = statement[2]
             elif statement[0] == "outputs":
-                rule.outputs = statement[4]
+                rule.outputs = statement[2]
             elif statement[0] == "script":
-                rule.script = statement[4]
+                rule.script = statement[2]
             elif statement[0] == "options":
                 #print("----> options", statement)
-                rule.options = [statement[4]] + list(statement[5])
+                options = [statement[2]]
+                rest = statement[3]
+                for i in range(0,len(rest),2):
+                    options.append(rest[1])
+                rule.options = options
             else:
                 raise Exception("unknown {}".format(statement[0]))
         #print("rule:", repr(rule))
@@ -323,18 +333,12 @@ class Semantics(object):
         return unquote(ast)
 
     def input_specs(self, ast):
-        #print("input_specs", repr(ast))
-        ast = ast[0:5] + ast[5]
-        #print("input_specs appened", repr(ast))
-        #print("ast", ast)
-        r = [ (ast[i], ast[i+4]) for i in range(0, len(ast), 8)]
-        #print("r", r)
-        for n, v in r:
-            #print("n", n, v)
-            assert n != "" and n != " "
-        return r
+        specs = [ast[0]]
+        rest = ast[1]
+        for i in range(0,len(rest),2):
+            specs.append(rest[1])
+        return specs
 
     def output_specs(self, ast):
-        ast = ast[0:5] + ast[5]
-        return [ (ast[i], ast[i+4]) for i in range(0, len(ast), 7)]
+        raise Exception("unimp")
 

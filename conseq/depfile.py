@@ -17,7 +17,7 @@ from grako.parsing import graken, Parser
 from grako.util import re, RE_FLAGS  # noqa
 
 
-__version__ = (2016, 2, 6, 3, 52, 45, 5)
+__version__ = (2016, 2, 7, 13, 45, 0, 6)
 
 __all__ = [
     'depfileParser',
@@ -44,10 +44,6 @@ class depfileParser(Parser):
             left_recursion=left_recursion,
             **kwargs
         )
-
-    @graken()
-    def _ws_(self):
-        self._pattern(r'\s*')
 
     @graken()
     def _triple_quoted_string_(self):
@@ -77,62 +73,42 @@ class depfileParser(Parser):
     @graken()
     def _json_name_value_pair_(self):
         self._quoted_string_()
-        self._ws_()
         self._token(':')
-        self._ws_()
         self._quoted_string_()
 
     @graken()
     def _json_obj_(self):
         self._token('{')
-        self._ws_()
         self._json_name_value_pair_()
-        self._ws_()
 
         def block0():
             self._token(',')
-            self._ws_()
             self._json_name_value_pair_()
-            self._ws_()
         self._closure(block0)
         self._token('}')
 
     @graken()
-    def _input_specs_(self):
+    def _input_spec_(self):
         self._identifier_()
-        self._ws_()
         self._token('=')
-        self._ws_()
         self._json_obj_()
 
+    @graken()
+    def _input_specs_(self):
+        self._input_spec_()
+
         def block0():
-            self._ws_()
             self._token(',')
-            self._ws_()
-            self._identifier_()
-            self._ws_()
-            self._token('=')
-            self._ws_()
-            self._json_obj_()
+            self._input_spec_()
         self._closure(block0)
 
     @graken()
     def _output_specs_(self):
-        self._identifier_()
-        self._ws_()
-        self._token('=')
-        self._ws_()
-        self._quoted_string_()
+        self._json_obj_()
 
         def block0():
-            self._ws_()
             self._token(',')
-            self._ws_()
-            self._identifier_()
-            self._ws_()
-            self._token('=')
-            self._ws_()
-            self._quoted_string_()
+            self._json_obj_()
         self._closure(block0)
 
     @graken()
@@ -141,37 +117,26 @@ class depfileParser(Parser):
             with self._choice():
                 with self._option():
                     self._token('inputs')
-                    self._ws_()
                     self._token(':')
-                    self._ws_()
                     self._input_specs_()
                 with self._option():
                     self._token('outputs')
-                    self._ws_()
                     self._token(':')
-                    self._ws_()
                     self._output_specs_()
                 with self._option():
                     self._token('script')
-                    self._ws_()
                     self._token(':')
-                    self._ws_()
                     self._quoted_string_()
                 with self._option():
                     self._token('options')
-                    self._ws_()
                     self._token(':')
-                    self._ws_()
                     self._identifier_()
 
                     def block0():
-                        self._ws_()
                         self._token(',')
-                        self._ws_()
                         self._identifier_()
                     self._closure(block0)
                 self._error('no available options')
-        self._ws_()
 
     @graken()
     def _statements_(self):
@@ -183,22 +148,15 @@ class depfileParser(Parser):
     @graken()
     def _rule_(self):
         self._token('rule')
-        self._ws_()
         self._identifier_()
-        self._ws_()
         self._token(':')
-        self._ws_()
         self._statements_()
-        self._ws_()
 
     @graken()
     def _xref_(self):
         self._token('xref')
-        self._ws_()
         self._url_()
-        self._ws_()
         self._json_obj_()
-        self._ws_()
 
     @graken()
     def _declarations_(self):
@@ -216,9 +174,6 @@ class depfileParser(Parser):
 
 
 class depfileSemantics(object):
-    def ws(self, ast):
-        return ast
-
     def triple_quoted_string(self, ast):
         return ast
 
@@ -238,6 +193,9 @@ class depfileSemantics(object):
         return ast
 
     def json_obj(self, ast):
+        return ast
+
+    def input_spec(self, ast):
         return ast
 
     def input_specs(self, ast):
