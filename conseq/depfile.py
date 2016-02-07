@@ -17,7 +17,7 @@ from grako.parsing import graken, Parser
 from grako.util import re, RE_FLAGS  # noqa
 
 
-__version__ = (2016, 2, 7, 13, 45, 0, 6)
+__version__ = (2016, 2, 7, 13, 57, 17, 6)
 
 __all__ = [
     'depfileParser',
@@ -71,10 +71,19 @@ class depfileParser(Parser):
         self._pattern(r'\S+')
 
     @graken()
+    def _json_value_(self):
+        with self._choice():
+            with self._option():
+                self._quoted_string_()
+            with self._option():
+                self._json_obj_()
+            self._error('no available options')
+
+    @graken()
     def _json_name_value_pair_(self):
         self._quoted_string_()
         self._token(':')
-        self._quoted_string_()
+        self._json_value_()
 
     @graken()
     def _json_obj_(self):
@@ -187,6 +196,9 @@ class depfileSemantics(object):
         return ast
 
     def url(self, ast):
+        return ast
+
+    def json_value(self, ast):
         return ast
 
     def json_name_value_pair(self, ast):
