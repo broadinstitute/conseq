@@ -6,7 +6,7 @@ def rm(args):
     depexec.rm_cmd(args.dir, args.dry_run, args.json_query, args.with_invalidate)
 
 def run(args):
-    depexec.main(args.file, args.dir)
+    depexec.main(args.file, args.dir, args.targets)
 
 def dot(args):
     depexec.dot_cmd(args.dir)
@@ -22,6 +22,7 @@ def main(argv):
 
     run_cmd = sub.add_parser("run")
     run_cmd.add_argument('file', metavar="FILE", help="the input file to parse")
+    run_cmd.add_argument('targets', nargs='*')
     run_cmd.set_defaults(func=run)
 
     dot_cmd = sub.add_parser("dot")

@@ -43,7 +43,7 @@ def transaction(db):
     if current_db_cursor_state.depth == 0:
         current_db_cursor_state.cursor.close()
         current_db_cursor_state.cursor = None
-    db.commit()
+        db.commit()
 
 def get_cursor():
     assert current_db_cursor_state.cursor != None
@@ -185,9 +185,13 @@ class RuleSet:
         return self.rule_by_id[id]
 
     def remove_rule(self, rule_id):
-        get_cursor().execute("delete from rule where id = ?", [rule_id])
-        for remove_rule_listener in self.remove_rule_listeners:
-            remove_rule_listener(rule_id)
+        c = get_cursor()
+        c.execute("delete from rule where id = ?", [rule_id])
+        rows = c.rowcount
+        if rows > 0:
+            for remove_rule_listener in self.remove_rule_listeners:
+                remove_rule_listener(rule_id)
+        return rows
 
     def _mk_rule_natural_key(self, inputs, transform):
         flattened_inputs = []
@@ -308,10 +312,6 @@ class ExecutionLog:
         c = get_cursor()
         c.execute("select id, rule_id, transform from execution")
         return self._as_RuleList(c)
-
-#    def mark_stale(self, execution_id):
-#        c = get_cursor()
-#        c.execute("update execution set status = ? where id = ?", [STATUS_CANCELED, execution_id])
 
     def record_completed(self, execution_id, new_status, outputs):
         c = get_cursor()
@@ -491,8 +491,9 @@ class Jobs:
     def remove_obj(self, obj_id, with_invalidate):
         with transaction(self.db):
             obj = self.objects.get(obj_id)
-            for x in self.log.get_by_output(obj):
-                self.rule_set.remove_rule(x.rule_id)
+            if with_invalidate:
+                for x in self.log.get_by_output(obj):
+                    self.rule_set.remove_rule(x.rule_id)
             self.objects.remove(obj_id)
 
     def find_objs(self, query):
@@ -503,9 +504,6 @@ class Jobs:
         with transaction(self.db):
             return self.log.get_pending()
 
-    def mark_stale(self, execution_id):
-        self.log.mark_stale(execution_id)
-
     def record_completed(self, timestamp, execution_id, new_status, outputs):
         with transaction(self.db):
             interned_outputs = []
@@ -513,6 +511,15 @@ class Jobs:
                 obj_id = self.add_obj(timestamp, output)
                 interned_outputs.append( self.objects.get(obj_id) )
             self.log.record_completed(execution_id, new_status, interned_outputs)
+
+    def invalidate_rule_execution(self, transform):
+        with transaction(self.db):
+            count = 0
+            for r in self.log.get_all():
+                if r.transform != transform:
+                    continue
+                count += self.rule_set.remove_rule(r.rule_id)
+        return count
 
     def dump(self):
         with transaction(self.db):

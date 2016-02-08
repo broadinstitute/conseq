@@ -146,11 +146,15 @@ def main_loop(j, new_object_listener, rule_by_name, working_dir):
     executing = []
     active_job_ids = set()
 
+    prev_msg = None
     while True:
         pending_jobs = j.get_pending()
         if len(executing) == 0 and len(pending_jobs) == 0:
             break
-        print("executing", len(executing), "pending", len(pending_jobs))
+        msg = "%d processes running, %d executions pending" % ( len(executing), len(pending_jobs) - len(executing) )
+        if prev_msg != msg:
+            log.info(msg)
+        prev_msg = msg
 
         did_useful_work = False
         for job in pending_jobs:
@@ -238,7 +242,7 @@ def list_cmd(state_dir):
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
     j.dump()
 
-def main(depfile, state_dir):
+def main(depfile, state_dir, forced_targets):
     if not os.path.exists(state_dir):
         os.makedirs(state_dir)
     working_dir = os.path.join(state_dir, "working")
@@ -246,7 +250,14 @@ def main(depfile, state_dir):
         os.makedirs(working_dir)
     db_path = os.path.join(state_dir, "db.sqlite3")
     j = dep.open_job_db(db_path)
+
+    for target in forced_targets:
+        #assert target in rule_by_name
+        count = j.invalidate_rule_execution(target)
+        log.info("Cleared %d old executions of %s", count, target)
+
     rule_by_name = read_deps(depfile, j)
+
     def new_object_listener(obj):
         timestamp = datetime.datetime.now().isoformat()
         j.add_obj(timestamp, obj)
