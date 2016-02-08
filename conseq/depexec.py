@@ -5,10 +5,17 @@ import jinja2
 import os
 import time
 import textwrap
+import logging
+import tempfile
 
+from collections import namedtuple
+
+from . import dlcache
 from . import dep
 from . import depfile
 from . import pull_url
+
+log = logging.getLogger(__name__)
 
 class FatalUserError(Exception):
     pass
@@ -48,7 +55,7 @@ class Execution:
             with open(self.results_path) as fd:
                 results = json.load(fd)
 
-        print("----> results", results)
+        log.info("Rule {} completed. Results: {}".format(self.transform, results))
         outputs = [self._resolve_filenames(o) for o in results['outputs']]
         return outputs
 
@@ -56,24 +63,27 @@ def exec_script(name, id, language, job_dir, script_name, stdout_path, stderr_pa
     script_name = os.path.abspath(script_name)
     stdout_path = os.path.abspath(stdout_path)
     stderr_path = os.path.abspath(stderr_path)
+
+    env = os.environ.copy()
+
     if language in ['python']:
         cmd = "cd {job_dir} ; {language} {script_name} > {stdout_path} 2> {stderr_path}".format(**locals())
+
+        if ("PYTHONPATH" in env):
+            env['PYTHONPATH'] = env['PYTHONPATH'] + ":" + os.path.abspath(".")
+        else:
+            env['PYTHONPATH'] = os.path.abspath(".")
     elif language in ['shell']:
         cmd = "cd {job_dir} ; bash {script_name} > {stdout_path} 2> {stderr_path}".format(**locals())
     elif language in ['R']:
         cmd = "cd {job_dir} ; Rscript {script_name} > {stdout_path} 2> {stderr_path}".format(**locals())
     else:
         raise Exception("unknown language: {}".format(language))
-    print("executing:", cmd)
-    env = os.environ.copy()
-    if ("PYTHONPATH" in env):
-        env['PYTHONPATH'] = env['PYTHONPATH'] + ":" + os.path.abspath(".")
-    else:
-        env['PYTHONPATH'] = os.path.abspath(".")
+
+    log.debug("executing: %s", cmd)
+
     proc = subprocess.Popen(['bash', '-c', cmd], env=env)
     return Execution(name, id, job_dir, results_path, proc, outputs)
-
-import tempfile
 
 def _localize_filenames(pull, job_dir, props):
     props_copy = {}
@@ -101,7 +111,7 @@ def execute(name, pull, jinja2_env, id, job_dir, inputs, rule):
     assert isinstance(inputs, dict)
     inputs = dict([(k, localize_filenames(pull, job_dir, v)) for k,v in inputs.items()])
 
-    print("Executing {} with inputs {}".format(name, inputs))
+    log.info("Executing %s with inputs %s", name, inputs)
 
     formatted_script_body = jinja2_env.from_string(script_body).render(inputs=inputs)
     formatted_script_body = textwrap.dedent(formatted_script_body)
@@ -119,7 +129,6 @@ def execute(name, pull, jinja2_env, id, job_dir, inputs, rule):
                        os.path.join(job_dir, "results.json"),
                        rule.outputs)
 
-from . import dlcache
 
 def main_loop(j, new_object_listener, rule_by_name, working_dir):
     jinja2_env = jinja2.Environment(undefined=jinja2.StrictUndefined)
@@ -174,7 +183,6 @@ def main_loop(j, new_object_listener, rule_by_name, working_dir):
 
 def to_template(rule):
     queries = []
-    print("to_template", rule.inputs)
     for name, spec in rule.inputs:
         assert name != ""
         queries.append(dep.ForEach(name, spec))
@@ -188,7 +196,7 @@ def parse(filename):
         text,
         "declarations",
         filename=filename,
-        trace=True,
+        trace=False,
         nameguard=None,
         semantics = Semantics())
 
@@ -281,7 +289,6 @@ def unquote(s):
     assert s[-1] == '"'
     return s[1:-1]
 
-from collections import namedtuple
 InputSpec = namedtuple("InputSpec", ["variable", "json_obj"])
 
 class Semantics(object):

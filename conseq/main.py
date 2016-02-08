@@ -1,4 +1,5 @@
 import argparse
+import logging
 from . import depexec
 
 def rm(args):
@@ -16,7 +17,7 @@ def _list(args):
 def main(argv):
     parser = argparse.ArgumentParser()
     parser.add_argument('--dir', metavar="DIR", help="The directory to write working versions of files to", default="state")
-
+    parser.add_argument('--verbose', dest='verbose', action='store_true')
     sub = parser.add_subparsers()
 
     run_cmd = sub.add_parser("run")
@@ -36,4 +37,9 @@ def main(argv):
     rm_cmd.set_defaults(func=rm)
 
     args = parser.parse_args()
+    if args.verbose:
+        level = logging.DEBUG
+    else:
+        level = logging.INFO
+    logging.basicConfig(level=level)
     args.func(args)

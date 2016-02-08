@@ -2,12 +2,10 @@ import json
 import sqlite3
 import os
 import collections
+import logging
 
-#WAITING="waiting"
-#READY="ready"
-#STARTED="started"
-#FAILED="failed"
-#COMPLETED="completed"
+log = logging.getLogger(__name__)
+
 class Wildcard:
     pass
 
@@ -124,7 +122,6 @@ class ObjSet:
 
             if self.replace_if_exists:
                 assert len(matches) == 1
-                print("removing obj {} from {}".format(matches[0].id, self.table_name))
                 self.remove(matches[0].id)
 
         c = get_cursor()
@@ -437,10 +434,8 @@ class Template:
                 continue
             results.append( (tuple(b.items()), self.transform) )
 
-        print ("Created rules for",self.transform,":")
-        for r in results:
-            print(" ",bindings)
-#               , repr(results), repr(bindings))
+
+        log.debug("Created rules for %s: %s", self.transform, results)
         return results
 
 
