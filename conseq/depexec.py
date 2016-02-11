@@ -20,14 +20,17 @@ log = logging.getLogger(__name__)
 class FatalUserError(Exception):
     pass
 
+class JobFailedError(FatalUserError):
+    pass
+
 class Execution:
-    def __init__(self, transform, id, job_dir, results_path, proc, outputs):
+    def __init__(self, transform, id, job_dir, proc, outputs):
         self.transform = transform
         self.id = id
         self.proc = proc
-        self.results_path = results_path
         self.job_dir = job_dir
         self.outputs = outputs
+        assert job_dir != None
 
     def _resolve_filenames(self, props):
         props_copy = {}
@@ -37,53 +40,83 @@ class Execution:
             props_copy[k] = v
         return props_copy
 
+    @property
+    def results_path(self):
+        return os.path.join(self.job_dir, "results.json")
+
     def get_completion(self):
         retcode = self.proc.poll()
-   
+
+        # if self.backend == "local":
+        #     pid = int(self.backend_id)
+        #     running = True
+        #     try:
+        #         os.kill(pid, 0)
+        #     except OSError:
+        #         running = False
+        #
+        #     if running:
+        # else:
+        #     raise Exception("unknown backend {}".format(self.backend))
+
         if retcode == None:
-            return None
+            return None, None
         
         if retcode != 0:
-            raise Exception("failed with {}".format(retcode))
+            return("shell command failed with {}".format(retcode), None)
+
+        retcode_file = os.path.join(self.job_dir, "retcode.txt")
+        try:
+            with open(retcode_file) as fd:
+                retcode = int(fd.read())
+                if retcode != 0:
+                    return "failed with {}".format(retcode), None
+        except FileNotFoundError:
+            return "No retcode file {}".format(retcode_file), None
 
         if self.outputs != None:
             results = {"outputs": self.outputs}
         else:
             if not os.path.exists(self.results_path):
-                raise FatalUserError("rule {} completed successfully, but no results.json file written to working directory".format(self.transform))
+                return("rule {} completed successfully, but no results.json file written to working directory".format(self.transform), None)
 
             with open(self.results_path) as fd:
                 results = json.load(fd)
 
-        log.info("Rule {} completed. Results: {}".format(self.transform, results))
+        log.info("Rule {} completed ({}). Results: {}".format(self.transform, self.job_dir, results))
         outputs = [self._resolve_filenames(o) for o in results['outputs']]
-        return outputs
+        return None, outputs
 
-def exec_script(name, id, language, job_dir, script_name, stdout_path, stderr_path, results_path, outputs):
+def exec_script(name, id, language, job_dir, script_name, outputs):
+    stdout_path = os.path.join(job_dir, "stdout.txt")
+    stderr_path = os.path.join(job_dir, "stderr.txt")
+    # results_path = os.path.join(job_dir, "results.json")
+
     script_name = os.path.abspath(script_name)
     stdout_path = os.path.abspath(stdout_path)
     stderr_path = os.path.abspath(stderr_path)
+    retcode_path = os.path.abspath(os.path.join(job_dir, "retcode.txt"))
 
     env = os.environ.copy()
 
     if language in ['python']:
-        cmd = "cd {job_dir} ; {language} {script_name} > {stdout_path} 2> {stderr_path}".format(**locals())
+        cmd = "cd {job_dir} ; {language} {script_name} > {stdout_path} 2> {stderr_path} ; echo $? > {retcode_path}".format(**locals())
 
         if ("PYTHONPATH" in env):
             env['PYTHONPATH'] = env['PYTHONPATH'] + ":" + os.path.abspath(".")
         else:
             env['PYTHONPATH'] = os.path.abspath(".")
     elif language in ['shell']:
-        cmd = "cd {job_dir} ; bash {script_name} > {stdout_path} 2> {stderr_path}".format(**locals())
+        cmd = "cd {job_dir} ; bash {script_name} > {stdout_path} 2> {stderr_path} ; echo $? > {retcode_path}".format(**locals())
     elif language in ['R']:
-        cmd = "cd {job_dir} ; Rscript {script_name} > {stdout_path} 2> {stderr_path}".format(**locals())
+        cmd = "cd {job_dir} ; Rscript {script_name} > {stdout_path} 2> {stderr_path} ; echo $? > {retcode_path}".format(**locals())
     else:
         raise Exception("unknown language: {}".format(language))
 
     log.debug("executing: %s", cmd)
 
     proc = subprocess.Popen(['bash', '-c', cmd], env=env)
-    return Execution(name, id, job_dir, results_path, proc, outputs)
+    return Execution(name, id, job_dir, proc, outputs)
 
 def _localize_filenames(pull, job_dir, props):
     props_copy = {}
@@ -104,7 +137,6 @@ def localize_filenames(pull, job_dir, v):
     assert isinstance(v, tuple)
     return [_localize_filenames(pull, job_dir, x.props) for x in v]
 
-
 def execute(name, pull, jinja2_env, id, job_dir, inputs, rule):
     language = rule.language
     script_body = rule.script
@@ -119,18 +151,52 @@ def execute(name, pull, jinja2_env, id, job_dir, inputs, rule):
     script_name = os.path.join(job_dir, "script")
     with open(script_name, "w") as fd:
         fd.write(formatted_script_body)
-    return exec_script(name,
+    execution = exec_script(name,
                        id,
                        language,
                        job_dir,
                        script_name,
-                       os.path.join(job_dir, "stdout.txt"),
-                       os.path.join(job_dir, "stderr.txt"),
-                       os.path.join(job_dir, "results.json"),
                        rule.outputs)
+    return execution
 
 
-def main_loop(j, new_object_listener, rule_by_name, working_dir):
+    # def __init__(self, transform, id, job_dir, results_path, proc, outputs):
+    #     self.transform = transform
+    #     self.id = id
+    #     self.proc = proc
+    #     self.results_path = results_path
+    #     self.job_dir = job_dir
+    #     self.outputs = outputs
+
+class ProcStub:
+    def __init__(self, xref):
+        assert xref.startswith("PID:")
+        self.pid = int(xref[4:])
+
+    def poll(self):
+        try:
+            os.kill(self.pid, 0)
+            return None
+        except OSError:
+            return 0
+
+def reattach(j, rules_by_name):
+    pending_jobs = j.get_pending()
+    executing = []
+    for e in pending_jobs:
+        if e.exec_xref != None:
+            rule = rules_by_name[e.transform]
+            ee = Execution(e.transform, e.id, e.job_dir, ProcStub(e.exec_xref), rule.outputs)
+            executing.append(ee)
+            log.warn("Reattaching existing job {}: {}".format(e.transform, e.exec_xref))
+        else:
+            log.warn("Canceling {}".format(e.id))
+            j.cancel_execution(e.id)
+    return executing
+
+def main_loop(j, new_object_listener, rule_by_name, working_dir, executing):
+    active_job_ids = set([e.id for e in executing])
+
     jinja2_env = jinja2.Environment(undefined=jinja2.StrictUndefined)
     puller = pull_url.Pull()
     cache = dlcache.open_dl_db(working_dir+"/cache.sqlite3")
@@ -143,18 +209,15 @@ def main_loop(j, new_object_listener, rule_by_name, working_dir):
             cache.put(url, dest_filename)
         return dest_filename
 
-    executing = []
-    active_job_ids = set()
-
     prev_msg = None
     while True:
         pending_jobs = j.get_pending()
-        if len(executing) == 0 and len(pending_jobs) == 0:
-            break
         msg = "%d processes running, %d executions pending" % ( len(executing), len(pending_jobs) - len(executing) )
         if prev_msg != msg:
             log.info(msg)
         prev_msg = msg
+        if len(executing) == 0 and len(pending_jobs) == 0:
+            break
 
         did_useful_work = False
         for job in pending_jobs:
@@ -171,15 +234,23 @@ def main_loop(j, new_object_listener, rule_by_name, working_dir):
             rule = rule_by_name[job.transform]
             e = execute(job.transform, pull, jinja2_env, job.id, job_dir, dict(job.inputs), rule)
             executing.append(e)
+            j.update_exec_xref(e.id, "PID:{}".format(e.proc.pid), job_dir)
 
         for i, e in reversed(list(enumerate(executing))):
-            completion = e.get_completion()
-            if completion == None:
+            failure, completion = e.get_completion()
+
+            if failure == None and completion == None:
                 continue
 
             del executing[i]
             timestamp = datetime.datetime.now().isoformat()
-            j.record_completed(timestamp, e.id, dep.STATUS_COMPLETED, completion)
+
+            if failure != None:
+                log.error("Transform %s failed (job_dir=%s): %s", e.transform, e.job_dir, failure)
+                j.record_completed(timestamp, e.id, dep.STATUS_FAILED, {})
+            elif completion != None:
+                j.record_completed(timestamp, e.id, dep.STATUS_COMPLETED, completion)
+
             did_useful_work = True
         
         if not did_useful_work:
@@ -220,10 +291,6 @@ def read_deps(filename, j):
             assert isinstance(dec, Rule)
             #print("adding transform", dec.name)
             rule_by_name[dec.name] = (dec)
-    for dec in p:
-        if not (isinstance(dec, Rule)):
-            continue
-        j.add_template(to_template(dec))
     return rule_by_name
 
 def rm_cmd(state_dir, dry_run, json_query, with_invalidate):
@@ -258,11 +325,18 @@ def main(depfile, state_dir, forced_targets):
 
     rule_by_name = read_deps(depfile, j)
 
+    executing = reattach(j, rule_by_name)
+
+    for dec in rule_by_name.values():
+        if not (isinstance(dec, Rule)):
+            continue
+        j.add_template(to_template(dec))
+
     def new_object_listener(obj):
         timestamp = datetime.datetime.now().isoformat()
         j.add_obj(timestamp, obj)
     try:
-        main_loop(j, new_object_listener, rule_by_name, working_dir)
+        main_loop(j, new_object_listener, rule_by_name, working_dir, executing)
     except FatalUserError as e:
         print("Error: {}".format(e))
 
@@ -275,7 +349,7 @@ class Rule:
     def __init__(self, name):
         self.name = name
         self.inputs = []
-        self.outputs = []
+        self.outputs = None
         self.options = []
         self.script = None
         assert self.name != "" and self.name != " "

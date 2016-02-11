@@ -15,7 +15,7 @@ class InstanceTemplate:
     def __init__(self, props):
         pass
 
-
+STATUS_UNKNOWN = "unknown"
 STATUS_READY = "ready"
 STATUS_CANCELED = "canceled"
 STATUS_COMPLETED = "completed"
@@ -179,10 +179,10 @@ class RuleSet:
         self.add_rule_listeners = []
 
     def __iter__(self):
-        return iter(self.rule_by_id.values())
-
-    def get(self, id):
-        return self.rule_by_id[id]
+        c = get_cursor()
+        c.execute("select id, transform from rule")
+        rules = c.fetchall()
+        return iter(rules)
 
     def remove_rule(self, rule_id):
         c = get_cursor()
@@ -229,27 +229,35 @@ class RuleSet:
 
 
 class RulePending:
-    def __init__(self, id, rule_id, inputs, outputs, transform):
+    def __init__(self, id, rule_id, inputs, outputs, transform, status, exec_xref, job_dir):
         assertInputsValid(inputs)
 
         self.id = id
         self.transform = transform
         self.inputs = inputs
         self.rule_id = rule_id
-        self.status = STATUS_READY
+        self.status = status
         self.outputs = outputs
+        self.exec_xref = exec_xref
+        self.job_dir = job_dir
+
+        assert self.job_dir != "ready"
 
     def __repr__(self):
-        return "<Rule id:{} rule_id:{} inputs:{} outputs:{} transform:{}>".format(self.id, self.rule_id, self.inputs, self.outputs, self.transform)
+        return "<Rule id:{} rule_id:{} inputs:{} outputs:{} transform:{} status:{} exec_xref:{}>".format(self.id, self.rule_id, self.inputs, self.outputs, self.transform, self.status, self.exec_xref)
 
 
 class ExecutionLog:
     def __init__(self, obj_history):
         self.obj_history = obj_history
 
-    def cancel_execution(self, rule_id):
+    def cancel_execution(self, rule_id=None, exec_id=None):
+        assert rule_id != None or exec_id != None
         c = get_cursor()
-        c.execute("update execution set status = ? where rule_id = ?", [STATUS_CANCELED, rule_id])
+        if rule_id != None:
+            c.execute("update execution set status = ? where rule_id = ?", [STATUS_CANCELED, rule_id])
+        else:
+            c.execute("update execution set status = ? where id = ?", [STATUS_CANCELED, exec_id])
 
     def _make_copy_get_id(self, x):
         return self.obj_history.add(x.timestamp, x.props)
@@ -270,7 +278,7 @@ class ExecutionLog:
 
     def _as_RuleList(self, c):
         pending = []
-        for exec_id, rule_id, transform in c.fetchall():
+        for exec_id, rule_id, transform, status, exec_xref, job_dir in c.fetchall():
             inputs = collections.defaultdict(lambda: [])
             var_is_list = {}
             c.execute("select name, obj_id, is_list from execution_input where execution_id = ?", [exec_id])
@@ -293,25 +301,40 @@ class ExecutionLog:
             for obj_id, in c.fetchall():
                 outputs.append(self.obj_history.get(obj_id))
 
-            pending.append(RulePending(exec_id, rule_id, tuple(in_name_values), outputs, transform))
+            pending.append(RulePending(exec_id, rule_id, tuple(in_name_values), outputs, transform, status, exec_xref, job_dir))
         return pending
+
+    def get(self, id):
+        c = get_cursor()
+        c.execute("select id, rule_id, transform, status, execution_xref, job_dir from execution where id = ?", [id])
+        rules = self._as_RuleList(c)
+        if len(rules) == 1:
+            return rules[0]
+        elif len(rules) == 0:
+            return None
+        else:
+            raise Exception("Multiple rows fetched for id {}".format(id))
 
     def get_pending(self):
         c = get_cursor()
-        c.execute("select id, rule_id, transform from execution where status = ?", [STATUS_READY])
+        c.execute("select id, rule_id, transform, status, execution_xref, job_dir from execution where status = ?", [STATUS_READY])
         return self._as_RuleList(c)
 
     def get_by_output(self, obj):
         # probably won't really make a copy, just want to get the corresponding id
         obj_id = self._make_copy_get_id(obj)
         c = get_cursor()
-        c.execute("select id, rule_id, transform from execution e where exists (select 1 from execution_output o where o.execution_id = e.id and obj_id = ?)", [obj_id])
+        c.execute("select id, rule_id, transform, status, execution_xref, job_dir from execution e where exists (select 1 from execution_output o where o.execution_id = e.id and obj_id = ?)", [obj_id])
         return self._as_RuleList(c)
 
     def get_all(self):
         c = get_cursor()
-        c.execute("select id, rule_id, transform from execution")
+        c.execute("select id, rule_id, transform, status, execution_xref, job_dir from execution")
         return self._as_RuleList(c)
+
+    def update_exec_xref(self, exec_id, xref, job_dir):
+        c = get_cursor()
+        c.execute("update execution set execution_xref = ?, job_dir = ? where id = ?", [xref, job_dir, exec_id])
 
     def record_completed(self, execution_id, new_status, outputs):
         c = get_cursor()
@@ -511,6 +534,20 @@ class Jobs:
                 obj_id = self.add_obj(timestamp, output)
                 interned_outputs.append( self.objects.get(obj_id) )
             self.log.record_completed(execution_id, new_status, interned_outputs)
+            if new_status == STATUS_FAILED:
+                e = self.log.get(execution_id)
+                self.rule_set.remove_rule(e.rule_id)
+
+    def update_exec_xref(self, exec_id, xref, job_dir):
+        with transaction(self.db):
+            self.log.update_exec_xref(exec_id, xref, job_dir)
+
+
+    def cancel_execution(self, exec_id):
+        with transaction(self.db):
+            e = self.log.get(exec_id)
+            self.rule_set.remove_rule(e.rule_id)
+            self.log.cancel_execution(exec_id=exec_id)
 
     def invalidate_rule_execution(self, transform):
         with transaction(self.db):
@@ -525,6 +562,12 @@ class Jobs:
         with transaction(self.db):
             for obj in self.objects:
                 print("obj:", obj)
+            for rs in self.rule_set:
+                print("rule:", rs)
+            for job in self.log.get_all():
+                print("all job:", job)
+            for job in self.log.get_pending():
+                print("pending job:", job)
 
 def open_job_db(filename):
     needs_create = not os.path.exists(filename)
@@ -533,13 +576,13 @@ def open_job_db(filename):
 
     if needs_create:
         stmts = [
-            "create table rule (id INTEGER PRIMARY KEY   AUTOINCREMENT, transform STRING, key STRING)",
-            "create table rule_input (id INTEGER PRIMARY KEY   AUTOINCREMENT, rule_id INTEGER, name string, obj_id INTEGER)",
-            "create table cur_obj (id INTEGER PRIMARY KEY   AUTOINCREMENT, timestamp STRING, json STRING)",
-            "create table past_obj (id INTEGER PRIMARY KEY   AUTOINCREMENT, timestamp STRING, json STRING)",
-            "create table execution (id INTEGER PRIMARY KEY   AUTOINCREMENT, rule_id INTEGER, transform STRING, status STRING)",
-            "create table execution_input (id INTEGER PRIMARY KEY   AUTOINCREMENT, execution_id INTEGER, name STRING, obj_id INTEGER, is_list INTEGER)",
-            "create table execution_output (id INTEGER PRIMARY KEY   AUTOINCREMENT, execution_id INTEGER, obj_id INTEGER)",
+            "create table rule (id INTEGER PRIMARY KEY AUTOINCREMENT, transform STRING, key STRING)",
+            "create table rule_input (id INTEGER PRIMARY KEY AUTOINCREMENT, rule_id INTEGER, name string, obj_id INTEGER)",
+            "create table cur_obj (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp STRING, json STRING)",
+            "create table past_obj (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp STRING, json STRING)",
+            "create table execution (id INTEGER PRIMARY KEY AUTOINCREMENT, rule_id INTEGER, transform STRING, status STRING, execution_xref STRING, job_dir STRING)",
+            "create table execution_input (id INTEGER PRIMARY KEY AUTOINCREMENT, execution_id INTEGER, name STRING, obj_id INTEGER, is_list INTEGER)",
+            "create table execution_output (id INTEGER PRIMARY KEY AUTOINCREMENT, execution_id INTEGER, obj_id INTEGER)",
             ]
         for stmt in stmts:
             db.execute(stmt)
