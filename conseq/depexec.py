@@ -8,12 +8,11 @@ import textwrap
 import logging
 import tempfile
 
-from collections import namedtuple
 
 from . import dlcache
 from . import dep
-from . import depfile
 from . import pull_url
+from . import parser
 
 log = logging.getLogger(__name__)
 
@@ -159,15 +158,6 @@ def execute(name, pull, jinja2_env, id, job_dir, inputs, rule):
                        rule.outputs)
     return execution
 
-
-    # def __init__(self, transform, id, job_dir, results_path, proc, outputs):
-    #     self.transform = transform
-    #     self.id = id
-    #     self.proc = proc
-    #     self.results_path = results_path
-    #     self.job_dir = job_dir
-    #     self.outputs = outputs
-
 class ProcStub:
     def __init__(self, xref):
         assert xref.startswith("PID:")
@@ -256,25 +246,6 @@ def main_loop(j, new_object_listener, rule_by_name, working_dir, executing):
         if not did_useful_work:
             time.sleep(0.5)
 
-def to_template(rule):
-    queries = []
-    for name, spec in rule.inputs:
-        assert name != ""
-        queries.append(dep.ForEach(name, spec))
-    return dep.Template(queries, [], rule.name)
-
-def parse(filename):
-    with open(filename) as f:
-        text = f.read()
-    parser = depfile.depfileParser(parseinfo=False)
-    return parser.parse(
-        text,
-        "declarations",
-        filename=filename,
-        trace=False,
-        nameguard=None,
-        semantics = Semantics())
-
 def add_xref(j, xref):
     timestamp = datetime.datetime.now().isoformat()
     d = dict(xref.obj)
@@ -283,12 +254,12 @@ def add_xref(j, xref):
 
 def read_deps(filename, j):
     rule_by_name = {}
-    p = parse(filename)
+    p = parser.parse(filename)
     for dec in p:
-        if isinstance(dec, XRef):
+        if isinstance(dec, parser.XRef):
             add_xref(j, dec)
         else:
-            assert isinstance(dec, Rule)
+            assert isinstance(dec, parser.Rule)
             #print("adding transform", dec.name)
             rule_by_name[dec.name] = (dec)
     return rule_by_name
@@ -309,6 +280,28 @@ def list_cmd(state_dir):
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
     j.dump()
 
+import collections
+
+def to_template(rule):
+    queries = []
+    predicates = []
+    pairs_by_var = collections.defaultdict(lambda: [])
+    for bound_name, spec in rule.inputs:
+        assert bound_name != ""
+
+        constants = {}
+        for prop_name, value in spec.items():
+            if isinstance(value, parser.QueryVariable):
+                pairs_by_var[value.name].append( (bound_name, prop_name) )
+            else:
+                constants[prop_name] = value
+        queries.append(dep.ForEach(bound_name, constants))
+
+    for var, pairs in pairs_by_var.items():
+        predicates.append(dep.PropsMatch(pairs))
+
+    return dep.Template(queries, predicates, rule.name)
+
 def main(depfile, state_dir, forced_targets):
     if not os.path.exists(state_dir):
         os.makedirs(state_dir)
@@ -328,7 +321,7 @@ def main(depfile, state_dir, forced_targets):
     executing = reattach(j, rule_by_name)
 
     for dec in rule_by_name.values():
-        if not (isinstance(dec, Rule)):
+        if not (isinstance(dec, parser.Rule)):
             continue
         j.add_template(to_template(dec))
 
@@ -339,111 +332,5 @@ def main(depfile, state_dir, forced_targets):
         main_loop(j, new_object_listener, rule_by_name, working_dir, executing)
     except FatalUserError as e:
         print("Error: {}".format(e))
-
-class XRef:
-    def __init__(self, url, obj):
-        self.url = url
-        self.obj = obj
-
-class Rule:
-    def __init__(self, name):
-        self.name = name
-        self.inputs = []
-        self.outputs = None
-        self.options = []
-        self.script = None
-        assert self.name != "" and self.name != " "
-
-    @property
-    def language(self):
-        if "exec-python" in self.options:
-            return "python"
-        elif "exec-R" in self.options:
-            return "R"
-        else:
-            return "shell"
-
-    def __repr__(self):
-        return "<Rule {} inputs={} options={}>".format(self.name, self.inputs, self.options)
-
-def unquote(s):
-    if len(s) > 0 and s[:3] == '"""':
-        assert s[-3:] == '"""'
-        return s[3:-3]
-    assert s[0] == '"'
-    assert s[-1] == '"'
-    return s[1:-1]
-
-InputSpec = namedtuple("InputSpec", ["variable", "json_obj"])
-
-class Semantics(object):
-    def statement(self, ast):
-#        print("statement:", repr(ast))
-        return tuple(ast)
-
-    def input_spec(self, ast):
-        return InputSpec(ast[0], ast[2])
-
-    def statements(self, ast):
-#        print("statements:", repr(ast))
-        return ast
-
-    def json_name_value_pair(self, ast):
-        return (ast[0], ast[2])
-
-    def json_obj(self, ast):
-        #print("json_obj", ast)
-        pairs = [ast[1]]
-        rest = ast[2]
-        for x in range(0, len(rest), 2):
-            pairs.append(rest[x+1])
-        #print("after json_obj", pairs)
-        return dict(pairs)
-
-    def xref(self, ast):
-        #print("xref ast", ast)
-        return XRef(ast[1],ast[2])
-
-    def rule(self, ast):
-        #print("rule", repr(ast))
-        rule_name = ast[1]
-        statements = ast[3]
-        #print("rule: {}".format(repr(ast)))
-        rule = Rule(rule_name)
-        for statement in statements:
-            if statement[0] == "inputs":
-                rule.inputs = statement[2]
-            elif statement[0] == "outputs":
-                rule.outputs = statement[2]
-            elif statement[0] == "script":
-                rule.script = statement[2]
-            elif statement[0] == "options":
-                #print("----> options", statement)
-                options = [statement[2]]
-                rest = statement[3]
-                for i in range(0,len(rest),2):
-                    options.append(rest[1])
-                rule.options = options
-            else:
-                raise Exception("unknown {}".format(statement[0]))
-        #print("rule:", repr(rule))
-        return rule
-
-    def quoted_string(self, ast):
-        return unquote(ast)
-
-    def input_specs(self, ast):
-        specs = [ast[0]]
-        rest = ast[1]
-        for i in range(0,len(rest),2):
-            specs.append(rest[1])
-        return specs
-
-    def output_specs(self, ast):
-        specs = [ast[0]]
-        rest = ast[1]
-        for i in range(0,len(rest),2):
-            specs.append(rest[1])
-        return specs
 
 

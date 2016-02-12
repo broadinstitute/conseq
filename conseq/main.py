@@ -18,6 +18,7 @@ def main(argv):
     parser = argparse.ArgumentParser()
     parser.add_argument('--dir', metavar="DIR", help="The directory to write working versions of files to", default="state")
     parser.add_argument('--verbose', dest='verbose', action='store_true')
+    parser.set_defaults(func=None)
     sub = parser.add_subparsers()
 
     run_cmd = sub.add_parser("run")
@@ -43,4 +44,5 @@ def main(argv):
     else:
         level = logging.INFO
     logging.basicConfig(level=level)
-    args.func(args)
+    if args.func != None:
+        args.func(args)

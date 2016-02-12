@@ -17,7 +17,7 @@ from grako.parsing import graken, Parser
 from grako.util import re, RE_FLAGS  # noqa
 
 
-__version__ = (2016, 2, 7, 13, 57, 17, 6)
+__version__ = (2016, 2, 12, 2, 55, 32, 4)
 
 __all__ = [
     'depfileParser',
@@ -97,10 +97,37 @@ class depfileParser(Parser):
         self._token('}')
 
     @graken()
+    def _query_variable_(self):
+        self._identifier_()
+
+    @graken()
+    def _query_name_value_pair_(self):
+        self._quoted_string_()
+        self._token(':')
+        with self._group():
+            with self._choice():
+                with self._option():
+                    self._json_value_()
+                with self._option():
+                    self._query_variable_()
+                self._error('no available options')
+
+    @graken()
+    def _query_obj_(self):
+        self._token('{')
+        self._query_name_value_pair_()
+
+        def block0():
+            self._token(',')
+            self._query_name_value_pair_()
+        self._closure(block0)
+        self._token('}')
+
+    @graken()
     def _input_spec_(self):
         self._identifier_()
         self._token('=')
-        self._json_obj_()
+        self._query_obj_()
 
     @graken()
     def _input_specs_(self):
@@ -205,6 +232,15 @@ class depfileSemantics(object):
         return ast
 
     def json_obj(self, ast):
+        return ast
+
+    def query_variable(self, ast):
+        return ast
+
+    def query_name_value_pair(self, ast):
+        return ast
+
+    def query_obj(self, ast):
         return ast
 
     def input_spec(self, ast):

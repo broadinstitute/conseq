@@ -1,5 +1,9 @@
 from . import pull_url
+import pytest
 
+at_broad = False
+
+@pytest.mark.skipif(not at_broad, reason="need ssh host")
 def test_pull(tmpdir):
     dest = str(tmpdir.join("dest"))
 

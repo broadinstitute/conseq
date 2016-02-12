@@ -8,7 +8,10 @@ url = /\S+/ ;
 json_value = quoted_string | json_obj ;
 json_name_value_pair = quoted_string ":" json_value ;
 json_obj = "{" json_name_value_pair { "," json_name_value_pair }* "}" ;
-input_spec = identifier "=" json_obj ;
+query_variable = identifier ;
+query_name_value_pair = quoted_string ":" ( json_value | query_variable )  ;
+query_obj = "{" query_name_value_pair { "," query_name_value_pair }* "}" ;
+input_spec = identifier "=" query_obj ;
 input_specs = input_spec { "," input_spec }* ;
 output_specs = json_obj { "," json_obj } ;
 statement = ( "inputs" ":" input_specs |

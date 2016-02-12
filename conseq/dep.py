@@ -396,6 +396,26 @@ class PropEqualsConstant:
     def satisfied(self, bindings):
         return bindings[self.variable][self.property] == self.constant
 
+class PropsMatch:
+    def __init__(self, pairs):
+        self.pairs = pairs
+
+    def __repr__(self):
+        return "<PropsMatch pairs={}>".format(self.pairs)
+
+    def satisfied(self, bindings):
+        first = True
+        prev_value = None
+        for name, prop in self.pairs:
+            value = bindings[name][prop]
+            if first:
+                prev_value = value
+            else:
+                if prev_value != value:
+                    return False
+            first = False
+        return True
+
 class Template:
     def __init__(self, queries, predicates, transform, expected=None):
         self.foreach_queries = []
