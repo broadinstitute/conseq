@@ -15,6 +15,7 @@ class Rule:
         self.outputs = None
         self.options = []
         self.script = None
+        self.postscript = None
         assert self.name != "" and self.name != " "
 
     @property
@@ -29,6 +30,10 @@ class Rule:
     def __repr__(self):
         return "<Rule {} inputs={} options={}>".format(self.name, self.inputs, self.options)
 
+InputSpec = namedtuple("InputSpec", ["variable", "json_obj"])
+IncludeStatement = namedtuple("IncludeStatement", ["filename"])
+LetStatement = namedtuple("LetStatement", ["name", "value"])
+
 def unquote(s):
     if len(s) > 0 and s[:3] == '"""':
         assert s[-3:] == '"""'
@@ -37,7 +42,6 @@ def unquote(s):
     assert s[-1] == '"'
     return s[1:-1]
 
-InputSpec = namedtuple("InputSpec", ["variable", "json_obj"])
 
 class Semantics(object):
     def statement(self, ast):
@@ -90,6 +94,8 @@ class Semantics(object):
                 rule.outputs = statement[2]
             elif statement[0] == "script":
                 rule.script = statement[2]
+            elif statement[0] == "postscript":
+                rule.postscript = statement[2]
             elif statement[0] == "options":
                 #print("----> options", statement)
                 options = [statement[2]]
@@ -118,6 +124,13 @@ class Semantics(object):
         for i in range(0,len(rest),2):
             specs.append(rest[1])
         return specs
+
+    def var_stmt(self, ast):
+        return LetStatement(ast[1], ast[3])
+
+    def include_stmt(self, ast):
+        return IncludeStatement(ast[1])
+
 
 def parse_str(text, filename=None):
     parser = depfile.depfileParser(parseinfo=False)

@@ -7,7 +7,7 @@ import time
 import textwrap
 import logging
 import tempfile
-
+import collections
 
 from . import dlcache
 from . import dep
@@ -86,7 +86,7 @@ class Execution:
         outputs = [self._resolve_filenames(o) for o in results['outputs']]
         return None, outputs
 
-def exec_script(name, id, language, job_dir, script_name, outputs):
+def exec_script(name, id, language, job_dir, script_name, postscript_name, outputs):
     stdout_path = os.path.join(job_dir, "stdout.txt")
     stderr_path = os.path.join(job_dir, "stderr.txt")
     # results_path = os.path.join(job_dir, "results.json")
@@ -97,24 +97,33 @@ def exec_script(name, id, language, job_dir, script_name, outputs):
     retcode_path = os.path.abspath(os.path.join(job_dir, "retcode.txt"))
 
     env = os.environ.copy()
-
-    if language in ['python']:
-        cmd = "cd {job_dir} ; {language} {script_name} > {stdout_path} 2> {stderr_path} ; echo $? > {retcode_path}".format(**locals())
-
-        if ("PYTHONPATH" in env):
-            env['PYTHONPATH'] = env['PYTHONPATH'] + ":" + os.path.abspath(".")
-        else:
-            env['PYTHONPATH'] = os.path.abspath(".")
-    elif language in ['shell']:
-        cmd = "cd {job_dir} ; bash {script_name} > {stdout_path} 2> {stderr_path} ; echo $? > {retcode_path}".format(**locals())
-    elif language in ['R']:
-        cmd = "cd {job_dir} ; Rscript {script_name} > {stdout_path} 2> {stderr_path} ; echo $? > {retcode_path}".format(**locals())
+    if ("PYTHONPATH" in env):
+        env['PYTHONPATH'] = env['PYTHONPATH'] + ":" + os.path.abspath(".")
     else:
-        raise Exception("unknown language: {}".format(language))
+        env['PYTHONPATH'] = os.path.abspath(".")
 
-    log.debug("executing: %s", cmd)
+    wrapper_path = os.path.join(job_dir, "wrapper.sh")
+    with open(wrapper_path, "w") as fd:
+        fd.write("cd {job_dir}\n".format(**locals()))
 
-    proc = subprocess.Popen(['bash', '-c', cmd], env=env)
+        if language in ['python']:
+            cmd = "{language} {script_name}".format(**locals())
+        elif language in ['shell']:
+            cmd = "bash {script_name}".format(**locals())
+        elif language in ['R']:
+            cmd = "Rscript {script_name}".format(**locals())
+        else:
+            raise Exception("unknown language: {}".format(language))
+
+        if postscript_name != None:
+            cmd += " && python {}".format(postscript_name)
+
+        fd.write(cmd+"\n")
+        fd.write("echo $? > {retcode_path}\n".format(**locals()))
+
+    bash_cmd = "exec bash {wrapper_path} > {stdout_path} 2> {stderr_path}".format(**locals())
+    log.debug("executing: %s", bash_cmd)
+    proc = subprocess.Popen(['bash', '-c', bash_cmd], env=env)
     return Execution(name, id, job_dir, proc, outputs)
 
 def _localize_filenames(pull, job_dir, props):
@@ -136,25 +145,34 @@ def localize_filenames(pull, job_dir, v):
     assert isinstance(v, tuple)
     return [_localize_filenames(pull, job_dir, x.props) for x in v]
 
-def execute(name, pull, jinja2_env, id, job_dir, inputs, rule):
+def execute(name, pull, jinja2_env, id, job_dir, inputs, rule, config):
     language = rule.language
-    script_body = rule.script
     assert isinstance(inputs, dict)
     inputs = dict([(k, localize_filenames(pull, job_dir, v)) for k,v in inputs.items()])
 
     log.info("Executing %s with inputs %s", name, inputs)
 
-    formatted_script_body = jinja2_env.from_string(script_body).render(inputs=inputs)
-    formatted_script_body = textwrap.dedent(formatted_script_body)
+    def write_script(filename, script_body):
+        formatted_script_body = jinja2_env.from_string(script_body).render(inputs=inputs, config=config)
+        formatted_script_body = textwrap.dedent(formatted_script_body)
 
-    script_name = os.path.join(job_dir, "script")
-    with open(script_name, "w") as fd:
-        fd.write(formatted_script_body)
+        script_name = os.path.join(job_dir, "script")
+        with open(script_name, "w") as fd:
+            fd.write(formatted_script_body)
+
+        return script_name
+
+    script_name = write_script("script", rule.script)
+    postscript_name = None
+    if rule.postscript != None:
+        postscript_name = write_script("postscript", rule.postscript)
+
     execution = exec_script(name,
                        id,
                        language,
                        job_dir,
                        script_name,
+                       postscript_name,
                        rule.outputs)
     return execution
 
@@ -170,12 +188,12 @@ class ProcStub:
         except OSError:
             return 0
 
-def reattach(j, rules_by_name):
+def reattach(j, rules):
     pending_jobs = j.get_pending()
     executing = []
     for e in pending_jobs:
         if e.exec_xref != None:
-            rule = rules_by_name[e.transform]
+            rule = rules.get_rule(e.transform)
             ee = Execution(e.transform, e.id, e.job_dir, ProcStub(e.exec_xref), rule.outputs)
             executing.append(ee)
             log.warn("Reattaching existing job {}: {}".format(e.transform, e.exec_xref))
@@ -184,7 +202,7 @@ def reattach(j, rules_by_name):
             j.cancel_execution(e.id)
     return executing
 
-def main_loop(j, new_object_listener, rule_by_name, working_dir, executing):
+def main_loop(j, new_object_listener, rules, working_dir, executing):
     active_job_ids = set([e.id for e in executing])
 
     jinja2_env = jinja2.Environment(undefined=jinja2.StrictUndefined)
@@ -192,6 +210,10 @@ def main_loop(j, new_object_listener, rule_by_name, working_dir, executing):
     cache = dlcache.open_dl_db(working_dir+"/cache.sqlite3")
 
     def pull(url):
+        # check to see if url is actual a file we can access.  If so, just return that path
+        if os.path.exists(url):
+            return os.path.abspath(url)
+
         dest_filename = cache.get(url)
         if dest_filename == None:
             dest_filename = tempfile.NamedTemporaryFile(delete=False, dir=working_dir).name
@@ -221,8 +243,8 @@ def main_loop(j, new_object_listener, rule_by_name, working_dir, executing):
             if not os.path.exists(job_dir):
                 os.makedirs(job_dir)
 
-            rule = rule_by_name[job.transform]
-            e = execute(job.transform, pull, jinja2_env, job.id, job_dir, dict(job.inputs), rule)
+            rule = rules.get_rule(job.transform)
+            e = execute(job.transform, pull, jinja2_env, job.id, job_dir, dict(job.inputs), rule, rules.get_vars())
             executing.append(e)
             j.update_exec_xref(e.id, "PID:{}".format(e.proc.pid), job_dir)
 
@@ -252,17 +274,51 @@ def add_xref(j, xref):
     d["filename"] = {"$xref_url": xref.url}
     return j.add_obj(timestamp, d, overwrite=False)
 
+class Rules:
+    def __init__(self):
+        self.rule_by_name = {}
+        self.vars = {}
+
+    def set_var(self, name, value):
+        self.vars[name] = value
+
+    def get_vars(self):
+        return dict(self.vars)
+
+    def __iter__(self):
+        return iter(self.rule_by_name.values())
+
+    def get_rule(self, name):
+        return self.rule_by_name[name]
+
+    def set_rule(self, name, rule):
+        if name in self.rule_by_name:
+            raise Exception("Duplicate rules for {}".format(name))
+        self.rule_by_name[name] = rule
+
+    def merge(self, other):
+        for name, rule in other.rule_by_name.items():
+            self.set_rule(name, rule)
+        self.vars.update(other.vars)
+
+    def __repr__(self):
+        return "<Rules vars:{}, rules:{}>".format(self.vars, list(self))
+
 def read_deps(filename, j):
-    rule_by_name = {}
+    rules = Rules()
     p = parser.parse(filename)
     for dec in p:
         if isinstance(dec, parser.XRef):
             add_xref(j, dec)
+        elif isinstance(dec, parser.LetStatement):
+            rules.set_var(dec.name, dec.value)
+        elif isinstance(dec, parser.IncludeStatement):
+            child_rules = read_deps(dec.filename, j)
+            rules.merge(child_rules)
         else:
             assert isinstance(dec, parser.Rule)
-            #print("adding transform", dec.name)
-            rule_by_name[dec.name] = (dec)
-    return rule_by_name
+            rules.set_rule(dec.name, dec)
+    return rules
 
 def rm_cmd(state_dir, dry_run, json_query, with_invalidate):
     query = json.loads(json_query)
@@ -280,7 +336,6 @@ def list_cmd(state_dir):
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
     j.dump()
 
-import collections
 
 def to_template(rule):
     queries = []
@@ -312,15 +367,14 @@ def main(depfile, state_dir, forced_targets):
     j = dep.open_job_db(db_path)
 
     for target in forced_targets:
-        #assert target in rule_by_name
         count = j.invalidate_rule_execution(target)
         log.info("Cleared %d old executions of %s", count, target)
 
-    rule_by_name = read_deps(depfile, j)
+    rules = read_deps(depfile, j)
 
-    executing = reattach(j, rule_by_name)
+    executing = reattach(j, rules)
 
-    for dec in rule_by_name.values():
+    for dec in rules:
         if not (isinstance(dec, parser.Rule)):
             continue
         j.add_template(to_template(dec))
@@ -329,7 +383,7 @@ def main(depfile, state_dir, forced_targets):
         timestamp = datetime.datetime.now().isoformat()
         j.add_obj(timestamp, obj)
     try:
-        main_loop(j, new_object_listener, rule_by_name, working_dir, executing)
+        main_loop(j, new_object_listener, rules, working_dir, executing)
     except FatalUserError as e:
         print("Error: {}".format(e))
 

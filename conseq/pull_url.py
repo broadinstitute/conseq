@@ -6,6 +6,14 @@ import os
 
 log = logging.getLogger(__name__)
 
+import urllib
+
+def http_fetch(url, dest):
+    with open(dest, "wb") as fdo:
+        fd = urllib.request.urlopen(url)
+        for chunk in iter(lambda: fd.read(10000), b""):
+            fdo.write(chunk)
+
 class Pull:
     def __init__(self):
         self.ssh_client_cache = {}
@@ -36,6 +44,8 @@ class Pull:
             transport = client.get_transport()
             sftp = transport.open_sftp_client()
             sftp.get(parts.path, dest_path)
+        elif parts.scheme in ["http", "https"]:
+            http_fetch(url, dest_path)
         else:
             raise Exception("unrecognized url: {}, {}".format(url, parts))
 

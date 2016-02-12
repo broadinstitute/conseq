@@ -21,6 +21,8 @@ statement = ( "inputs" ":" input_specs |
 statements = { statement }+ ;
 rule = "rule" identifier ":" statements ;
 xref = "xref" url json_obj ;
-declarations =  { rule | xref }+  $ ;
+var_stmt = "let" identifier "=" quoted_string ;
+include_stmt = "include" quoted_string ;
+declarations =  { rule | xref | include_stmt | var_stmt }+  $ ;
 
 

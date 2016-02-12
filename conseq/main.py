@@ -43,6 +43,6 @@ def main(argv):
         level = logging.DEBUG
     else:
         level = logging.INFO
-    logging.basicConfig(level=level)
+    logging.basicConfig(level=level, format='%(asctime)s %(levelname)-4s: %(message)s',)
     if args.func != None:
         args.func(args)

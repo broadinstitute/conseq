@@ -4,6 +4,8 @@ from . import depexec
 pair_of_rules = """
 xref http://foo.org {"a": "b"}
 
+# ignore this comment
+
 rule create_numbers:
     options: exec-python
     script: \"\"\"
@@ -51,3 +53,10 @@ def test_parse_constrained_query():
     print("predicate", pred)
     assert pred.satisfied({"a": {"value": "1"}, "b": {"value": "1"}})
     assert not pred.satisfied({"a": {"value": "1"}, "b": {"value": "2"}})
+
+def test_parse_vars():
+    decs = parser.parse_str("let a=\"x\"\n")
+    assert len(decs) == 1
+    assignment = decs[0]
+    assert assignment.name == "a"
+    assert assignment.value == "x"

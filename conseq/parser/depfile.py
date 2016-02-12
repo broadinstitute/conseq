@@ -17,7 +17,7 @@ from grako.parsing import graken, Parser
 from grako.util import re, RE_FLAGS  # noqa
 
 
-__version__ = (2016, 2, 12, 2, 55, 32, 4)
+__version__ = (2016, 2, 12, 19, 11, 29, 4)
 
 __all__ = [
     'depfileParser',
@@ -195,6 +195,18 @@ class depfileParser(Parser):
         self._json_obj_()
 
     @graken()
+    def _var_stmt_(self):
+        self._token('let')
+        self._identifier_()
+        self._token('=')
+        self._quoted_string_()
+
+    @graken()
+    def _include_stmt_(self):
+        self._token('include')
+        self._quoted_string_()
+
+    @graken()
     def _declarations_(self):
 
         def block0():
@@ -203,6 +215,10 @@ class depfileParser(Parser):
                     self._rule_()
                 with self._option():
                     self._xref_()
+                with self._option():
+                    self._include_stmt_()
+                with self._option():
+                    self._var_stmt_()
                 self._error('no available options')
         self._positive_closure(block0)
 
@@ -262,6 +278,12 @@ class depfileSemantics(object):
         return ast
 
     def xref(self, ast):
+        return ast
+
+    def var_stmt(self, ast):
+        return ast
+
+    def include_stmt(self, ast):
         return ast
 
     def declarations(self, ast):
