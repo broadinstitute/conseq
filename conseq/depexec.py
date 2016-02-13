@@ -145,6 +145,26 @@ def localize_filenames(pull, job_dir, v):
     assert isinstance(v, tuple)
     return [_localize_filenames(pull, job_dir, x.props) for x in v]
 
+class LazyConfig:
+    def __init__(self, render_template, config_dict):
+        self._config_dict = config_dict
+        self._render_template = render_template
+
+    def __getitem__(self, name):
+        v = self._config_dict[name]
+        return self._render_template(v)
+
+def render_template(jinja2_env, template_text, config, **kwargs):
+    kwargs = dict(kwargs)
+
+    def render_template_callback(text):
+        rendered = jinja2_env.from_string(text).render(**kwargs)
+        return rendered
+
+    kwargs["config"] = LazyConfig(render_template_callback, config)
+
+    return render_template_callback(template_text)
+
 def execute(name, pull, jinja2_env, id, job_dir, inputs, rule, config):
     language = rule.language
     assert isinstance(inputs, dict)
@@ -153,7 +173,7 @@ def execute(name, pull, jinja2_env, id, job_dir, inputs, rule, config):
     log.info("Executing %s with inputs %s", name, inputs)
 
     def write_script(filename, script_body):
-        formatted_script_body = jinja2_env.from_string(script_body).render(inputs=inputs, config=config)
+        formatted_script_body = render_template(jinja2_env, script_body, config=config, inputs=inputs)
         formatted_script_body = textwrap.dedent(formatted_script_body)
 
         script_name = os.path.join(job_dir, "script")
