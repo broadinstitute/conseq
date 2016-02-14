@@ -7,16 +7,14 @@ xref http://foo.org {"a": "b"}
 # ignore this comment
 
 rule create_numbers:
-    options: exec-python
-    script: \"\"\"
+    run "python" with \"\"\"
         import conseq
         conseq.publish({"value": "2", "type": "number"}, {"value": "3", "type": "number"})
         \"\"\"
 
 rule square:
     inputs: n={"type": "number"}
-    options: exec-python
-    script: \"\"\"
+    run "python" with \"\"\"
         import conseq
         result = {{inputs.n.value}} ** 2
         conseq.publish(dict(type="squared", value=str(result)))
@@ -30,7 +28,7 @@ def test_parse_three_rules():
 constrained_query = """
 rule a:
     inputs: a={"type": "number", "value": value}, b={"type": "other", "value": value}
-    script: "script_body"
+    run "bash"
 """
 
 def test_parse_constrained_query():

@@ -7,6 +7,7 @@ import os
 log = logging.getLogger(__name__)
 
 import urllib
+import urllib.request
 
 def http_fetch(url, dest):
     with open(dest, "wb") as fdo:

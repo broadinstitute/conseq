@@ -17,7 +17,7 @@ def test_rule_with_no_inputs(tmpdir):
     j = run_conseq(tmpdir, """
     rule a:
         outputs: {"finished": "true"}
-        script: "echo test"
+        run "bash" with "echo test"
     """)
     assert len(j.find_objs({}))==1
     print("objs ------------------------------")
@@ -30,7 +30,7 @@ def test_rule_depending_on_xref(tmpdir):
     rule a:
         inputs: in={"name": "webpage"}
         outputs: {"finished": "true"}
-        script: "echo test"
+        run "bash" with "echo test"
     """)
     assert len(j.find_objs({}))==2
 
@@ -44,7 +44,7 @@ def test_rule_depending_on_local_xref(tmpdir):
     rule a:
         inputs: in={"name": "testfile"}
         outputs: {"finished": "true"}
-        script: "cat {{ inputs.in.filename }}"
+        run "bash" with "cat {{ inputs.in.filename }}"
     """)
     assert len(j.find_objs({}))==2
 

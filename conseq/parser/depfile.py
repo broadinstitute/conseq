@@ -17,7 +17,7 @@ from grako.parsing import graken, Parser
 from grako.util import re, RE_FLAGS  # noqa
 
 
-__version__ = (2016, 2, 12, 19, 11, 29, 4)
+__version__ = (2016, 2, 14, 4, 45, 29, 6)
 
 __all__ = [
     'depfileParser',
@@ -160,9 +160,11 @@ class depfileParser(Parser):
                     self._token(':')
                     self._output_specs_()
                 with self._option():
-                    self._token('script')
-                    self._token(':')
+                    self._token('run')
                     self._quoted_string_()
+                    with self._optional():
+                        self._token('with')
+                        self._quoted_string_()
                 with self._option():
                     self._token('options')
                     self._token(':')

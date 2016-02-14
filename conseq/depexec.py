@@ -86,12 +86,11 @@ class Execution:
         outputs = [self._resolve_filenames(o) for o in results['outputs']]
         return None, outputs
 
-def exec_script(name, id, language, job_dir, script_name, postscript_name, outputs):
+def exec_script(name, id, language, job_dir, run_stmts, outputs):
     stdout_path = os.path.join(job_dir, "stdout.txt")
     stderr_path = os.path.join(job_dir, "stderr.txt")
     # results_path = os.path.join(job_dir, "results.json")
 
-    script_name = os.path.abspath(script_name)
     stdout_path = os.path.abspath(stdout_path)
     stderr_path = os.path.abspath(stderr_path)
     retcode_path = os.path.abspath(os.path.join(job_dir, "retcode.txt"))
@@ -106,19 +105,13 @@ def exec_script(name, id, language, job_dir, script_name, postscript_name, outpu
     with open(wrapper_path, "w") as fd:
         fd.write("cd {job_dir}\n".format(**locals()))
 
-        if language in ['python']:
-            cmd = "{language} {script_name}".format(**locals())
-        elif language in ['shell']:
-            cmd = "bash {script_name}".format(**locals())
-        elif language in ['R']:
-            cmd = "Rscript {script_name}".format(**locals())
-        else:
-            raise Exception("unknown language: {}".format(language))
+        for command, script_name in run_stmts:
+            fd.write(command)
+            if script_name != None:
+                fd.write(" "+os.path.abspath(script_name))
+            fd.write(" &&\\\n")
 
-        if postscript_name != None:
-            cmd += " && python {}".format(postscript_name)
-
-        fd.write(cmd+"\n")
+        fd.write("true\n")
         fd.write("echo $? > {retcode_path}\n".format(**locals()))
 
     bash_cmd = "exec bash {wrapper_path} > {stdout_path} 2> {stderr_path}".format(**locals())
@@ -182,17 +175,18 @@ def execute(name, pull, jinja2_env, id, job_dir, inputs, rule, config):
 
         return script_name
 
-    script_name = write_script("script", rule.script)
-    postscript_name = None
-    if rule.postscript != None:
-        postscript_name = write_script("postscript", rule.postscript)
+    def mk_scripts_for_stmt(i, command, script_body):
+        if script_body != None:
+            script_name = write_script("script_%d"%i, script_body)
+        return (command, script_name)
+
+    run_stmts = [mk_scripts_for_stmt(i, x[0], x[1]) for i, x in enumerate(rule.run_stmts)]
 
     execution = exec_script(name,
                        id,
                        language,
                        job_dir,
-                       script_name,
-                       postscript_name,
+                       run_stmts,
                        rule.outputs)
     return execution
 

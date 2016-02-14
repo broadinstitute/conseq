@@ -2,6 +2,7 @@ from collections import namedtuple
 from . import depfile
 
 QueryVariable = namedtuple("QueryVariable", ["name"])
+RunStmt = namedtuple("RunStmt", ["command", "script"])
 
 class XRef:
     def __init__(self, url, obj):
@@ -14,8 +15,7 @@ class Rule:
         self.inputs = []
         self.outputs = None
         self.options = []
-        self.script = None
-        self.postscript = None
+        self.run_stmts = []
         assert self.name != "" and self.name != " "
 
     @property
@@ -92,10 +92,12 @@ class Semantics(object):
                 rule.inputs = statement[2]
             elif statement[0] == "outputs":
                 rule.outputs = statement[2]
-            elif statement[0] == "script":
-                rule.script = statement[2]
-            elif statement[0] == "postscript":
-                rule.postscript = statement[2]
+            elif statement[0] == "run":
+                if len(statement) > 3:
+                    script_body = statement[3]
+                else:
+                    script_body = None
+                rule.run_stmts.append( RunStmt(statement[1], script_body) )
             elif statement[0] == "options":
                 #print("----> options", statement)
                 options = [statement[2]]
