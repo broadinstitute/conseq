@@ -49,6 +49,18 @@ def get_cursor():
     assert current_db_cursor_state.cursor != None
     return current_db_cursor_state.cursor
 
+def split_props_into_key_and_other(props):
+    key_props = {}
+    other_props = {}
+
+    for k, v in props.items():
+        if isinstance(v, dict) and "$value" in v:
+            other_props[k] = v["$value"]
+        else:
+            key_props[k] = v
+
+    return key_props, other_props
+
 class Obj:
     "Models an any input or output artifact by a set of key-value pairs"
     def __init__(self, id, timestamp, props):
@@ -59,14 +71,7 @@ class Obj:
         """
         self.id = id
         self.timestamp = timestamp
-        self.props = dict(props)
-
-    def __eq__(self, other):
-        """
-        :param other: an instance of Obj to compare to
-        :return: true of this object has the same properties as "other" does
-        """
-        return self.props == other.props
+        self.props = props
 
     def get(self, prop_name):
         """
@@ -74,6 +79,16 @@ class Obj:
         :return: the value for the given property
         """
         return self.props[prop_name]
+        # if prop_name in self.key_props:
+        #     return self.key_props[prop_name]
+        # else:
+        #     return self.other_props[prop_name]
+
+    # @property
+    # def props(self):
+    #     d = dict(self.key_props)
+    #     d.update(self.other_props)
+    #     return d
 
     def __repr__(self):
         return "<{} {}>".format(self.id, repr(self.props))
@@ -112,17 +127,14 @@ class ObjSet:
 
     def add(self, timestamp, props):
         # first check to see if this already exists
-        matches = self.find(props)
-        matches = [m for m in matches if m.props == props]
+        match = self.find_by_key(props)
 
-        if len(matches) > 0:
-            for m in matches:
-                if m.timestamp == timestamp:
-                    return m.id
+        if match != None:
+            if match.timestamp == timestamp:
+                return match.id
 
             if self.replace_if_exists:
-                assert len(matches) == 1
-                self.remove(matches[0].id)
+                self.remove(match.id)
 
         c = get_cursor()
         c.execute("insert into {} (timestamp, json) values (?, ?)".format(self.table_name), [timestamp, json.dumps(props)])
@@ -134,6 +146,16 @@ class ObjSet:
             add_listener(obj)
 
         return id
+
+    def find_by_key(self, props):
+        key_props = split_props_into_key_and_other(props)[0]
+        matches = self.find(key_props)
+        if len(matches) > 1:
+            raise Exception("Too many matches: key_props={}, matches={}".format(key_props, matches))
+        elif len(matches) == 1:
+            return matches[0]
+        else:
+            return None
 
     def find(self, properties):
         result = []
@@ -525,9 +547,9 @@ class Jobs:
 
         with transaction(self.db):
             if not overwrite:
-                existing = self.objects.find(obj_props)
-                if len(existing) == 1:
-                    return existing[0].id
+                existing = self.objects.find_by_key(obj_props)
+                if existing != None:
+                    return existing.id
 
             return self.objects.add(timestamp, obj_props)
 
