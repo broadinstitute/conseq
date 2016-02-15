@@ -3,26 +3,37 @@
 triple_quoted_string = /"""(?:[^"]|"{1,2}(?!"))+"""/;
 single_quoted_string = /"[^"]*"/ ;
 quoted_string = triple_quoted_string | single_quoted_string ;
+
 identifier = /[A-Za-z_]+[A-Za-z0-9_-]*/ ;
 url = /\S+/ ;
+
 json_value = quoted_string | json_obj ;
 json_name_value_pair = quoted_string ":" json_value ;
 json_obj = "{" json_name_value_pair { "," json_name_value_pair }* "}" ;
+
 query_variable = identifier ;
 query_name_value_pair = quoted_string ":" ( json_value | query_variable )  ;
 query_obj = "{" query_name_value_pair { "," query_name_value_pair }* "}" ;
+
 input_spec = identifier "=" query_obj ;
 input_specs = input_spec { "," input_spec }* ;
+
 output_specs = json_obj { "," json_obj } ;
+
 statement = ( "inputs" ":" input_specs |
   "outputs" ":" output_specs |
   "run" quoted_string [ "with" quoted_string ] |
   "options" ":" identifier { "," identifier }* )  ;
 statements = { statement }+ ;
+
 rule = "rule" identifier ":" statements ;
+
 xref = "xref" url json_obj ;
+
 var_stmt = "let" identifier "=" quoted_string ;
+
 include_stmt = "include" quoted_string ;
+
 declarations =  { rule | xref | include_stmt | var_stmt }+  $ ;
 
 

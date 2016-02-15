@@ -105,10 +105,8 @@ def exec_script(name, id, language, job_dir, run_stmts, outputs):
     with open(wrapper_path, "w") as fd:
         fd.write("cd {job_dir}\n".format(**locals()))
 
-        for command, script_name in run_stmts:
+        for command in run_stmts:
             fd.write(command)
-            if script_name != None:
-                fd.write(" "+os.path.abspath(script_name))
             fd.write(" &&\\\n")
 
         fd.write("true\n")
@@ -148,6 +146,7 @@ class LazyConfig:
         return self._render_template(v)
 
 def render_template(jinja2_env, template_text, config, **kwargs):
+    assert isinstance(template_text, str)
     kwargs = dict(kwargs)
 
     def render_template_callback(text):
@@ -158,36 +157,34 @@ def render_template(jinja2_env, template_text, config, **kwargs):
 
     return render_template_callback(template_text)
 
+
 def execute(name, pull, jinja2_env, id, job_dir, inputs, rule, config):
     language = rule.language
+    outputs = [expand_outputs(jinja2_env, output, config, inputs=inputs) for output in rule.outputs]
     assert isinstance(inputs, dict)
     inputs = dict([(k, localize_filenames(pull, job_dir, v)) for k,v in inputs.items()])
 
     log.info("Executing %s with inputs %s", name, inputs)
 
-    def write_script(filename, script_body):
-        formatted_script_body = render_template(jinja2_env, script_body, config=config, inputs=inputs)
-        formatted_script_body = textwrap.dedent(formatted_script_body)
-
-        script_name = os.path.join(job_dir, "script")
-        with open(script_name, "w") as fd:
-            fd.write(formatted_script_body)
-
-        return script_name
-
-    def mk_scripts_for_stmt(i, command, script_body):
+    run_stmts = []
+    for i, x in enumerate(rule.run_stmts):
+        command, script_body = x
+        command, script_body = expand_run(jinja2_env, command, script_body, config, inputs)
         if script_body != None:
-            script_name = write_script("script_%d"%i, script_body)
-        return (command, script_name)
+            formatted_script_body = textwrap.dedent(script_body)
+            script_name = os.path.join(job_dir, "script_%d"%i)
+            with open(script_name, "w") as fd:
+                fd.write(formatted_script_body)
+            command += " "+script_name
 
-    run_stmts = [mk_scripts_for_stmt(i, x[0], x[1]) for i, x in enumerate(rule.run_stmts)]
+        run_stmts.append(command)
 
     execution = exec_script(name,
                        id,
                        language,
                        job_dir,
                        run_stmts,
-                       rule.outputs)
+                       outputs)
     return execution
 
 class ProcStub:
@@ -216,10 +213,9 @@ def reattach(j, rules):
             j.cancel_execution(e.id)
     return executing
 
-def main_loop(j, new_object_listener, rules, working_dir, executing):
+def main_loop(jinja2_env, j, new_object_listener, rules, working_dir, executing):
     active_job_ids = set([e.id for e in executing])
 
-    jinja2_env = jinja2.Environment(undefined=jinja2.StrictUndefined)
     puller = pull_url.Pull()
     cache = dlcache.open_dl_db(working_dir+"/cache.sqlite3")
 
@@ -292,6 +288,10 @@ class Rules:
     def __init__(self):
         self.rule_by_name = {}
         self.vars = {}
+        self.xrefs = []
+
+    def add_xref(self, xref):
+        self.xrefs.append(xref)
 
     def set_var(self, name, value):
         self.vars[name] = value
@@ -314,6 +314,7 @@ class Rules:
         for name, rule in other.rule_by_name.items():
             self.set_rule(name, rule)
         self.vars.update(other.vars)
+        self.xrefs.extend(other.xrefs)
 
     def __repr__(self):
         return "<Rules vars:{}, rules:{}>".format(self.vars, list(self))
@@ -323,7 +324,7 @@ def read_deps(filename, j):
     p = parser.parse(filename)
     for dec in p:
         if isinstance(dec, parser.XRef):
-            add_xref(j, dec)
+            rules.add_xref(dec)
         elif isinstance(dec, parser.LetStatement):
             rules.set_var(dec.name, dec.value)
         elif isinstance(dec, parser.IncludeStatement):
@@ -350,13 +351,49 @@ def list_cmd(state_dir):
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
     j.dump()
 
+def expand_run(jinja2_env, command, script_body, config, inputs):
+    command = render_template(jinja2_env, command, config)
+    script_body = render_template(jinja2_env, script_body, config, inputs=inputs)
+    return (command, script_body)
 
-def to_template(rule):
+def expand_dict(jinja2_env, d, config, **kwargs):
+    assert isinstance(d, dict)
+    assert isinstance(config, dict)
+
+    new_output = {}
+    for k, v in d.items():
+        k = render_template(jinja2_env, k, config, **kwargs)
+        # QueryVariables get introduced via expand input spec
+        if not isinstance(v, parser.QueryVariable):
+            v = render_template(jinja2_env, v, config, **kwargs)
+        new_output[k] = v
+
+    return new_output
+
+def expand_outputs(jinja2_env, output, config, **kwargs):
+    return expand_dict(jinja2_env, output, config, **kwargs)
+
+def expand_input_spec(jinja2_env, spec, config):
+    return expand_dict(jinja2_env, spec, config)
+    # assert isinstance(config, dict)
+    # return parser.InputSpec(
+    #     render_template(jinja2_env, spec.variable, config),
+    #     expand_dict(jinja2_env, spec.json_obj, config)
+    # )
+
+def expand_xref(jinja2_env, xref, config):
+    return parser.XRef(
+        render_template(jinja2_env, xref.url, config),
+        expand_dict(jinja2_env, xref.obj, config)
+    )
+
+def to_template(jinja2_env, rule, config):
     queries = []
     predicates = []
     pairs_by_var = collections.defaultdict(lambda: [])
     for bound_name, spec in rule.inputs:
         assert bound_name != ""
+        spec = expand_input_spec(jinja2_env, spec, config)
 
         constants = {}
         for prop_name, value in spec.items():
@@ -371,9 +408,12 @@ def to_template(rule):
 
     return dep.Template(queries, predicates, rule.name)
 
-def main(depfile, state_dir, forced_targets):
+def main(depfile, state_dir, forced_targets, override_vars):
+    jinja2_env = jinja2.Environment(undefined=jinja2.StrictUndefined)
+
     if not os.path.exists(state_dir):
         os.makedirs(state_dir)
+
     working_dir = os.path.join(state_dir, "working")
     if not os.path.exists(working_dir):
         os.makedirs(working_dir)
@@ -386,18 +426,23 @@ def main(depfile, state_dir, forced_targets):
 
     rules = read_deps(depfile, j)
 
+    for var, value in override_vars.items():
+        rules.set_var(var, value)
+
+    for xref in rules.xrefs:
+        add_xref(j, expand_xref(jinja2_env, xref, rules.vars))
+
     executing = reattach(j, rules)
 
     for dec in rules:
-        if not (isinstance(dec, parser.Rule)):
-            continue
-        j.add_template(to_template(dec))
+        assert (isinstance(dec, parser.Rule))
+        j.add_template(to_template(jinja2_env, dec, rules.vars))
 
     def new_object_listener(obj):
         timestamp = datetime.datetime.now().isoformat()
         j.add_obj(timestamp, obj)
     try:
-        main_loop(j, new_object_listener, rules, working_dir, executing)
+        main_loop(jinja2_env, j, new_object_listener, rules, working_dir, executing)
     except FatalUserError as e:
         print("Error: {}".format(e))
 

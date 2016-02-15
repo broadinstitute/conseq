@@ -8,7 +8,7 @@ def run_conseq(tmpdir, config, targets=[]):
     filename = str(tmpdir)+"/t.conseq"
     with open(filename, "wt") as fd:
         fd.write(config)
-    depexec.main(filename, state_dir, targets)
+    depexec.main(filename, state_dir, targets, {})
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
     return j
 

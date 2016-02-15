@@ -30,8 +30,10 @@ rule a:
     inputs: a={"type": "number", "value": value}, b={"type": "other", "value": value}
     run "bash"
 """
-
+import jinja2
 def test_parse_constrained_query():
+    jinja2_env = jinja2.Environment(undefined=jinja2.StrictUndefined)
+
     decs = parser.parse_str(constrained_query)
     assert len(decs) == 1
     rule = decs[0]
@@ -41,7 +43,7 @@ def test_parse_constrained_query():
     assert isinstance(a.json_obj["value"], parser.QueryVariable)
     assert isinstance(b.json_obj["value"], parser.QueryVariable)
 
-    template = depexec.to_template(rule)
+    template = depexec.to_template(jinja2_env, rule, {})
     assert template.transform == "a"
     assert len(template.foreach_queries) == 2
     assert len(template.forall_queries) == 0

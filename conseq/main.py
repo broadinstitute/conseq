@@ -6,7 +6,7 @@ def rm(args):
     depexec.rm_cmd(args.dir, args.dry_run, args.json_query, args.with_invalidate)
 
 def run(args):
-    depexec.main(args.file, args.dir, args.targets)
+    depexec.main(args.file, args.dir, args.targets, {})
 
 def dot(args):
     depexec.dot_cmd(args.dir)
