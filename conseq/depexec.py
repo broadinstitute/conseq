@@ -160,7 +160,10 @@ def render_template(jinja2_env, template_text, config, **kwargs):
 
 def execute(name, pull, jinja2_env, id, job_dir, inputs, rule, config):
     language = rule.language
-    outputs = [expand_outputs(jinja2_env, output, config, inputs=inputs) for output in rule.outputs]
+    if rule.outputs == None:
+        outputs = None
+    else:
+        outputs = [expand_outputs(jinja2_env, output, config, inputs=inputs) for output in rule.outputs]
     assert isinstance(inputs, dict)
     inputs = dict([(k, localize_filenames(pull, job_dir, v)) for k,v in inputs.items()])
 
@@ -353,7 +356,8 @@ def list_cmd(state_dir):
 
 def expand_run(jinja2_env, command, script_body, config, inputs):
     command = render_template(jinja2_env, command, config)
-    script_body = render_template(jinja2_env, script_body, config, inputs=inputs)
+    if script_body != None:
+        script_body = render_template(jinja2_env, script_body, config, inputs=inputs)
     return (command, script_body)
 
 def expand_dict(jinja2_env, d, config, **kwargs):

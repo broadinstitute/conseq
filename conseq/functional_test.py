@@ -48,3 +48,14 @@ def test_rule_depending_on_local_xref(tmpdir):
     """)
     assert len(j.find_objs({}))==2
 
+def test_no_results_failure(tmpdir):
+    j = run_conseq(tmpdir, """
+    rule a:
+        run "bash" with "cat /dev/null"
+    """)
+
+def test_nonzero_retcode(tmpdir):
+    j = run_conseq(tmpdir, """
+    rule a:
+        run "bash non-existant-file"
+    """)
