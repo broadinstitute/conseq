@@ -3,6 +3,9 @@ import json
 def Local(name):
     return {"$filename": name}
 
+def Varies(value):
+    return {"$value": value}
+
 def LocalP(name):
     return {"name": name, "filename": Local(name)}
 

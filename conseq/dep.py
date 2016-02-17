@@ -398,9 +398,6 @@ class ForEach:
         assert variable != ""
         self.variable = variable
         self.const_constraints = const_constraints
-#        for k, v in self.const_constraints.items():
-#            assert isinstance(k, str)
-#            assert isinstance(v, str)
     def __repr__(self):
         return "<ForEach {} where {}>".format(self.variable, self.const_constraints)
 
