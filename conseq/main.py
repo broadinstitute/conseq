@@ -1,5 +1,6 @@
 import argparse
 import logging
+import colorlog
 from . import depexec
 
 def rm(args):
@@ -7,6 +8,9 @@ def rm(args):
 
 def run(args):
     depexec.main(args.file, args.dir, args.targets, {})
+
+def debugrun(args):
+    depexec.debugrun(args.dir, args.file, args.target, {})
 
 def dot(args):
     depexec.dot_cmd(args.dir)
@@ -26,6 +30,11 @@ def main(argv):
     run_cmd.add_argument('targets', nargs='*')
     run_cmd.set_defaults(func=run)
 
+    debugrun_cmd = sub.add_parser("debugrun")
+    debugrun_cmd.add_argument('file', metavar="FILE", help="the input file to parse")
+    debugrun_cmd.add_argument('target')
+    debugrun_cmd.set_defaults(func=debugrun)
+
     dot_cmd = sub.add_parser("dot")
     dot_cmd.set_defaults(func=dot)
 
@@ -43,6 +52,14 @@ def main(argv):
         level = logging.DEBUG
     else:
         level = logging.INFO
-    logging.basicConfig(level=level, format='%(asctime)s %(levelname)-4s: %(message)s',)
+
+    root = logging.getLogger()
+    hdlr = logging.StreamHandler(None)
+    hdlr.setFormatter(colorlog.ColoredFormatter('%(log_color)s%(asctime)s %(levelname)s: %(message)s'))
+    root.addHandler(hdlr)
+    root.setLevel(level)
+
+#    logging.basicConfig(level=level, format='%(asctime)s %(levelname)-4s: %(message)s',)
+#    logger = logging.getLogger()
     if args.func != None:
         args.func(args)

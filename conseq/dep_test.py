@@ -1,5 +1,25 @@
 from . import dep
 
+def test_overwrite_obj(tmpdir):
+    jobdb = str(tmpdir.join("db"))
+
+    j = dep.open_job_db(jobdb)
+    id1 = j.add_obj(1, {"A":"a", "mut":{"$value": "1"}})
+    objs = j.find_objs({"A":"a"})
+    assert len(objs) == 1
+    id2 = j.add_obj(2, {"A":"a", "mut":{"$value": "2"}})
+    objs = j.find_objs({"A":"a"})
+    assert len(objs) == 1
+    assert id1 != id2
+
+    id1 = j.add_obj(1, {"B":"b", "mut":{"$filename": "1"}})
+    objs = j.find_objs({"B":"b"})
+    assert len(objs) == 1
+    id2 = j.add_obj(2, {"B":"b", "mut":{"$filename": "2"}})
+    objs = j.find_objs({"B":"b"})
+    assert len(objs) == 1
+    assert id1 != id2
+
 # foreach context where context.type = "context" and context.name exists execute MakeContext yielding (type="context", name exists)
 # foreach avana_lib where avana_lib.type = "crispr_dataset" and avana_lib.library = "Avana" withall gecko_libs where gecko_libs.library = "Gecko"
 

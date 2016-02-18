@@ -54,8 +54,8 @@ def split_props_into_key_and_other(props):
     other_props = {}
 
     for k, v in props.items():
-        if isinstance(v, dict) and "$value" in v:
-            other_props[k] = v["$value"]
+        if isinstance(v, dict) and len(v) == 1 and list(v.keys())[0].startswith("$"):
+            other_props[k] = list(v.values())[0]
         else:
             key_props[k] = v
 
@@ -83,6 +83,9 @@ class Obj:
         #     return self.key_props[prop_name]
         # else:
         #     return self.other_props[prop_name]
+
+    def __getitem__(self, item):
+        return self.get(item)
 
     # @property
     # def props(self):
@@ -127,14 +130,18 @@ class ObjSet:
 
     def add(self, timestamp, props):
         # first check to see if this already exists
-        match = self.find_by_key(props)
+        if self.replace_if_exists:
+            match = self.find_by_key(props)
 
-        if match != None:
-            if match.timestamp == timestamp:
-                return match.id
+            if match != None:
+                if match.timestamp == timestamp:
+                    return match.id
 
-            if self.replace_if_exists:
                 self.remove(match.id)
+        else:
+            match = self.find_identical(props, timestamp)
+            if match != None:
+                return match.id
 
         c = get_cursor()
         c.execute("insert into {} (timestamp, json) values (?, ?)".format(self.table_name), [timestamp, json.dumps(props)])
@@ -146,6 +153,16 @@ class ObjSet:
             add_listener(obj)
 
         return id
+
+    def find_identical(self, props, timestamp):
+        matches = self.find(props)
+        matches = [m for m in matches if m.timestamp == timestamp]
+        if len(matches) > 1:
+            raise Exception("Too many matches: props={}, matches={}".format(props, matches))
+        elif len(matches) == 1:
+            return matches[0]
+        else:
+            return None
 
     def find_by_key(self, props):
         key_props = split_props_into_key_and_other(props)[0]
@@ -373,6 +390,9 @@ class ExecutionLog:
         objs = {}
         #state_color = {WAITING:"gray", READY:"red", STARTED:"blue", FAILED:"green", COMPLETED:"turquoise"}
         for rule in self.get_all():
+            if rule.status == "canceled":
+                continue
+                
             for name, value in rule.inputs:
                 if not isinstance(value, tuple):
                     value = [value]
@@ -496,7 +516,6 @@ class Template:
                 continue
             results.append( (tuple(b.items()), self.transform) )
 
-
         log.debug("Created rules for %s: %s", self.transform, results)
         return results
 
@@ -526,6 +545,10 @@ class Jobs:
     def to_dot(self):
         with transaction(self.db):
             return self.log.to_dot()
+
+    def query_template(self, template):
+        with transaction(self.db):
+            return template.create_rules(self.objects)
 
     def add_template(self, template):
         with transaction(self.db):

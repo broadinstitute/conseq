@@ -48,7 +48,8 @@ class Semantics(object):
         return tuple(ast)
 
     def input_spec(self, ast):
-        return InputSpec(ast[0], ast[2])
+        inspec = InputSpec(ast[0], ast[2])
+        return inspec
 
     def statements(self, ast):
         return ast
@@ -117,7 +118,7 @@ class Semantics(object):
         specs = [ast[0]]
         rest = ast[1]
         for i in range(0,len(rest),2):
-            specs.append(rest[1])
+            specs.append(rest[i+1])
         return specs
 
     def output_specs(self, ast):

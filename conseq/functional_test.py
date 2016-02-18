@@ -54,8 +54,54 @@ def test_no_results_failure(tmpdir):
         run "bash" with "cat /dev/null"
     """)
 
+def test_rerun_multiple_times(tmpdir):
+
+    j = run_conseq(tmpdir, """
+    rule a:
+        outputs: {"finished": "true", "mut":{"$value": "1"}}
+        run "bash -c echo test"
+    """)
+    objs = j.find_objs({})
+    assert len(objs)==1
+    assert objs[0]["mut"] == {"$value" : "1"}
+
+    j = run_conseq(tmpdir, """
+    rule b:
+        outputs: {"finished": "true", "mut":{"$value": "2"}}
+        run "bash -c echo test"
+    """)
+    assert len(objs)==1
+    assert objs[0]["mut"] == {"$value" : "2"}
+
+    j = run_conseq(tmpdir, """
+    rule b:
+        outputs: {"finished": "true", "mut":{"$value": "3"}}
+        run "bash -c echo test"
+    """)
+    assert len(objs)==1
+    assert objs[0]["mut"] == {"$value" : "3"}
+
 def test_nonzero_retcode(tmpdir):
     j = run_conseq(tmpdir, """
     rule a:
         run "bash non-existant-file"
     """)
+
+def test_non_key_values(tmpdir):
+    j = run_conseq(tmpdir, """
+    rule a:
+        outputs: {"finished": "true", "other": {"$value": "apple"}}
+        run "bash" with "echo test"
+    """)
+    assert len(j.find_objs({}))==1
+
+    j = run_conseq(tmpdir, """
+    rule b:
+        inputs: in={"finished": "true"}
+        outputs: {"name": "result", "filename": {"$filename":"stdout.txt"}}
+        run "bash" with "echo {{inputs.in.other}}"
+    """)
+    results = j.find_objs({"name":"result"})
+    assert len(results)==1
+    stdout = open(results[0]["filename"]["$filename"]).read()
+    assert "apple\n" == stdout
