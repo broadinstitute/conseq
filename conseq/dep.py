@@ -392,7 +392,7 @@ class ExecutionLog:
         for rule in self.get_all():
             if rule.status == "canceled":
                 continue
-                
+
             for name, value in rule.inputs:
                 if not isinstance(value, tuple):
                     value = [value]

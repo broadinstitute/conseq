@@ -6,12 +6,9 @@ import os
 import time
 import textwrap
 import logging
-import tempfile
 import collections
 
-from . import dlcache
 from . import dep
-from . import pull_url
 from . import parser
 
 log = logging.getLogger(__name__)
@@ -110,27 +107,6 @@ def exec_script(name, id, language, job_dir, run_stmts, outputs):
     proc = subprocess.Popen(['bash', '-c', bash_cmd])
     return Execution(name, id, job_dir, proc, outputs)
 
-def _localize_filenames(pull, job_dir, props):
-    props_copy = {}
-    for k, v in props.items():
-        if isinstance(v, dict):
-            if "$filename" in v:
-                v = os.path.relpath(v["$filename"], job_dir)
-            elif "$xref_url" in v:
-                url = v["$xref_url"]
-                v = pull(url)
-            elif "$value" in v:
-                v = v["$value"]
-        props_copy[k] = v
-
-    return props_copy
-
-def localize_filenames(pull, job_dir, v):
-    if isinstance(v, dep.Obj):
-        return _localize_filenames(pull, job_dir, v.props)
-    assert isinstance(v, tuple)
-    return [_localize_filenames(pull, job_dir, x.props) for x in v]
-
 class LazyConfig:
     def __init__(self, render_template, config_dict):
         self._config_dict = config_dict
@@ -156,15 +132,47 @@ def render_template(jinja2_env, template_text, config, **kwargs):
 
     return render_template_callback(template_text)
 
+def flatten_parameters(d):
+    pairs = []
+    for k, v in d.items():
+        if isinstance(v, dict) and len(v) == 1 and "$value" in v:
+            v = v["$value"]
+        pairs.append( (k,v) )
+    return dict(pairs)
 
-def execute(name, pull, jinja2_env, id, job_dir, inputs, rule, config):
+def needs_resolution(obj):
+    if not ("$xref_url" in obj):
+        return False
+    for v in obj.values():
+        if isinstance(v, dict) and "$value" in v:
+            return False
+    return True
+
+def preprocess_inputs(j, resolver, inputs):
+    result = {}
+    for bound_name, obj_ in inputs:
+        assert isinstance(obj_, dep.Obj)
+        obj = obj_.props
+        if needs_resolution(obj):
+            extra_params = resolver.resolve(obj["$xref_url"])
+            obj_copy = dict(obj)
+            for k, v in extra_params.items():
+                obj_copy[k] = {"$value": v}
+            timestamp = datetime.datetime.now().isoformat()
+            # persist new version of object with extra properties
+            j.add_obj(timestamp, obj_copy)
+            obj = obj_copy
+        result[bound_name] = flatten_parameters(obj)
+    return result
+
+def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config):
     language = rule.language
     if rule.outputs == None:
         outputs = None
     else:
         outputs = [expand_outputs(jinja2_env, output, config, inputs=inputs) for output in rule.outputs]
     assert isinstance(inputs, dict)
-    inputs = dict([(k, localize_filenames(pull, job_dir, v)) for k,v in inputs.items()])
+    inputs = dict([(k, flatten_parameters(v)) for k,v in inputs.items()])
 
     log.info("Executing %s with inputs %s", name, inputs)
 
@@ -215,29 +223,11 @@ def reattach(j, rules):
             j.cancel_execution(e.id)
     return executing
 
+from . import xref
 def main_loop(jinja2_env, j, new_object_listener, rules, working_dir, executing):
     active_job_ids = set([e.id for e in executing])
 
-    puller = pull_url.Pull()
-    cache = dlcache.open_dl_db(working_dir+"/cache.sqlite3")
-
-    def pull(url):
-        # check to see if url is actual a file we can access.  If so, just return that path
-        if os.path.exists(url):
-            return os.path.abspath(url)
-        elif url.startswith("taiga://"):
-            from . import taiga_pull
-            permaname = url.replace("taiga://", "")
-            dataset_id = taiga_pull.get_id_by_name(rules.vars, permaname)
-            assert dataset_id != None
-            return dataset_id
-        else:
-            dest_filename = cache.get(url)
-            if dest_filename == None:
-                dest_filename = tempfile.NamedTemporaryFile(delete=False, dir=working_dir).name
-                puller.pull(url, dest_filename)
-                cache.put(url, dest_filename)
-            return dest_filename
+    resolver = xref.Resolver(rules.vars)
 
     prev_msg = None
     while True:
@@ -262,7 +252,8 @@ def main_loop(jinja2_env, j, new_object_listener, rules, working_dir, executing)
                 os.makedirs(job_dir)
 
             rule = rules.get_rule(job.transform)
-            e = execute(job.transform, pull, jinja2_env, job.id, job_dir, dict(job.inputs), rule, rules.get_vars())
+            inputs = preprocess_inputs(j, resolver, job.inputs)
+            e = execute(job.transform, resolver, jinja2_env, job.id, job_dir, inputs, rule, rules.get_vars())
             executing.append(e)
             j.update_exec_xref(e.id, "PID:{}".format(e.proc.pid), job_dir)
 
@@ -289,10 +280,7 @@ def main_loop(jinja2_env, j, new_object_listener, rules, working_dir, executing)
 def add_xref(j, xref):
     timestamp = datetime.datetime.now().isoformat()
     d = dict(xref.obj)
-    if xref.url.startswith("taiga://"):
-        d["dataset_id"] = {"$xref_url": xref.url}
-    else:
-        d["filename"] = {"$xref_url": xref.url}
+    d["$xref_url"] = xref.url
     return j.add_obj(timestamp, d, overwrite=False)
 
 class Rules:
@@ -470,6 +458,9 @@ def main(depfile, state_dir, forced_targets, override_vars):
     working_dir = os.path.join(state_dir, "working")
     if not os.path.exists(working_dir):
         os.makedirs(working_dir)
+    dlcache = os.path.join(state_dir, 'dlcache')
+    if not os.path.exists(dlcache):
+        os.makedirs(dlcache)
     db_path = os.path.join(state_dir, "db.sqlite3")
     j = dep.open_job_db(db_path)
 
@@ -481,6 +472,7 @@ def main(depfile, state_dir, forced_targets, override_vars):
 
     for var, value in override_vars.items():
         rules.set_var(var, value)
+    rules.set_var("DL_CACHE_DIR", dlcache)
 
     for xref in rules.xrefs:
         add_xref(j, expand_xref(jinja2_env, xref, rules.vars))
