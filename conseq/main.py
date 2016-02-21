@@ -7,7 +7,7 @@ def rm(args):
     depexec.rm_cmd(args.dir, args.dry_run, args.json_query, args.with_invalidate)
 
 def run(args):
-    depexec.main(args.file, args.dir, args.targets, {})
+    depexec.main(args.file, args.dir, args.targets, {}, args.concurrent)
 
 def debugrun(args):
     depexec.debugrun(args.dir, args.file, args.target, {})
@@ -27,6 +27,7 @@ def main(argv):
 
     run_cmd = sub.add_parser("run")
     run_cmd.add_argument('file', metavar="FILE", help="the input file to parse")
+    run_cmd.add_argument("concurrent", type="int", default=5)
     run_cmd.add_argument('targets', nargs='*')
     run_cmd.set_defaults(func=run)
 

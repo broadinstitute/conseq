@@ -224,7 +224,7 @@ def reattach(j, rules):
     return executing
 
 from . import xref
-def main_loop(jinja2_env, j, new_object_listener, rules, working_dir, executing):
+def main_loop(jinja2_env, j, new_object_listener, rules, working_dir, executing, max_concurrent_executions):
     active_job_ids = set([e.id for e in executing])
 
     resolver = xref.Resolver(rules.vars)
@@ -242,8 +242,15 @@ def main_loop(jinja2_env, j, new_object_listener, rules, working_dir, executing)
         did_useful_work = False
         for job in pending_jobs:
             assert isinstance(job, dep.RulePending)
+
+            # if we've hit our cap on concurrent executions, just bail before spawning anything new
+            if len(executing) >= max_concurrent_executions:
+                break
+
+            # if this job is one we're currently running, just move along
             if job.id in active_job_ids:
                 continue
+
             active_job_ids.add(job.id)
             did_useful_work = True
 
@@ -449,7 +456,7 @@ def create_jinja2_env():
     jinja2_env.filters['quoted'] = quote_str
     return jinja2_env
 
-def main(depfile, state_dir, forced_targets, override_vars):
+def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_executions):
     jinja2_env = create_jinja2_env()
 
     if not os.path.exists(state_dir):
@@ -490,7 +497,7 @@ def main(depfile, state_dir, forced_targets, override_vars):
         timestamp = datetime.datetime.now().isoformat()
         j.add_obj(timestamp, obj)
     try:
-        main_loop(jinja2_env, j, new_object_listener, rules, working_dir, executing)
+        main_loop(jinja2_env, j, new_object_listener, rules, working_dir, executing, max_concurrent_executions)
     except FatalUserError as e:
         print("Error: {}".format(e))
 
