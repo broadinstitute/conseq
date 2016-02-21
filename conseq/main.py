@@ -27,7 +27,7 @@ def main(argv):
 
     run_cmd = sub.add_parser("run")
     run_cmd.add_argument('file', metavar="FILE", help="the input file to parse")
-    run_cmd.add_argument("concurrent", type="int", default=5)
+    run_cmd.add_argument("--concurrent", type=int, default=5)
     run_cmd.add_argument('targets', nargs='*')
     run_cmd.set_defaults(func=run)
 
