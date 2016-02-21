@@ -275,6 +275,7 @@ def main_loop(jinja2_env, j, new_object_listener, rules, working_dir, executing,
 
             if failure != None:
                 log.error("Transform %s failed (job_dir=%s): %s", e.transform, e.job_dir, failure)
+                log_job_output(e.job_dir)
                 j.record_completed(timestamp, e.id, dep.STATUS_FAILED, {})
             elif completion != None:
                 j.record_completed(timestamp, e.id, dep.STATUS_COMPLETED, completion)
@@ -283,6 +284,25 @@ def main_loop(jinja2_env, j, new_object_listener, rules, working_dir, executing,
         
         if not did_useful_work:
             time.sleep(0.5)
+
+def _tail_file(filename, line_count=20):
+    with open(filename, "rt") as fd:
+        fd.seek(0, 2)
+        file_len = fd.tell()
+        # read at most, the last 100k of the file
+        fd.seek(max(0, file_len-100000), 0)
+        lines = fd.read().split("\n")
+        for line in lines[-line_count:]:
+            print(line)
+
+def log_job_output(job_dir, line_count=20):
+    stdout_path = os.path.relpath(os.path.join(job_dir, "stdout.txt"))
+    stderr_path = os.path.relpath(os.path.join(job_dir, "stderr.txt"))
+    log.error("Dumping last {} lines of {}".format(line_count, stdout_path))
+    _tail_file(stdout_path)
+    log.error("Dumping last {} lines of {}".format(line_count, stderr_path))
+    _tail_file(stderr_path)
+
 
 def add_xref(j, xref):
     timestamp = datetime.datetime.now().isoformat()
