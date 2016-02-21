@@ -65,19 +65,23 @@ def test_rerun_multiple_times(tmpdir):
     assert len(objs)==1
     assert objs[0]["mut"] == {"$value" : "1"}
 
+    # this should result in the object being overwritten because its from a different rule
     j = run_conseq(tmpdir, """
     rule b:
         outputs: {"finished": "true", "mut":{"$value": "2"}}
         run "bash -c echo test"
     """)
+    objs = j.find_objs({})
     assert len(objs)==1
     assert objs[0]["mut"] == {"$value" : "2"}
 
+    # this should result in the object being overwritten because we forced the rule to execute
     j = run_conseq(tmpdir, """
     rule b:
         outputs: {"finished": "true", "mut":{"$value": "3"}}
         run "bash -c echo test"
-    """)
+    """, targets=["b"])
+    objs = j.find_objs({})
     assert len(objs)==1
     assert objs[0]["mut"] == {"$value" : "3"}
 

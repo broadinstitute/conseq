@@ -464,9 +464,12 @@ def main(depfile, state_dir, forced_targets, override_vars):
     db_path = os.path.join(state_dir, "db.sqlite3")
     j = dep.open_job_db(db_path)
 
-    for target in forced_targets:
-        count = j.invalidate_rule_execution(target)
-        log.info("Cleared %d old executions of %s", count, target)
+    # handle case where we explicitly state some templates to execute.  Make sure nothing else executes
+    if len(forced_targets) > 0:
+        j.limitStartToTemplates(forced_targets)
+        for target in forced_targets:
+            count = j.invalidate_rule_execution(target)
+            log.info("Cleared %d old executions of %s", count, target)
 
     rules = read_deps(depfile)
 

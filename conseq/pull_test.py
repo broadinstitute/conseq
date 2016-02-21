@@ -1,4 +1,4 @@
-from . import pull_url
+from . import xref
 import pytest
 
 at_broad = False
@@ -7,6 +7,6 @@ at_broad = False
 def test_pull(tmpdir):
     dest = str(tmpdir.join("dest"))
 
-    p = pull_url.Pull()
+    p = xref.Pull()
     p.pull("ssh://gold.broadinstitute.org/xchip/datasci/pmontgom/testfile", dest)
     assert open(dest).read() == "sample\n"

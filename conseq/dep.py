@@ -519,6 +519,27 @@ class Template:
         log.debug("Created rules for %s: %s", self.transform, results)
         return results
 
+class RuleAndDerivativesFilter:
+    def __init__(self, templateNames):
+        self.templateNames = templateNames
+        self.new_object_ids = set()
+
+    def add_object(self, obj):
+        self.new_object_ids.add(obj.id)
+
+    def rule_allowed(self, inputs, transform):
+        print("rule_allowed", inputs)
+        # if we are executing a rule we've explictly whitelisted
+        if transform in self.templateNames:
+            return True
+        # or we are executing a rule which uses an object that was created since this
+        # process started (implying it must have come from a whitelisted rule) then
+        # let this rule get created
+        for name, obj in inputs:
+            if obj.id in self.new_object_ids:
+                return True
+        # All others should be dropped
+        return False
 
 class Jobs:
     """
@@ -529,10 +550,16 @@ class Jobs:
         self.rule_set = RuleSet()
         self.rule_templates = []
         self.objects = ObjSet("cur_obj", True)
-        self.objects.add_listeners.append(self._object_added)
+        self.add_new_obj_listener(self._object_added)
         self.log = ExecutionLog(ObjSet("past_obj", False))
         self.rule_set.add_rule_listeners.append(self.log.add_execution)
         self.rule_set.remove_rule_listeners.append(self.log.cancel_execution)
+        self.rule_allowed = lambda inputs, transform: True
+
+    def limitStartToTemplates(self, templateNames):
+        filter = RuleAndDerivativesFilter(templateNames)
+        self.rule_allowed = filter.rule_allowed
+        self.add_new_obj_listener(filter.add_object)
 
     def _object_added(self, obj):
         new_rules = []
@@ -540,7 +567,15 @@ class Jobs:
             new_rules.extend(template.create_rules(self.objects))
 
         for rule in new_rules:
+            self._add_rule(rule)
+
+    def _add_rule(self, rule):
+        inputs, transform = rule
+        if self.rule_allowed(inputs, transform):
             self.rule_set.add_rule(*rule)
+
+    def add_new_obj_listener(self, listener):
+        self.objects.add_listeners.append(listener)
 
     def to_dot(self):
         with transaction(self.db):
@@ -555,7 +590,7 @@ class Jobs:
             self.rule_templates.append(template)
             new_rules = template.create_rules(self.objects)
             for rule in new_rules:
-                self.rule_set.add_rule(*rule)
+                self._add_rule(rule)
 
     def add_obj(self, timestamp, obj_props, overwrite=True):
         """
