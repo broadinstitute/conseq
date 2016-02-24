@@ -65,7 +65,7 @@ class Resolver:
 
     def resolve(self, url):
         if os.path.exists(url):
-            return dict(filename=url)
+            return dict(filename=os.path.abspath(url))
         elif url.startswith("taiga://"):
             from . import taiga_pull
             permaname = url.replace("taiga://", "")

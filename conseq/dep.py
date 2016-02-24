@@ -241,6 +241,11 @@ class RuleSet:
         flattened_inputs.sort()
         return repr((tuple(flattened_inputs), transform))
 
+    def find_by_input(self, input_id):
+        c = get_cursor()
+        c.execute("select rule_id from rule_input where obj_id = ?", [input_id])
+        return [x[0] for x in c.fetchall()]
+
     def add_rule(self, inputs, transform):
         # first check to make sure rule isn't duplicated
         key = self._mk_rule_natural_key(inputs, transform)
@@ -442,7 +447,7 @@ class PropsMatch:
     def __repr__(self):
         return "<PropsMatch pairs={}>".format(self.pairs)
 
-    def satisfied(self, bindings):
+    def satisified(self, bindings):
         first = True
         prev_value = None
         for name, prop in self.pairs:
@@ -551,6 +556,7 @@ class Jobs:
         self.rule_templates = []
         self.objects = ObjSet("cur_obj", True)
         self.add_new_obj_listener(self._object_added)
+        self.objects.remove_listeners.append(self._object_removed)
         self.log = ExecutionLog(ObjSet("past_obj", False))
         self.rule_set.add_rule_listeners.append(self.log.add_execution)
         self.rule_set.remove_rule_listeners.append(self.log.cancel_execution)
@@ -560,6 +566,17 @@ class Jobs:
         filter = RuleAndDerivativesFilter(templateNames)
         self.rule_allowed = filter.rule_allowed
         self.add_new_obj_listener(filter.add_object)
+
+    def _object_removed(self, obj):
+        for rule_id in self.rule_set.find_by_input(obj):
+            self.rule_set.remove_rule(rule_id)
+        # forall might result in rules being recreated even without this input
+        new_rules = []
+        for template in self.rule_templates:
+            new_rules.extend(template.create_rules(self.objects))
+
+        for rule in new_rules:
+            self._add_rule(rule)
 
     def _object_added(self, obj):
         new_rules = []
@@ -623,6 +640,10 @@ class Jobs:
     def get_pending(self):
         with transaction(self.db):
             return self.log.get_pending()
+
+    def get_all_executions(self):
+        with transaction(self.db):
+            return self.log.get_all()
 
     def record_completed(self, timestamp, execution_id, new_status, outputs):
         with transaction(self.db):

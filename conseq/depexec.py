@@ -137,6 +137,8 @@ def flatten_parameters(d):
     for k, v in d.items():
         if isinstance(v, dict) and len(v) == 1 and "$value" in v:
             v = v["$value"]
+        elif isinstance(v, dict) and len(v) == 1 and "$filename" in v:
+            v = os.path.abspath(v["$filename"])
         pairs.append( (k,v) )
     return dict(pairs)
 
@@ -149,6 +151,7 @@ def needs_resolution(obj):
     return True
 
 def preprocess_inputs(j, resolver, inputs):
+    xrefs_resolved = False
     result = {}
     for bound_name, obj_ in inputs:
         assert isinstance(obj_, dep.Obj)
@@ -161,9 +164,10 @@ def preprocess_inputs(j, resolver, inputs):
             timestamp = datetime.datetime.now().isoformat()
             # persist new version of object with extra properties
             j.add_obj(timestamp, obj_copy)
+            xrefs_resolved = True
             obj = obj_copy
         result[bound_name] = flatten_parameters(obj)
-    return result
+    return result, xrefs_resolved
 
 def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config):
     language = rule.language
@@ -259,7 +263,10 @@ def main_loop(jinja2_env, j, new_object_listener, rules, working_dir, executing,
                 os.makedirs(job_dir)
 
             rule = rules.get_rule(job.transform)
-            inputs = preprocess_inputs(j, resolver, job.inputs)
+            inputs, xrefs_resolved = preprocess_inputs(j, resolver, job.inputs)
+            if xrefs_resolved:
+                log.info("Resolved xrefs on rule, new version will be executed next pass")
+                continue
             e = execute(job.transform, resolver, jinja2_env, job.id, job_dir, inputs, rule, rules.get_vars())
             executing.append(e)
             j.update_exec_xref(e.id, "PID:{}".format(e.proc.pid), job_dir)
