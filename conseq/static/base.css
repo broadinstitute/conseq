@@ -1,0 +1,27 @@
+.altlabel {
+  background-color: #777;
+  padding: .2em 0.3em .4em 0.9em;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+  text-align: right;
+  white-space: nowrap;
+  vertical-align: baseline;
+  border-radius: 2em;
+  margin: 0.2em 0em;
+  width: 200px;
+}
+
+.altbadge {
+    cursor: pointer;
+    vertical-align: baseline;
+    top: 0.12em;
+    background: white;
+    color: #777;
+    border: solid 0.2em white;
+    border-radius: 10em;
+  }
+
+.altbadge:hover {
+    color: red;
+}

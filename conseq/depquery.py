@@ -7,6 +7,13 @@ def count_unique_values_per_property(instances):
     for x in instances:
         assert isinstance(x, dict)
         for k, v in x.items():
+            if isinstance(v, dict):
+                if "$value" in v:
+                    v = v["$value"]
+                elif "$filename" in v:
+                    v = v["$filename"]
+                else:
+                    raise Exception("key: {} had dict: {}".format(k, v))
             per_prop[k].add(v)
     return [ (property, len(values)) for property, values in per_prop.items() ]
 
