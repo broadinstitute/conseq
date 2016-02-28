@@ -167,5 +167,5 @@ def test_stuff(tmpdir):
     for pending in j.get_pending():
         execute(pending.id, pending.transform, pending.inputs)
 
-    print(j.to_dot())
+    print(j.to_dot(True))
     #assert False
