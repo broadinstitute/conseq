@@ -60,3 +60,19 @@ def test_parse_vars():
     assignment = decs[0]
     assert assignment.name == "a"
     assert assignment.value == "x"
+
+rule_with_forall = """
+rule create_numbers:
+    inputs: a=all {"type": "box"}, b={"name": "shoe"}
+    run "command"
+"""
+
+def test_forall_query():
+    decs = parser.parse_str(rule_with_forall)
+    assert len(decs) == 1
+    rule = decs[0]
+    assert len(rule.inputs) == 2
+    assert rule.inputs[0].variable == "a"
+    assert rule.inputs[0].for_all
+    assert rule.inputs[1].variable == "b"
+    assert not rule.inputs[1].for_all

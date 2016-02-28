@@ -30,7 +30,7 @@ class Rule:
     def __repr__(self):
         return "<Rule {} inputs={} options={}>".format(self.name, self.inputs, self.options)
 
-InputSpec = namedtuple("InputSpec", ["variable", "json_obj"])
+InputSpec = namedtuple("InputSpec", ["variable", "json_obj", "for_all"])
 IncludeStatement = namedtuple("IncludeStatement", ["filename"])
 LetStatement = namedtuple("LetStatement", ["name", "value"])
 
@@ -47,8 +47,12 @@ class Semantics(object):
     def statement(self, ast):
         return tuple(ast)
 
-    def input_spec(self, ast):
-        inspec = InputSpec(ast[0], ast[2])
+    def input_spec_each(self, ast):
+        inspec = InputSpec(ast[0], ast[2], False)
+        return inspec
+
+    def input_spec_all(self, ast):
+        inspec = InputSpec(ast[0], ast[3], True)
         return inspec
 
     def statements(self, ast):

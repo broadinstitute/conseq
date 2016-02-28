@@ -17,7 +17,7 @@ from grako.parsing import graken, Parser
 from grako.util import re, RE_FLAGS  # noqa
 
 
-__version__ = (2016, 2, 14, 4, 45, 29, 6)
+__version__ = (2016, 2, 26, 15, 48, 12, 4)
 
 __all__ = [
     'depfileParser',
@@ -124,10 +124,26 @@ class depfileParser(Parser):
         self._token('}')
 
     @graken()
-    def _input_spec_(self):
+    def _input_spec_each_(self):
         self._identifier_()
         self._token('=')
         self._query_obj_()
+
+    @graken()
+    def _input_spec_all_(self):
+        self._identifier_()
+        self._token('=')
+        self._token('all')
+        self._query_obj_()
+
+    @graken()
+    def _input_spec_(self):
+        with self._choice():
+            with self._option():
+                self._input_spec_each_()
+            with self._option():
+                self._input_spec_all_()
+            self._error('no available options')
 
     @graken()
     def _input_specs_(self):
@@ -259,6 +275,12 @@ class depfileSemantics(object):
         return ast
 
     def query_obj(self, ast):
+        return ast
+
+    def input_spec_each(self, ast):
+        return ast
+
+    def input_spec_all(self, ast):
         return ast
 
     def input_spec(self, ast):

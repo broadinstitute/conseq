@@ -387,7 +387,7 @@ class ExecutionLog:
             obj_id = self._make_copy_get_id(x)
             c.execute("insert into execution_output (execution_id, obj_id) values (?, ?)", [execution_id, obj_id])
 
-    def to_dot(self):
+    def to_dot(self, detailed):
         """
         :return: a graphviz graph in dot syntax of all objects and rules created
         """
@@ -414,7 +414,11 @@ class ExecutionLog:
             stmts.append("r{} [shape=box, label=\"{}\", style=\"filled\" fillcolor=\"{}\"]".format(rule.id, rule.transform, color))
 
         for obj in objs.values():
-            label = "\\n".join([ "{}: {}".format(k, v) for k,v in obj.props.items() ])
+            prop_values = []
+            for k,v in obj.props.items():
+                if not isinstance(v, dict) or detailed:
+                    prop_values.append("{}: {}".format(k, v))
+            label = "\\n".join(prop_values)
             stmts.append("o{} [label=\"{}\"]".format(obj.id, label))
         return "digraph { " + (";\n".join(stmts)) + " } "
 
@@ -447,7 +451,7 @@ class PropsMatch:
     def __repr__(self):
         return "<PropsMatch pairs={}>".format(self.pairs)
 
-    def satisified(self, bindings):
+    def satisfied(self, bindings):
         first = True
         prev_value = None
         for name, prop in self.pairs:
@@ -476,7 +480,7 @@ class Template:
 
     def _predicate_satisifed(self, bindings):
         for p in self.predicates:
-            if not p.satisified(bindings):
+            if not p.satisfied(bindings):
                 return False
         return True
 
@@ -594,9 +598,9 @@ class Jobs:
     def add_new_obj_listener(self, listener):
         self.objects.add_listeners.append(listener)
 
-    def to_dot(self):
+    def to_dot(self, detailed):
         with transaction(self.db):
-            return self.log.to_dot()
+            return self.log.to_dot(detailed)
 
     def query_template(self, template):
         with transaction(self.db):
@@ -659,7 +663,6 @@ class Jobs:
     def update_exec_xref(self, exec_id, xref, job_dir):
         with transaction(self.db):
             self.log.update_exec_xref(exec_id, xref, job_dir)
-
 
     def cancel_execution(self, exec_id):
         with transaction(self.db):

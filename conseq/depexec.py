@@ -151,9 +151,9 @@ def needs_resolution(obj):
     return True
 
 def preprocess_inputs(j, resolver, inputs):
-    xrefs_resolved = False
-    result = {}
-    for bound_name, obj_ in inputs:
+    xrefs_resolved = [False]
+
+    def resolve(obj_):
         assert isinstance(obj_, dep.Obj)
         obj = obj_.props
         if needs_resolution(obj):
@@ -164,10 +164,20 @@ def preprocess_inputs(j, resolver, inputs):
             timestamp = datetime.datetime.now().isoformat()
             # persist new version of object with extra properties
             j.add_obj(timestamp, obj_copy)
-            xrefs_resolved = True
+            xrefs_resolved[0] = True
             obj = obj_copy
-        result[bound_name] = flatten_parameters(obj)
-    return result, xrefs_resolved
+        assert isinstance(obj, dict)
+        return flatten_parameters(obj)
+
+    result = {}
+    for bound_name, obj_or_list in inputs:
+        if isinstance(obj_or_list, list) or isinstance(obj_or_list, tuple):
+            list_ = obj_or_list
+            result[bound_name] = [resolve(obj_) for obj_ in list_]
+        else:
+            obj_ = obj_or_list
+            result[bound_name] = resolve(obj_)
+    return result, xrefs_resolved[0]
 
 def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config):
     language = rule.language
@@ -176,7 +186,7 @@ def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config):
     else:
         outputs = [expand_outputs(jinja2_env, output, config, inputs=inputs) for output in rule.outputs]
     assert isinstance(inputs, dict)
-    inputs = dict([(k, flatten_parameters(v)) for k,v in inputs.items()])
+    #inputs = dict([(k, flatten_parameters(v)) for k,v in inputs.items()])
 
     log.info("Executing %s with inputs %s", name, inputs)
 
@@ -376,9 +386,9 @@ def rm_cmd(state_dir, dry_run, json_query, with_invalidate):
         if not dry_run:
             j.remove_obj(o.id, with_invalidate)
 
-def dot_cmd(state_dir):
+def dot_cmd(state_dir, detailed):
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
-    print(j.to_dot())
+    print(j.to_dot(detailed))
 
 def list_cmd(state_dir):
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
@@ -450,7 +460,7 @@ def convert_input_spec_to_queries(jinja2_env, rule, config):
     queries = []
     predicates = []
     pairs_by_var = collections.defaultdict(lambda: [])
-    for bound_name, spec in rule.inputs:
+    for bound_name, spec, for_all in rule.inputs:
         assert bound_name != ""
         spec = expand_input_spec(jinja2_env, spec, config)
 
@@ -460,7 +470,12 @@ def convert_input_spec_to_queries(jinja2_env, rule, config):
                 pairs_by_var[value.name].append( (bound_name, prop_name) )
             else:
                 constants[prop_name] = value
-        queries.append(dep.ForEach(bound_name, constants))
+        if for_all:
+            q = dep.ForAll(bound_name, constants)
+        else:
+            q = dep.ForEach(bound_name, constants)
+
+        queries.append(q)
 
     for var, pairs in pairs_by_var.items():
         predicates.append(dep.PropsMatch(pairs))

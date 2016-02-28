@@ -13,7 +13,7 @@ def debugrun(args):
     depexec.debugrun(args.dir, args.file, args.target, {})
 
 def dot(args):
-    depexec.dot_cmd(args.dir)
+    depexec.dot_cmd(args.dir, args.detailed)
 
 def _list(args):
     depexec.list_cmd(args.dir)
@@ -37,6 +37,7 @@ def main(argv):
     debugrun_cmd.set_defaults(func=debugrun)
 
     dot_cmd = sub.add_parser("dot")
+    dot_cmd.add_argument("--detailed", action="store_true")
     dot_cmd.set_defaults(func=dot)
 
     list_cmd = sub.add_parser("list")
