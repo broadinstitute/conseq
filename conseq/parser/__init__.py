@@ -1,5 +1,6 @@
 from collections import namedtuple
 from . import depfile
+import re
 
 QueryVariable = namedtuple("QueryVariable", ["name"])
 RunStmt = namedtuple("RunStmt", ["command", "script"])
@@ -69,7 +70,10 @@ class Semantics(object):
         return dict(pairs)
 
     def query_name_value_pair(self, ast):
-        return (ast[0], ast[2])
+        if ast[1] == "~":
+            return (ast[0], re.compile(ast[2]))
+        else:
+            return (ast[0], ast[2])
 
     def query_obj(self, ast):
         pairs = [ast[1]]

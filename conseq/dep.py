@@ -3,13 +3,9 @@ import sqlite3
 import os
 import collections
 import logging
+import re
 
 log = logging.getLogger(__name__)
-
-class Wildcard:
-    pass
-
-WILDCARD = Wildcard()
 
 class InstanceTemplate:
     def __init__(self, props):
@@ -17,6 +13,7 @@ class InstanceTemplate:
 
 STATUS_UNKNOWN = "unknown"
 STATUS_READY = "ready"
+STATUS_DEFERRED = "deferred"
 STATUS_CANCELED = "canceled"
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
@@ -285,8 +282,6 @@ class RulePending:
         self.exec_xref = exec_xref
         self.job_dir = job_dir
 
-        assert self.job_dir != "ready"
-
     def __repr__(self):
         return "<Rule id:{} rule_id:{} inputs:{} outputs:{} transform:{} status:{} exec_xref:{}>".format(self.id, self.rule_id, self.inputs, self.outputs, self.transform, self.status, self.exec_xref)
 
@@ -294,6 +289,10 @@ class RulePending:
 class ExecutionLog:
     def __init__(self, obj_history):
         self.obj_history = obj_history
+
+    def enable_deferred(self):
+        c = get_cursor()
+        c.execute("update execution set status = ? where status = ?", [STATUS_READY, STATUS_DEFERRED])
 
     def cancel_execution(self, rule_id=None, exec_id=None):
         assert rule_id != None or exec_id != None
@@ -307,8 +306,15 @@ class ExecutionLog:
         return self.obj_history.add(x.timestamp, x.props)
 
     def add_execution(self, rule):
+        status = STATUS_READY
+
+        # look at the inputs, if any obj is a list (not a Obj), that implies this was a "forall" and we want to mark this as deferred
+        for name, objs in rule.inputs:
+            if not isinstance(objs, Obj):
+                status = STATUS_DEFERRED
+
         c = get_cursor()
-        c.execute("insert into execution (rule_id, transform, status) values (?, ?, ?)", [rule.id, rule.transform, STATUS_READY])
+        c.execute("insert into execution (rule_id, transform, status) values (?, ?, ?)", [rule.id, rule.transform, status])
         exec_id = c.lastrowid
         for name, objs in rule.inputs:
             is_list = True
@@ -387,6 +393,30 @@ class ExecutionLog:
             obj_id = self._make_copy_get_id(x)
             c.execute("insert into execution_output (execution_id, obj_id) values (?, ?)", [execution_id, obj_id])
 
+    def find_all_reachable_objs(self, root_obj_ids, inputs_for_obj):
+        objs_to_explore = [root_obj_ids]
+        objs_reached = set()
+
+        while len(objs_to_explore) > 0:
+            obj_id = objs_to_explore[-1]
+            del objs_to_explore[-1]
+
+            objs_reached.add(obj_id)
+
+            input_obj_ids = inputs_for_obj[obj_id]
+            for input_obj_id in input_obj_ids:
+                if input_obj_id in objs_reached:
+                    continue
+                objs_to_explore.append(input_obj_id)
+
+    def compute_inputs_for_obj_map(self):
+        inputs_for_obj = {}
+        for rule in self.get_all():
+            obj_ids = [x.obj_id for x in rule.inputs]
+            for output in rule.outputs:
+                inputs_for_obj[output.id] = obj_ids
+
+
     def to_dot(self, detailed):
         """
         :return: a graphviz graph in dot syntax of all objects and rules created
@@ -443,6 +473,15 @@ class PropEqualsConstant:
 
     def satisfied(self, bindings):
         return bindings[self.variable][self.property] == self.constant
+
+class PropMatchesRegexp:
+    def __init__(self, variable, property, regexp):
+        self.variable = variable
+        self.property = property
+        self.regexp = re.compile(regexp)
+
+    def satisfied(self, bindings):
+        return self.regexp.match(bindings[self.variable][self.property]) != None
 
 class PropsMatch:
     def __init__(self, pairs):
@@ -537,16 +576,20 @@ class RuleAndDerivativesFilter:
         self.new_object_ids.add(obj.id)
 
     def rule_allowed(self, inputs, transform):
-        print("rule_allowed", inputs)
         # if we are executing a rule we've explictly whitelisted
         if transform in self.templateNames:
             return True
         # or we are executing a rule which uses an object that was created since this
         # process started (implying it must have come from a whitelisted rule) then
         # let this rule get created
-        for name, obj in inputs:
-            if obj.id in self.new_object_ids:
-                return True
+        for name, _obj in inputs:
+            if isinstance(_obj, Obj):
+                objs = [_obj]
+            else:
+                objs = _obj
+            for obj in objs:
+                if obj.id in self.new_object_ids:
+                    return True
         # All others should be dropped
         return False
 
@@ -574,6 +617,7 @@ class Jobs:
     def _object_removed(self, obj):
         for rule_id in self.rule_set.find_by_input(obj):
             self.rule_set.remove_rule(rule_id)
+
         # forall might result in rules being recreated even without this input
         new_rules = []
         for template in self.rule_templates:
@@ -648,6 +692,10 @@ class Jobs:
     def get_all_executions(self):
         with transaction(self.db):
             return self.log.get_all()
+
+    def enable_deferred(self):
+        with transaction(self.db):
+            return self.log.enable_deferred()
 
     def record_completed(self, timestamp, execution_id, new_status, outputs):
         with transaction(self.db):

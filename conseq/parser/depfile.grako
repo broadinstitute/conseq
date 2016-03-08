@@ -12,7 +12,8 @@ json_name_value_pair = quoted_string ":" json_value ;
 json_obj = "{" json_name_value_pair { "," json_name_value_pair }* "}" ;
 
 query_variable = identifier ;
-query_name_value_pair = quoted_string ":" ( json_value | query_variable )  ;
+query_name_value_pair = quoted_string ":" ( json_value | query_variable ) |
+    quoted_string "~" quoted_string ;
 query_obj = "{" query_name_value_pair { "," query_name_value_pair }* "}" ;
 
 input_spec_each = identifier "=" query_obj ;

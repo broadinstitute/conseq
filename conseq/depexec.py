@@ -20,19 +20,24 @@ class JobFailedError(FatalUserError):
     pass
 
 class Execution:
-    def __init__(self, transform, id, job_dir, proc, outputs):
+    def __init__(self, transform, id, job_dir, proc, outputs, captured_stdouts, desc_name):
         self.transform = transform
         self.id = id
         self.proc = proc
         self.job_dir = job_dir
         self.outputs = outputs
+        self.captured_stdouts = captured_stdouts
+        self.desc_name = desc_name
         assert job_dir != None
 
     def _resolve_filenames(self, props):
         props_copy = {}
         for k, v in props.items():
             if isinstance(v, dict) and "$filename" in v:
-                v = {"$filename": self.job_dir + "/" + v["$filename"]}
+                full_filename = os.path.join(self.job_dir, v["$filename"])
+                if not os.path.exists(full_filename):
+                    raise Exception("Attempted to publish results which referenced file that did not exist: {}".format(full_filename))
+                v = {"$filename": full_filename}
             props_copy[k] = v
         return props_copy
 
@@ -71,7 +76,7 @@ class Execution:
         outputs = [self._resolve_filenames(o) for o in results['outputs']]
         return None, outputs
 
-def exec_script(name, id, language, job_dir, run_stmts, outputs):
+def exec_script(name, id, language, job_dir, run_stmts, outputs, capture_output, prologue, desc_name):
     stdout_path = os.path.join(job_dir, "stdout.txt")
     stderr_path = os.path.join(job_dir, "stderr.txt")
     # results_path = os.path.join(job_dir, "results.json")
@@ -80,20 +85,13 @@ def exec_script(name, id, language, job_dir, run_stmts, outputs):
     stderr_path = os.path.abspath(stderr_path)
     retcode_path = os.path.abspath(os.path.join(job_dir, "retcode.txt"))
 
-    env = os.environ.copy()
-    new_env = {}
-    if ("PYTHONPATH" in env):
-        new_env['PYTHONPATH'] = env['PYTHONPATH'] + ":" + os.path.abspath(".")
-    else:
-        new_env['PYTHONPATH'] = os.path.abspath(".")
 
     wrapper_path = os.path.join(job_dir, "wrapper.sh")
     with open(wrapper_path, "w") as fd:
+        fd.write("set -ex\n")
         fd.write("cd {job_dir}\n".format(**locals()))
 
-        # write changes to the environment to the wrapper script so that we can just re-run script outside of conseq to debug
-        for env_var, value in new_env.items():
-            fd.write("export {}={}\n".format(env_var, json.dumps(value)))
+        fd.write(prologue+"\n")
 
         for command in run_stmts:
             fd.write(command)
@@ -102,10 +100,21 @@ def exec_script(name, id, language, job_dir, run_stmts, outputs):
         fd.write("true\n")
         fd.write("echo $? > {retcode_path}\n".format(**locals()))
 
-    bash_cmd = "exec bash {wrapper_path} > {stdout_path} 2> {stderr_path}".format(**locals())
+    if capture_output:
+        bash_cmd = "exec bash {wrapper_path} > {stdout_path} 2> {stderr_path}".format(**locals())
+        captured_stdouts = (stdout_path, stderr_path)
+    else:
+        bash_cmd = "exec bash {wrapper_path}".format(**locals())
+        captured_stdouts = None
+
+    log.info("Starting task in %s", job_dir)
     log.debug("executing: %s", bash_cmd)
     proc = subprocess.Popen(['bash', '-c', bash_cmd])
-    return Execution(name, id, job_dir, proc, outputs)
+
+    with open(os.path.join(job_dir, "description.txt"), "w") as fd:
+        fd.write(desc_name)
+
+    return Execution(name, id, job_dir, proc, outputs, captured_stdouts, desc_name)
 
 class LazyConfig:
     def __init__(self, render_template, config_dict):
@@ -179,7 +188,9 @@ def preprocess_inputs(j, resolver, inputs):
             result[bound_name] = resolve(obj_)
     return result, xrefs_resolved[0]
 
-def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config):
+def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, capture_output):
+    prologue = render_template(jinja2_env, config["PROLOGUE"], config)
+
     language = rule.language
     if rule.outputs == None:
         outputs = None
@@ -188,7 +199,8 @@ def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config):
     assert isinstance(inputs, dict)
     #inputs = dict([(k, flatten_parameters(v)) for k,v in inputs.items()])
 
-    log.info("Executing %s with inputs %s", name, inputs)
+    log.info("Executing %s in %s with inputs %s", name, job_dir, inputs)
+    desc_name = "{} with inputs {} ({})".format(name, inputs, job_dir)
 
     run_stmts = []
     for i, x in enumerate(rule.run_stmts):
@@ -208,7 +220,7 @@ def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config):
                        language,
                        job_dir,
                        run_stmts,
-                       outputs)
+                       outputs, capture_output, prologue, desc_name)
     return execution
 
 class ProcStub:
@@ -229,7 +241,13 @@ def reattach(j, rules):
     for e in pending_jobs:
         if e.exec_xref != None:
             rule = rules.get_rule(e.transform)
-            ee = Execution(e.transform, e.id, e.job_dir, ProcStub(e.exec_xref), rule.outputs)
+
+            stdout_path = os.path.join(e.job_dir, "stdout.txt")
+            stderr_path = os.path.join(e.job_dir, "stderr.txt")
+            with open(os.path.join(e.job_dir, "description.txt")) as fd:
+                desc_name = fd.read()
+
+            ee = Execution(e.transform, e.id, e.job_dir, ProcStub(e.exec_xref), rule.outputs, (stdout_path, stderr_path), desc_name)
             executing.append(ee)
             log.warn("Reattaching existing job {}: {}".format(e.transform, e.exec_xref))
         else:
@@ -238,19 +256,26 @@ def reattach(j, rules):
     return executing
 
 from . import xref
-def main_loop(jinja2_env, j, new_object_listener, rules, working_dir, executing, max_concurrent_executions):
+def main_loop(jinja2_env, j, new_object_listener, rules, working_dir, executing, max_concurrent_executions, capture_output, req_confirm):
     active_job_ids = set([e.id for e in executing])
 
     resolver = xref.Resolver(rules.vars)
 
     prev_msg = None
-    while True:
+    abort = False
+    while not abort:
         pending_jobs = j.get_pending()
         msg = "%d processes running, %d executions pending" % ( len(executing), len(pending_jobs) - len(executing) )
         if prev_msg != msg:
             log.info(msg)
         prev_msg = msg
         if len(executing) == 0 and len(pending_jobs) == 0:
+            # now that we've completed everything, check for deferred jobs by marking them as ready.  If we have any, loop again
+            j.enable_deferred()
+            deferred_jobs = len(j.get_pending())
+            if deferred_jobs > 0:
+                log.info("Marked deferred %d executions as ready", deferred_jobs)
+                continue
             break
 
         did_useful_work = False
@@ -277,7 +302,21 @@ def main_loop(jinja2_env, j, new_object_listener, rules, working_dir, executing,
             if xrefs_resolved:
                 log.info("Resolved xrefs on rule, new version will be executed next pass")
                 continue
-            e = execute(job.transform, resolver, jinja2_env, job.id, job_dir, inputs, rule, rules.get_vars())
+
+            # if we're required confirmation from the user, do this before we continue
+            if req_confirm:
+                while True:
+                    answer = input("Proceed to run {} on {}? (y)es, (a)lways or (q)uit: ".format(job.transform, inputs))
+                    if not (answer in ["y", "a", "q"]):
+                        print("Invalid input")
+                    break
+                if answer == "a":
+                    req_confirm = False
+                elif answer == "q":
+                    abort = True
+                    break
+
+            e = execute(job.transform, resolver, jinja2_env, job.id, job_dir, inputs, rule, rules.get_vars(), capture_output)
             executing.append(e)
             j.update_exec_xref(e.id, "PID:{}".format(e.proc.pid), job_dir)
 
@@ -291,8 +330,9 @@ def main_loop(jinja2_env, j, new_object_listener, rules, working_dir, executing,
             timestamp = datetime.datetime.now().isoformat()
 
             if failure != None:
-                log.error("Transform %s failed (job_dir=%s): %s", e.transform, e.job_dir, failure)
-                log_job_output(e.job_dir)
+                log.error("Task failed %s: %s", e.desc_name, failure)
+                if e.captured_stdouts != None:
+                    log_job_output(e.job_dir, e.captured_stdouts)
                 j.record_completed(timestamp, e.id, dep.STATUS_FAILED, {})
             elif completion != None:
                 j.record_completed(timestamp, e.id, dep.STATUS_COMPLETED, completion)
@@ -303,6 +343,10 @@ def main_loop(jinja2_env, j, new_object_listener, rules, working_dir, executing,
             time.sleep(0.5)
 
 def _tail_file(filename, line_count=20):
+    if not os.path.exists(filename):
+        log.error("Cannot tail {} because no such file exists".format(filename))
+        return
+
     with open(filename, "rt") as fd:
         fd.seek(0, 2)
         file_len = fd.tell()
@@ -312,9 +356,10 @@ def _tail_file(filename, line_count=20):
         for line in lines[-line_count:]:
             print(line)
 
-def log_job_output(job_dir, line_count=20):
-    stdout_path = os.path.relpath(os.path.join(job_dir, "stdout.txt"))
-    stderr_path = os.path.relpath(os.path.join(job_dir, "stderr.txt"))
+def log_job_output(job_dir, captured_stdouts, line_count=20):
+    stdout_path, stderr_path = captured_stdouts
+    #stdout_path = os.path.relpath(os.path.join(job_dir, "stdout.txt"))
+    #stderr_path = os.path.relpath(os.path.join(job_dir, "stderr.txt"))
     log.error("Dumping last {} lines of {}".format(line_count, stdout_path))
     _tail_file(stdout_path)
     log.error("Dumping last {} lines of {}".format(line_count, stderr_path))
@@ -362,8 +407,11 @@ class Rules:
     def __repr__(self):
         return "<Rules vars:{}, rules:{}>".format(self.vars, list(self))
 
-def read_deps(filename):
+def read_deps(filename, initial_vars={}):
     rules = Rules()
+    for name, value in initial_vars.items():
+        rules.set_var(name, value)
+
     p = parser.parse(filename)
     for dec in p:
         if isinstance(dec, parser.XRef):
@@ -421,6 +469,8 @@ def expand_run(jinja2_env, command, script_body, config, inputs):
     if script_body != None:
         script_body = render_template(jinja2_env, script_body, config, inputs=inputs)
     return (command, script_body)
+
+
 
 def expand_dict(jinja2_env, d, config, **kwargs):
     assert isinstance(d, dict)
@@ -498,7 +548,13 @@ def create_jinja2_env():
     jinja2_env.filters['quoted'] = quote_str
     return jinja2_env
 
-def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_executions):
+def print_rules(depfile):
+    rules = read_deps(depfile)
+    for rule in rules:
+        assert (isinstance(rule, parser.Rule))
+        print(rule.name)
+
+def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_executions, capture_output, req_confirm):
     jinja2_env = create_jinja2_env()
 
     if not os.path.exists(state_dir):
@@ -520,11 +576,14 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
             count = j.invalidate_rule_execution(target)
             log.info("Cleared %d old executions of %s", count, target)
 
-    rules = read_deps(depfile)
+    script_dir = os.path.dirname(os.path.abspath(depfile))
+
+    rules = read_deps(depfile, dict(DL_CACHE_DIR=dlcache,
+                                    SCRIPT_DIR=script_dir,
+                                    PROLOGUE=""))
 
     for var, value in override_vars.items():
         rules.set_var(var, value)
-    rules.set_var("DL_CACHE_DIR", dlcache)
 
     for xref in rules.xrefs:
         add_xref(j, expand_xref(jinja2_env, xref, rules.vars))
@@ -539,7 +598,7 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
         timestamp = datetime.datetime.now().isoformat()
         j.add_obj(timestamp, obj)
     try:
-        main_loop(jinja2_env, j, new_object_listener, rules, working_dir, executing, max_concurrent_executions)
+        main_loop(jinja2_env, j, new_object_listener, rules, working_dir, executing, max_concurrent_executions, capture_output, req_confirm)
     except FatalUserError as e:
         print("Error: {}".format(e))
 
