@@ -102,8 +102,8 @@ def test_non_key_values(tmpdir):
     j = run_conseq(tmpdir, """
     rule b:
         inputs: in={"finished": "true"}
-        outputs: {"name": "result", "filename": {"$filename":"stdout.txt"}}
-        run "bash" with "echo {{inputs.in.other}}"
+        outputs: {"name": "result", "filename": {"$filename":"foo.txt"}}
+        run "bash" with "echo {{inputs.in.other}} > foo.txt"
     """)
     results = j.find_objs({"name":"result"})
     assert len(results)==1

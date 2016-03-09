@@ -93,21 +93,40 @@ class Obj:
     def __repr__(self):
         return "<{} {}>".format(self.id, repr(self.props))
 
+class ObjHistory:
+    def __init__(self):
+        pass
+
+    def get(self, id):
+        c = get_cursor()
+        c.execute("select id, timestamp, json from past_obj where id = ?", [id])
+        o = c.fetchone()
+        if o == None:
+            return None
+        id, timestamp, _json = o
+        return Obj(id, timestamp, json.loads(_json))
+
+    def add(self, obj):
+        # first check to see if this already exists
+        if self.get(obj.id) != None:
+            return
+
+        c = get_cursor()
+        c.execute("insert into past_obj (id, timestamp, json) values (?, ?, ?)", [obj.id, obj.timestamp, json.dumps(obj.props)])
+
 class ObjSet:
     """
     Models the universe of all known artifacts.
 
     This prototype implementation does everything in memory but is intended to be replaced with one that read/writes to a persistent DB
     """
-    def __init__(self, table_name, replace_if_exists):
-        self.table_name = table_name
+    def __init__(self):
         self.add_listeners = []
         self.remove_listeners = []
-        self.replace_if_exists = replace_if_exists
 
     def __iter__(self):
         c = get_cursor()
-        c.execute("select id, timestamp, json from {}".format(self.table_name))
+        c.execute("select id, timestamp, json from cur_obj")
         objs = []
         for id, timestamp, _json in c.fetchall():
             objs.append( Obj(id, timestamp, json.loads(_json)) )
@@ -115,33 +134,28 @@ class ObjSet:
 
     def get(self, id):
         c = get_cursor()
-        c.execute("select id, timestamp, json from {} where id = ?".format(self.table_name), [id])
+        c.execute("select id, timestamp, json from cur_obj where id = ?", [id])
         id, timestamp, _json = c.fetchone()
         return Obj(id, timestamp, json.loads(_json))
 
     def remove(self, id):
         c = get_cursor()
-        c.execute("delete from {} where id = ?".format(self.table_name), [id])
+        c.execute("delete from cur_obj where id = ?", [id])
         for remove_listener in self.remove_listeners:
             remove_listener(id)
 
     def add(self, timestamp, props):
         # first check to see if this already exists
-        if self.replace_if_exists:
-            match = self.find_by_key(props)
+        match = self.find_by_key(props)
 
-            if match != None:
-                if match.timestamp == timestamp:
-                    return match.id
-
-                self.remove(match.id)
-        else:
-            match = self.find_identical(props, timestamp)
-            if match != None:
+        if match != None:
+            if match.timestamp == timestamp:
                 return match.id
 
+            self.remove(match.id)
+
         c = get_cursor()
-        c.execute("insert into {} (timestamp, json) values (?, ?)".format(self.table_name), [timestamp, json.dumps(props)])
+        c.execute("insert into cur_obj (timestamp, json) values (?, ?)", [timestamp, json.dumps(props)])
         id = c.lastrowid
 
         obj = Obj(id, timestamp, props)
@@ -150,16 +164,6 @@ class ObjSet:
             add_listener(obj)
 
         return id
-
-    def find_identical(self, props, timestamp):
-        matches = self.find(props)
-        matches = [m for m in matches if m.timestamp == timestamp]
-        if len(matches) > 1:
-            raise Exception("Too many matches: props={}, matches={}".format(props, matches))
-        elif len(matches) == 1:
-            return matches[0]
-        else:
-            return None
 
     def find_by_key(self, props):
         key_props = split_props_into_key_and_other(props)[0]
@@ -303,7 +307,8 @@ class ExecutionLog:
             c.execute("update execution set status = ? where id = ?", [STATUS_CANCELED, exec_id])
 
     def _make_copy_get_id(self, x):
-        return self.obj_history.add(x.timestamp, x.props)
+        self.obj_history.add(x)
+        return x.id
 
     def add_execution(self, rule):
         status = STATUS_READY
@@ -611,10 +616,10 @@ class Jobs:
         self.db = db
         self.rule_set = RuleSet()
         self.rule_templates = []
-        self.objects = ObjSet("cur_obj", True)
+        self.objects = ObjSet()
         self.add_new_obj_listener(self._object_added)
         self.objects.remove_listeners.append(self._object_removed)
-        self.log = ExecutionLog(ObjSet("past_obj", False))
+        self.log = ExecutionLog(ObjHistory())
         self.rule_set.add_rule_listeners.append(self.log.add_execution)
         self.rule_set.remove_rule_listeners.append(self.log.cancel_execution)
         self.rule_allowed = lambda inputs, transform: True
