@@ -561,10 +561,14 @@ def print_rules(depfile):
 def gc(state_dir):
     db_path = os.path.join(state_dir, "db.sqlite3")
     j = dep.open_job_db(db_path)
-    job_ids = j.gc()
-    for job_id in job_ids:
+
+    def rm_job_dir(job_id):
         job_dir = get_job_dir(state_dir, job_id)
-        shutil.rmtree(job_dir)
+        if os.path.exists(job_dir):
+            log.warn("Removing unused directory: %s", job_dir)
+            shutil.rmtree(job_dir)
+
+    j.gc(rm_job_dir)
 
 def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_executions, capture_output, req_confirm):
     jinja2_env = create_jinja2_env()

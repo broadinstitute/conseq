@@ -742,7 +742,7 @@ class Jobs:
                 count += self.rule_set.remove_rule(r.rule_id)
         return count
 
-    def gc(self):
+    def gc(self, rm_callback):
         with transaction(self.db):
             root_objs = [o.id for o in self.objects]
             obj_ids = self.log.find_all_reachable_objs(root_objs)
@@ -759,10 +759,11 @@ class Jobs:
             to_drop = []
             for e in self.log.get_all():
                 if not has_reachable_output(e):
-                    to_drop.append(e)
+                    to_drop.append(e.id)
 
-            for e in to_drop:
-                self.log.delete(e.id)
+            for e_id in to_drop:
+                self.log.delete(e_id)
+                rm_callback(e_id)
 
         return to_drop
 
