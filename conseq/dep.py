@@ -12,11 +12,15 @@ class InstanceTemplate:
         pass
 
 STATUS_UNKNOWN = "unknown"
-STATUS_READY = "ready"
-STATUS_DEFERRED = "deferred"
-STATUS_CANCELED = "canceled"
+STATUS_STARTED = "started"
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
+
+RE_STATUS_PENDING = "pending"
+RE_STATUS_STARTED = "started"
+RE_STATUS_COMPLETE = "complete"
+RE_STATUS_FAILED = "failed"
+RE_STATUS_DEFERRED = "deferred"
 
 from contextlib import contextmanager
 import threading
@@ -193,19 +197,20 @@ def assertInputsValid(inputs):
         name, value = x
         assert isinstance(value, Obj) or (isinstance(value, tuple) and isinstance(value[0], Obj))
 
-class Rule:
+class RuleExecution:
     """
     Represents a statement describing what transform to run to generate a set of Objs (outputs) from a different set of Objs (inputs)
     """
-    def __init__(self, id, inputs, transform):
+    def __init__(self, id, inputs, transform, state):
         assertInputsValid(inputs)
 
         self.inputs = inputs
         self.transform = transform
         self.id = id
+        self.state = state
 
     def __repr__(self):
-        return "<Rule in:{} out:{} transform:{}>".format(self.inputs, self.outputs, self.transform)
+        return "<Rule {} in:{} transform:{} state:{}>".format(self.id, self.inputs, self.transform, self.state)
 
 
 class RuleSet:
@@ -217,21 +222,14 @@ class RuleSet:
     def __init__(self):
         self.remove_rule_listeners = []
         self.add_rule_listeners = []
+        self.rule_by_key = {}
+        self.rules_by_id = {}
+        self.rules_by_input = collections.defaultdict(lambda: set())
+        self.next_rule_id = 1
+        self.rule_by_execution_id = {}
 
     def __iter__(self):
-        c = get_cursor()
-        c.execute("select id, transform from rule")
-        rules = c.fetchall()
-        return iter(rules)
-
-    def remove_rule(self, rule_id):
-        c = get_cursor()
-        c.execute("delete from rule where id = ?", [rule_id])
-        rows = c.rowcount
-        if rows > 0:
-            for remove_rule_listener in self.remove_rule_listeners:
-                remove_rule_listener(rule_id)
-        return rows
+        return iter(self.rules_by_id.values())
 
     def _mk_rule_natural_key(self, inputs, transform):
         flattened_inputs = []
@@ -243,37 +241,93 @@ class RuleSet:
         return repr((tuple(flattened_inputs), transform))
 
     def find_by_input(self, input_id):
-        c = get_cursor()
-        c.execute("select rule_id from rule_input where obj_id = ?", [input_id])
-        return [x[0] for x in c.fetchall()]
+        rule_ids = self.rules_by_input[input_id]
+        return rule_ids
 
     def add_rule(self, inputs, transform):
         # first check to make sure rule isn't duplicated
         key = self._mk_rule_natural_key(inputs, transform)
 
-        c = get_cursor()
-        c.execute("select id from rule where key = ?", [key])
-        rule_id = c.fetchone()
-        if rule_id != None:
-            return rule_id[0]
+        if key in self.rule_by_key:
+            return self.rule_by_key[key].id
 
-        c.execute("insert into rule (transform, key) values (?, ?)", [transform, key])
-        rule_id = c.lastrowid
-        for name, objs in inputs:
-            if not isinstance(objs, tuple):
-                objs = [objs]
-            for obj in objs:
-                c.execute("insert into rule_input (rule_id, name, obj_id) values (?, ?, ?)", [rule_id, name, obj.id])
+        id = self.next_rule_id
+        self.next_rule_id += 1
 
-        rule = Rule(rule_id, inputs, transform)
+        state = RE_STATUS_PENDING
+        for input in inputs:
+            if not isinstance(input, Obj):
+                state = RE_STATUS_DEFERRED
+
+        rule = RuleExecution(id, inputs, transform, state)
+        self.rule_by_key[key] = rule
+        self.rules_by_id[id] = rule
+        for input in rule.inputs:
+            self.rules_by_input[input.id].add(rule.id)
 
         for add_rule_listener in self.add_rule_listeners:
             add_rule_listener(rule)
 
-        return rule_id
+        return id
 
+    def remove_rule(self, rule_id):
+        rule = self.rules_by_id[rule_id]
 
-class RulePending:
+        for input in rule.inputs:
+            self.rules_by_input[input.id].remove(rule_id)
+
+        del self.rules_by_id[rule_id]
+        del self.rule_by_key[rule.key]
+        if rule.execution_id != None:
+            del self.rule_by_execution_id[rule.execution_id]
+
+        for l in self.remove_rule_listeners:
+            l(rule_id)
+
+    def get_pending(self):
+        pending = []
+        for rule in self.rules_by_id.values():
+            if rule.state == RE_STATUS_PENDING:
+                pending.append(rule)
+        return pending
+
+    def enable_deferred(self):
+        for rule in self.rules_by_id.values():
+            if rule.state == RE_STATUS_DEFERRED:
+                rule.state = RE_STATUS_PENDING
+
+    def started(self, rule_id, execution_id):
+        rule = self.get(rule_id)
+        assert rule.execution_id == None
+        rule.execution_id = execution_id
+        self.rule_by_execution_id[execution_id] = rule
+        rule.state = RE_STATUS_STARTED
+
+    def completed_execution(self, execution_id, new_status):
+        assert execution_id != None
+        if new_status == STATUS_COMPLETED:
+            s = RE_STATUS_COMPLETE
+        elif new_status == STATUS_FAILED:
+            s = RE_STATUS_FAILED
+        else:
+            raise Exception("invalid state")
+
+        rule = self._get_by_execution_id(execution_id)
+        if rule != None:
+            rule.state = s
+
+    def _get_by_execution_id(self, execution_id):
+        return self.rule_by_execution_id.get(execution_id)
+
+    def remove_incomplete(self):
+        incomplete = []
+        for rule in self.rules_by_id.values():
+            if rule.state != RE_STATUS_COMPLETE:
+                incomplete.append(rule.id)
+        for rule_id in incomplete:
+            self.remove_rule(rule_id)
+
+class Execution:
     def __init__(self, id, rule_id, inputs, outputs, transform, status, exec_xref, job_dir):
         assertInputsValid(inputs)
 
@@ -294,29 +348,16 @@ class ExecutionLog:
     def __init__(self, obj_history):
         self.obj_history = obj_history
 
-    def enable_deferred(self):
+    def mark_incomplete(self):
         c = get_cursor()
-        c.execute("update execution set status = ? where status = ?", [STATUS_READY, STATUS_DEFERRED])
-
-    def cancel_execution(self, rule_id=None, exec_id=None):
-        assert rule_id != None or exec_id != None
-        c = get_cursor()
-        if rule_id != None:
-            c.execute("update execution set status = ? where rule_id = ?", [STATUS_CANCELED, rule_id])
-        else:
-            c.execute("update execution set status = ? where id = ?", [STATUS_CANCELED, exec_id])
+        c.execute("update execution set status = ? where status = ?", [STATUS_UNKNOWN, STATUS_STARTED])
 
     def _make_copy_get_id(self, x):
         self.obj_history.add(x)
         return x.id
 
-    def add_execution(self, rule):
-        status = STATUS_READY
-
-        # look at the inputs, if any obj is a list (not a Obj), that implies this was a "forall" and we want to mark this as deferred
-        for name, objs in rule.inputs:
-            if not isinstance(objs, Obj):
-                status = STATUS_DEFERRED
+    def started_execution(self, rule):
+        status = STATUS_STARTED
 
         c = get_cursor()
         c.execute("insert into execution (rule_id, transform, status) values (?, ?, ?)", [rule.id, rule.transform, status])
@@ -376,11 +417,6 @@ class ExecutionLog:
         c.execute("delete from execution_output where execution_id = ?", [id])
         c.execute("delete from execution where id = ?", [id])
 
-    def get_pending(self):
-        c = get_cursor()
-        c.execute("select id, rule_id, transform, status, execution_xref, job_dir from execution where status = ?", [STATUS_READY])
-        return self._as_RuleList(c)
-
     def get_by_output(self, obj):
         # probably won't really make a copy, just want to get the corresponding id
         obj_id = self._make_copy_get_id(obj)
@@ -423,14 +459,6 @@ class ExecutionLog:
                     continue
                 objs_to_explore.append(input_obj_id)
         return objs_reached
-
-#    def compute_inputs_for_obj_map(self):
-#        inputs_for_obj = {}
-#        for rule in self.get_all():
-#            obj_ids = [x.obj_id for x in rule.inputs]
-#            for output in rule.outputs:
-#                inputs_for_obj[output.id] = obj_ids
-
 
     def to_dot(self, detailed):
         """
@@ -620,8 +648,6 @@ class Jobs:
         self.add_new_obj_listener(self._object_added)
         self.objects.remove_listeners.append(self._object_removed)
         self.log = ExecutionLog(ObjHistory())
-        self.rule_set.add_rule_listeners.append(self.log.add_execution)
-        self.rule_set.remove_rule_listeners.append(self.log.cancel_execution)
         self.rule_allowed = lambda inputs, transform: True
 
     def limitStartToTemplates(self, templateNames):
@@ -701,8 +727,7 @@ class Jobs:
             return self.objects.find(query)
 
     def get_pending(self):
-        with transaction(self.db):
-            return self.log.get_pending()
+        return self.rule_set.get_pending()
 
     def get_all_executions(self):
         with transaction(self.db):
@@ -710,7 +735,13 @@ class Jobs:
 
     def enable_deferred(self):
         with transaction(self.db):
-            return self.log.enable_deferred()
+            return self.rule_set.enable_deferred()
+
+    def record_started(self, rule_id):
+        with transaction(self.db):
+            rule = self.rule_set.get(rule_id)
+            execution_id = self.log.started_execution(rule)
+            self.rule_set.started(rule_id, execution_id)
 
     def record_completed(self, timestamp, execution_id, new_status, outputs):
         with transaction(self.db):
@@ -719,19 +750,16 @@ class Jobs:
                 obj_id = self.add_obj(timestamp, output)
                 interned_outputs.append( self.objects.get(obj_id) )
             self.log.record_completed(execution_id, new_status, interned_outputs)
-            if new_status == STATUS_FAILED:
-                e = self.log.get(execution_id)
-                self.rule_set.remove_rule(e.rule_id)
+            self.rule_set.completed_execution(execution_id, new_status)
 
     def update_exec_xref(self, exec_id, xref, job_dir):
         with transaction(self.db):
             self.log.update_exec_xref(exec_id, xref, job_dir)
 
-    def cancel_execution(self, exec_id):
+    def cleanup_incomplete(self):
         with transaction(self.db):
-            e = self.log.get(exec_id)
-            self.rule_set.remove_rule(e.rule_id)
-            self.log.cancel_execution(exec_id=exec_id)
+            self.rule_set.remove_incomplete()
+            self.log.mark_incomplete()
 
     def invalidate_rule_execution(self, transform):
         with transaction(self.db):
@@ -785,10 +813,9 @@ def open_job_db(filename):
     if needs_create:
         stmts = [
             "create table rule (id INTEGER PRIMARY KEY AUTOINCREMENT, transform STRING, key STRING)",
-            "create table rule_input (id INTEGER PRIMARY KEY AUTOINCREMENT, rule_id INTEGER, name string, obj_id INTEGER)",
             "create table cur_obj (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp STRING, json STRING)",
             "create table past_obj (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp STRING, json STRING)",
-            "create table execution (id INTEGER PRIMARY KEY AUTOINCREMENT, rule_id INTEGER, transform STRING, status STRING, execution_xref STRING, job_dir STRING)",
+            "create table execution (id INTEGER PRIMARY KEY AUTOINCREMENT, transform STRING, status STRING, execution_xref STRING, job_dir STRING)",
             "create table execution_input (id INTEGER PRIMARY KEY AUTOINCREMENT, execution_id INTEGER, name STRING, obj_id INTEGER, is_list INTEGER)",
             "create table execution_output (id INTEGER PRIMARY KEY AUTOINCREMENT, execution_id INTEGER, obj_id INTEGER)",
             ]
