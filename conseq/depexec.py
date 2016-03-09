@@ -7,6 +7,7 @@ import time
 import textwrap
 import logging
 import collections
+import shutil
 
 from . import dep
 from . import parser
@@ -255,8 +256,12 @@ def reattach(j, rules):
             j.cancel_execution(e.id)
     return executing
 
+def get_job_dir(state_dir, job_id):
+    working_dir = os.path.join(state_dir, "working")
+    return working_dir + "/r" + str(job_id)
+
 from . import xref
-def main_loop(jinja2_env, j, new_object_listener, rules, working_dir, executing, max_concurrent_executions, capture_output, req_confirm):
+def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, max_concurrent_executions, capture_output, req_confirm):
     active_job_ids = set([e.id for e in executing])
 
     resolver = xref.Resolver(rules.vars)
@@ -293,7 +298,7 @@ def main_loop(jinja2_env, j, new_object_listener, rules, working_dir, executing,
             active_job_ids.add(job.id)
             did_useful_work = True
 
-            job_dir = working_dir + "/r" + str(job.id)
+            job_dir = get_job_dir(state_dir, job.id)
             if not os.path.exists(job_dir):
                 os.makedirs(job_dir)
 
@@ -470,8 +475,6 @@ def expand_run(jinja2_env, command, script_body, config, inputs):
         script_body = render_template(jinja2_env, script_body, config, inputs=inputs)
     return (command, script_body)
 
-
-
 def expand_dict(jinja2_env, d, config, **kwargs):
     assert isinstance(d, dict)
     assert isinstance(config, dict)
@@ -482,8 +485,9 @@ def expand_dict(jinja2_env, d, config, **kwargs):
         k = render_template(jinja2_env, k, config, **kwargs)
         # QueryVariables get introduced via expand input spec
         if not isinstance(v, parser.QueryVariable):
-#            print("expanding v", v)
-            if not isinstance(v, dict):
+            if isinstance(v, dict):
+                v = expand_dict(jinja2_env, v, config, **kwargs)
+            else:
                 v = render_template(jinja2_env, v, config, **kwargs)
         new_output[k] = v
 
@@ -554,6 +558,14 @@ def print_rules(depfile):
         assert (isinstance(rule, parser.Rule))
         print(rule.name)
 
+def gc(state_dir):
+    db_path = os.path.join(state_dir, "db.sqlite3")
+    j = dep.open_job_db(db_path)
+    job_ids = j.gc()
+    for job_id in job_ids:
+        job_dir = get_job_dir(state_dir, job_id)
+        shutil.rmtree(job_dir)
+
 def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_executions, capture_output, req_confirm):
     jinja2_env = create_jinja2_env()
 
@@ -598,7 +610,7 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
         timestamp = datetime.datetime.now().isoformat()
         j.add_obj(timestamp, obj)
     try:
-        main_loop(jinja2_env, j, new_object_listener, rules, working_dir, executing, max_concurrent_executions, capture_output, req_confirm)
+        main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, max_concurrent_executions, capture_output, req_confirm)
     except FatalUserError as e:
         print("Error: {}".format(e))
 

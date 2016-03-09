@@ -365,6 +365,12 @@ class ExecutionLog:
         else:
             raise Exception("Multiple rows fetched for id {}".format(id))
 
+    def delete(self, id):
+        c = get_cursor()
+        c.execute("delete from execution_input where execution_id = ?", [id])
+        c.execute("delete from execution_output where execution_id = ?", [id])
+        c.execute("delete from execution where id = ?", [id])
+
     def get_pending(self):
         c = get_cursor()
         c.execute("select id, rule_id, transform, status, execution_xref, job_dir from execution where status = ?", [STATUS_READY])
@@ -393,8 +399,9 @@ class ExecutionLog:
             obj_id = self._make_copy_get_id(x)
             c.execute("insert into execution_output (execution_id, obj_id) values (?, ?)", [execution_id, obj_id])
 
-    def find_all_reachable_objs(self, root_obj_ids, inputs_for_obj):
-        objs_to_explore = [root_obj_ids]
+    def find_all_reachable_objs(self, root_obj_ids):
+        c = get_cursor()
+        objs_to_explore = list(root_obj_ids)
         objs_reached = set()
 
         while len(objs_to_explore) > 0:
@@ -403,18 +410,21 @@ class ExecutionLog:
 
             objs_reached.add(obj_id)
 
-            input_obj_ids = inputs_for_obj[obj_id]
+            c.execute("select ei.obj_id from execution_output eo join execution e on eo.execution_id = e.id join execution_input ei on e.id = ei.execution_id where eo.obj_id = ?", [obj_id])
+            input_obj_ids = [x[0] for x in c.fetchall()]
+
             for input_obj_id in input_obj_ids:
                 if input_obj_id in objs_reached:
                     continue
                 objs_to_explore.append(input_obj_id)
+        return objs_reached
 
-    def compute_inputs_for_obj_map(self):
-        inputs_for_obj = {}
-        for rule in self.get_all():
-            obj_ids = [x.obj_id for x in rule.inputs]
-            for output in rule.outputs:
-                inputs_for_obj[output.id] = obj_ids
+#    def compute_inputs_for_obj_map(self):
+#        inputs_for_obj = {}
+#        for rule in self.get_all():
+#            obj_ids = [x.obj_id for x in rule.inputs]
+#            for output in rule.outputs:
+#                inputs_for_obj[output.id] = obj_ids
 
 
     def to_dot(self, detailed):
@@ -726,6 +736,30 @@ class Jobs:
                     continue
                 count += self.rule_set.remove_rule(r.rule_id)
         return count
+
+    def gc(self):
+        with transaction(self.db):
+            root_objs = [o.id for o in self.objects]
+            obj_ids = self.log.find_all_reachable_objs(root_objs)
+
+            print("root_objs", root_objs)
+            print("obj_ids", obj_ids)
+
+            def has_reachable_output(e):
+                for o in e.outputs:
+                    if o.id in obj_ids:
+                        return True
+                return False
+
+            to_drop = []
+            for e in self.log.get_all():
+                if not has_reachable_output(e):
+                    to_drop.append(e)
+
+            for e in to_drop:
+                self.log.delete(e.id)
+
+        return to_drop
 
     def dump(self):
         with transaction(self.db):

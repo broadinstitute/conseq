@@ -1,4 +1,4 @@
-from . import parser
+#from . import parser
 from . import depexec
 from . import dep
 import os
@@ -8,7 +8,7 @@ def run_conseq(tmpdir, config, targets=[]):
     filename = str(tmpdir)+"/t.conseq"
     with open(filename, "wt") as fd:
         fd.write(config)
-    depexec.main(filename, state_dir, targets, {}, 10)
+    depexec.main(filename, state_dir, targets, {}, 10, False, False)
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
     return j
 
@@ -109,3 +109,26 @@ def test_non_key_values(tmpdir):
     assert len(results)==1
     stdout = open(results[0]["filename"]["$filename"]).read()
     assert "apple\n" == stdout
+
+
+def test_gc(tmpdir):
+    j = run_conseq(tmpdir, """
+    rule a:
+        outputs: {"finished": "true", "other": {"$value": "a"}}
+        run "bash" with "echo test"
+    """)
+    assert len(j.find_objs({}))==1
+
+    j = run_conseq(tmpdir, """
+    rule b:
+        outputs: {"finished": "true", "other": {"$value": "a"}}
+        run "bash" with "echo test"
+    """)
+    assert len(j.find_objs({}))==1
+
+    # make sure we have both executions
+    assert len(j.get_all_executions()) == 2
+
+    j.gc()
+    # after GC there's only one
+    assert len(j.get_all_executions()) == 1

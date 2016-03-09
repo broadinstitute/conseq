@@ -3,6 +3,9 @@ import logging
 import colorlog
 from . import depexec
 
+def gc(args):
+    depexec.gc(args.dir)
+
 def rm(args):
     depexec.rm_cmd(args.dir, args.dry_run, args.json_query, args.with_invalidate)
 
@@ -30,6 +33,9 @@ def main(argv):
     parser.add_argument('--verbose', dest='verbose', action='store_true')
     parser.set_defaults(func=None)
     sub = parser.add_subparsers()
+
+    gc_cmd = sub.add_parser("gc", help="Garbage collect (clean up unused files)")
+    gc_cmd.set_defaults(func=gc)
 
     rules_cmd = sub.add_parser("rules", help="Print the names all rules in the file")
     rules_cmd.add_argument('file', metavar="FILE", help="the input file to parse")
