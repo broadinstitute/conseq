@@ -3,13 +3,18 @@ from . import depexec
 from . import dep
 import os
 
-def run_conseq(tmpdir, config, targets=[]):
+def run_conseq(tmpdir, config, targets=[], assert_clean=True):
     state_dir=str(tmpdir)+"/state"
     filename = str(tmpdir)+"/t.conseq"
     with open(filename, "wt") as fd:
         fd.write(config)
+
+    db_path = os.path.join(state_dir, "db.sqlite3")
+    if assert_clean:
+        assert not os.path.exists(db_path)
+
     depexec.main(filename, state_dir, targets, {}, 10, False, False)
-    j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
+    j = dep.open_job_db(db_path)
     return j
 
 def test_rule_with_no_inputs(tmpdir):
@@ -70,7 +75,7 @@ def test_rerun_multiple_times(tmpdir):
     rule b:
         outputs: {"finished": "true", "mut":{"$value": "2"}}
         run "bash -c echo test"
-    """)
+    """, assert_clean=False)
     objs = j.find_objs({})
     assert len(objs)==1
     assert objs[0]["mut"] == {"$value" : "2"}
@@ -80,7 +85,7 @@ def test_rerun_multiple_times(tmpdir):
     rule b:
         outputs: {"finished": "true", "mut":{"$value": "3"}}
         run "bash -c echo test"
-    """, targets=["b"])
+    """, targets=["b"], assert_clean=False)
     objs = j.find_objs({})
     assert len(objs)==1
     assert objs[0]["mut"] == {"$value" : "3"}
@@ -104,26 +109,34 @@ def test_non_key_values(tmpdir):
         inputs: in={"finished": "true"}
         outputs: {"name": "result", "filename": {"$filename":"foo.txt"}}
         run "bash" with "echo {{inputs.in.other}} > foo.txt"
-    """)
+    """, assert_clean=False)
     results = j.find_objs({"name":"result"})
     assert len(results)==1
     stdout = open(results[0]["filename"]["$filename"]).read()
     assert "apple\n" == stdout
 
+def assert_transaction_closed():
+    if hasattr(dep.current_db_cursor_state, "cursor"):
+        assert dep.current_db_cursor_state.cursor == None
 
 def test_gc(tmpdir):
+    print("---------------------gc")
+    assert_transaction_closed()
+
     j = run_conseq(tmpdir, """
     rule a:
         outputs: {"finished": "true", "other": {"$value": "a"}}
         run "bash" with "echo test"
     """)
+    print("objs", j.find_objs({}))
     assert len(j.find_objs({}))==1
 
     j = run_conseq(tmpdir, """
     rule b:
-        outputs: {"finished": "true", "other": {"$value": "a"}}
+        outputs: {"finished": "true", "other": {"$value": "b"}}
         run "bash" with "echo test"
-    """)
+    """, assert_clean=False)
+    print("objs", j.find_objs({}))
     assert len(j.find_objs({}))==1
 
     # make sure we have both executions

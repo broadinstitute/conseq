@@ -35,16 +35,23 @@ def transaction(db):
         cursor = current_db_cursor_state.cursor
         depth = current_db_cursor_state.depth
     if cursor == None:
+        print("created cursor")
         cursor = db.cursor()
         current_db_cursor_state.cursor = cursor
     depth += 1
+    print("prior to yield depth:", depth)
     current_db_cursor_state.depth = depth
-    yield
-    current_db_cursor_state.depth -= 1
-    if current_db_cursor_state.depth == 0:
-        current_db_cursor_state.cursor.close()
-        current_db_cursor_state.cursor = None
-        db.commit()
+    try:
+        yield
+    finally:
+        print("post yield depth:", depth)
+        current_db_cursor_state.depth -= 1
+        if current_db_cursor_state.depth == 0:
+            print("close cursor")
+            current_db_cursor_state.cursor.close()
+            current_db_cursor_state.cursor = None
+            db.commit()
+
 
 def get_cursor():
     assert current_db_cursor_state.cursor != None
@@ -208,6 +215,7 @@ class RuleExecution:
         self.transform = transform
         self.id = id
         self.state = state
+        self.execution_id = None
 
     def __repr__(self):
         return "<Rule {} in:{} transform:{} state:{}>".format(self.id, self.inputs, self.transform, self.state)
@@ -241,8 +249,11 @@ class RuleSet:
         return repr((tuple(flattened_inputs), transform))
 
     def find_by_input(self, input_id):
-        rule_ids = self.rules_by_input[input_id]
+        rule_ids = list(self.rules_by_input[input_id])
         return rule_ids
+
+    def get(self, id):
+        return self.rules_by_id[id]
 
     def add_rule(self, inputs, transform):
         # first check to make sure rule isn't duplicated
@@ -255,15 +266,20 @@ class RuleSet:
         self.next_rule_id += 1
 
         state = RE_STATUS_PENDING
-        for input in inputs:
-            if not isinstance(input, Obj):
+        for name, obj in inputs:
+            if not isinstance(obj, Obj):
                 state = RE_STATUS_DEFERRED
 
         rule = RuleExecution(id, inputs, transform, state)
         self.rule_by_key[key] = rule
         self.rules_by_id[id] = rule
-        for input in rule.inputs:
-            self.rules_by_input[input.id].add(rule.id)
+        for name, _obj in rule.inputs:
+            if isinstance(_obj, Obj):
+                objs = [_obj]
+            else:
+                objs = _obj
+            for obj in objs:
+                self.rules_by_input[obj.id].add(rule.id)
 
         for add_rule_listener in self.add_rule_listeners:
             add_rule_listener(rule)
@@ -272,12 +288,18 @@ class RuleSet:
 
     def remove_rule(self, rule_id):
         rule = self.rules_by_id[rule_id]
+        key = self._mk_rule_natural_key(rule.inputs, rule.transform)
 
-        for input in rule.inputs:
-            self.rules_by_input[input.id].remove(rule_id)
+        for name, _obj in rule.inputs:
+            if isinstance(_obj, Obj):
+                objs = [_obj]
+            else:
+                objs = _obj
+            for obj in objs:
+                self.rules_by_input[obj.id].remove(rule_id)
 
         del self.rules_by_id[rule_id]
-        del self.rule_by_key[rule.key]
+        del self.rule_by_key[key]
         if rule.execution_id != None:
             del self.rule_by_execution_id[rule.execution_id]
 
@@ -285,6 +307,7 @@ class RuleSet:
             l(rule_id)
 
     def get_pending(self):
+        print("get_pending", self.rules_by_id)
         pending = []
         for rule in self.rules_by_id.values():
             if rule.state == RE_STATUS_PENDING:
@@ -315,6 +338,7 @@ class RuleSet:
         rule = self._get_by_execution_id(execution_id)
         if rule != None:
             rule.state = s
+        print("set rule", rule, "state to", s, "execution_id=",execution_id, self.rule_by_execution_id)
 
     def _get_by_execution_id(self, execution_id):
         return self.rule_by_execution_id.get(execution_id)
@@ -328,20 +352,19 @@ class RuleSet:
             self.remove_rule(rule_id)
 
 class Execution:
-    def __init__(self, id, rule_id, inputs, outputs, transform, status, exec_xref, job_dir):
+    def __init__(self, id, inputs, outputs, transform, status, exec_xref, job_dir):
         assertInputsValid(inputs)
 
         self.id = id
         self.transform = transform
         self.inputs = inputs
-        self.rule_id = rule_id
         self.status = status
         self.outputs = outputs
         self.exec_xref = exec_xref
         self.job_dir = job_dir
 
     def __repr__(self):
-        return "<Rule id:{} rule_id:{} inputs:{} outputs:{} transform:{} status:{} exec_xref:{}>".format(self.id, self.rule_id, self.inputs, self.outputs, self.transform, self.status, self.exec_xref)
+        return "<Rule id:{} inputs:{} outputs:{} transform:{} status:{} exec_xref:{}>".format(self.id, self.inputs, self.outputs, self.transform, self.status, self.exec_xref)
 
 
 class ExecutionLog:
@@ -360,7 +383,7 @@ class ExecutionLog:
         status = STATUS_STARTED
 
         c = get_cursor()
-        c.execute("insert into execution (rule_id, transform, status) values (?, ?, ?)", [rule.id, rule.transform, status])
+        c.execute("insert into execution (transform, status) values (?, ?)", [rule.transform, status])
         exec_id = c.lastrowid
         for name, objs in rule.inputs:
             is_list = True
@@ -374,7 +397,7 @@ class ExecutionLog:
 
     def _as_RuleList(self, c):
         pending = []
-        for exec_id, rule_id, transform, status, exec_xref, job_dir in c.fetchall():
+        for exec_id, transform, status, exec_xref, job_dir in c.fetchall():
             inputs = collections.defaultdict(lambda: [])
             var_is_list = {}
             c.execute("select name, obj_id, is_list from execution_input where execution_id = ?", [exec_id])
@@ -397,7 +420,7 @@ class ExecutionLog:
             for obj_id, in c.fetchall():
                 outputs.append(self.obj_history.get(obj_id))
 
-            pending.append(RulePending(exec_id, rule_id, tuple(in_name_values), outputs, transform, status, exec_xref, job_dir))
+            pending.append(Execution(exec_id, tuple(in_name_values), outputs, transform, status, exec_xref, job_dir))
         return pending
 
     def get(self, id):
@@ -421,12 +444,12 @@ class ExecutionLog:
         # probably won't really make a copy, just want to get the corresponding id
         obj_id = self._make_copy_get_id(obj)
         c = get_cursor()
-        c.execute("select id, rule_id, transform, status, execution_xref, job_dir from execution e where exists (select 1 from execution_output o where o.execution_id = e.id and obj_id = ?)", [obj_id])
+        c.execute("select id, transform, status, execution_xref, job_dir from execution e where exists (select 1 from execution_output o where o.execution_id = e.id and obj_id = ?)", [obj_id])
         return self._as_RuleList(c)
 
     def get_all(self):
         c = get_cursor()
-        c.execute("select id, rule_id, transform, status, execution_xref, job_dir from execution")
+        c.execute("select id, transform, status, execution_xref, job_dir from execution")
         return self._as_RuleList(c)
 
     def update_exec_xref(self, exec_id, xref, job_dir):
@@ -742,6 +765,7 @@ class Jobs:
             rule = self.rule_set.get(rule_id)
             execution_id = self.log.started_execution(rule)
             self.rule_set.started(rule_id, execution_id)
+            return execution_id
 
     def record_completed(self, timestamp, execution_id, new_status, outputs):
         with transaction(self.db):
@@ -764,10 +788,10 @@ class Jobs:
     def invalidate_rule_execution(self, transform):
         with transaction(self.db):
             count = 0
-            for r in self.log.get_all():
+            for r in self.get_pending():
                 if r.transform != transform:
                     continue
-                count += self.rule_set.remove_rule(r.rule_id)
+                count += self.rule_set.remove_rule(r.id)
         return count
 
     def gc(self):
