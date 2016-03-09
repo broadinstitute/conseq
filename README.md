@@ -1,27 +1,119 @@
-Consec
+# Conseq 
+(Pronounced "con-SIK" as in "consequence")
 
-Consec is a tool for running sequences of transformations.
+Conseq is a tool for running sequences of transformations or other operations.
 
-Rules define a script to run when the specified inputs exist.
+More on the motivation and details seen this slide deck: https://docs.google.com/a/broadinstitute.com/presentation/d/1LsRymTEKmqDxACDnMIx1z_Y2dQtY7TNpb5PAFyK0OQM/edit?usp=sharing
 
-Differences from other workflow executors:
-    - Inputs and outputs are "objects", not just filenames, allowing metadata to be stored in properties as opposed to encoding into filenames and directories.
-    - Only inputs are specified, not outputs in specfile. This allowing scripts to emit any outputs at run-time at the cost of not being able to predict what all needs to be run before execution.
-    - Inputs are defined as queries, allowing easy parameterization of analyses
+## Framework
 
-Concepts:
+Artifacts: a set of key/value pairs.  Special values are denoted as objects with a special key, which starts with "$".  For example {"A": {"$value": "B"}}
 
-Objects: a set of key/value pairs.  Special values are denoted as objects with a special key, which starts with "$".  For example {"A": {"$value": "B"}}
+## Reference
 
-Rule: A script and a query defining what inputs the script needs to execute.
+A conseq config file consists of xrefs, variables and rules.  
 
-Rule Application: A rule with inputs bound to it.
+### Variables
 
-Run statement: A command, and optionally text which will be written to a temp file and passed in as a parameter.
+Variables can be defined with the "let" keyword.  For example:
 
-History: inputs, rule_name, outputs
+let label="run10"
 
-Algorithm:
+This variable is accessible in as "config.label" and can be overriden by the command line by adding arguments of the form "-c label=XXX"
+
+### Xref
+
+Xrefs create artifacts which represent entities, identified by a url-style names, that are outside of conseq.  Supported urls are:
+
+taiga://...
+ssh://host/path/...
+http://host/path/...
+or a path to a locally accessible file.
+
+example:
+
+xref http://data/all.csv {"name": "data"}
+
+will result in an artifact with properties "name" and "filename" after the url has been fetched.
+
+### Rules
+
+The most important concept is are "rules".  These define what to run (generally, a script) when the required inputs exist.  
+
+Rules have three sections, each optional: "inputs", "outputs" and "run"
+
+Inputs define a query which will be executed to find the artifacts needed to execute the rule, and the name of the variable that the object will be bound to when its found.
+
+For example:
+
+Assume we have the following artifacts:
+
+type       name
+cell_line  NCI-543
+cell_line  MM3
+
+type       cellline_name
+WGS        NCI-543
+WGS        NCI-433
+
+rule process_cellline:
+  inputs: cellline={"type": "cell_line"}
+  ...
+
+Will run the "process_cellline" rule once for each artifact that has a "type" property with the value "cell_line".   In this example, process_cellline would be run twice.
+
+One can fetch multiple objects, by providing a comma seperated list such as:
+
+rule process_cellline:
+  inputs: cellline={"type": "cell_line"}, data={"type": "WGS"}
+  ...
+
+This will run process_cellline once for every combination of "data" and "cell".   In this example, process_cellline would be run four times.
+
+Often we want to not run every possible pair, but have the right pairs.  In this particular example, it'd only make sense to have the have the data for the cell line that was selected.  You can do this by not giving a constant (in quotes) but using a variable.
+
+rule process_cellline:
+  inputs: cellline={"type": "cell_line", "name": name}, data={"type": "WGS", "cellline_name": name}
+  ...
+
+With the artifacts above, this will result in a single execution of process_cellline where cellline will be {"cell_line": "NCI-543"} and data will be {"type": "WGS", "cellline_name": "NCI-543"}
+
+Lastly, one can fetch multiple artifacts by prefixing the query with "all" 
+
+rule process_cellline:
+  inputs: cellline=all {"type": "cell_line"}
+  ...
+
+will execute process_cellline once, with celllines = [{"type": "cell_line", "name": "NCI-543"}, {"type": "cell_line", "name": "MM3"}]
+
+### run statement
+
+Example:
+
+run "X"
+
+Executes "X"
+
+run "X" with "Y"
+
+Write "Y" to a temp file and run "X tempfilename".   For R, write
+
+run "Rscript" with "library(...) ..."
+
+### Publishing artifacts
+
+As part of running a rule, we should publish the results back to conseq.   For simple cases, we can include a "outputs" clause where we can list a static list of artifacts which will be published if and only if all run statements execute successfully.
+
+Alternatively, one can include a run step which uses python and the "conseq" module to publish.
+
+example:
+
+   run "python" with """
+     import conseq
+     ...
+     conseq.publish(dict(name=X, ...), dict(...), ... )
+     """
+
 
 for each rule:
   run query to find inputs.  Each set of inputs + rule results in a "Rule Application"
