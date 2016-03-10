@@ -71,13 +71,14 @@ def split_props_into_key_and_other(props):
 
 class Obj:
     "Models an any input or output artifact by a set of key-value pairs"
-    def __init__(self, id, timestamp, props):
+    def __init__(self, id, space, timestamp, props):
         """
         :param id:
         :param props: either a dictionary or a sequence of (key, value) tuples
         :return:
         """
         self.id = id
+        self.space = space
         self.timestamp = timestamp
         self.props = props
 
@@ -102,7 +103,7 @@ class Obj:
     #     return d
 
     def __repr__(self):
-        return "<{} {}>".format(self.id, repr(self.props))
+        return "<{}:{} {}>".format(self.space, self.id, repr(self.props))
 
 class ObjHistory:
     def __init__(self):
@@ -110,12 +111,12 @@ class ObjHistory:
 
     def get(self, id):
         c = get_cursor()
-        c.execute("select id, timestamp, json from past_obj where id = ?", [id])
+        c.execute("select id, space, timestamp, json from past_obj where id = ?", [id])
         o = c.fetchone()
         if o == None:
             return None
-        id, timestamp, _json = o
-        return Obj(id, timestamp, json.loads(_json))
+        id, space, timestamp, _json = o
+        return Obj(id, space, timestamp, json.loads(_json))
 
     def add(self, obj):
         # first check to see if this already exists
@@ -123,7 +124,7 @@ class ObjHistory:
             return
 
         c = get_cursor()
-        c.execute("insert into past_obj (id, timestamp, json) values (?, ?, ?)", [obj.id, obj.timestamp, json.dumps(obj.props)])
+        c.execute("insert into past_obj (id, space, timestamp, json) values (?, ?, ?, ?)", [obj.id, obj.space, obj.timestamp, json.dumps(obj.props)])
 
 class ObjSet:
     """
@@ -137,17 +138,17 @@ class ObjSet:
 
     def __iter__(self):
         c = get_cursor()
-        c.execute("select id, timestamp, json from cur_obj")
+        c.execute("select id, space, timestamp, json from cur_obj")
         objs = []
-        for id, timestamp, _json in c.fetchall():
-            objs.append( Obj(id, timestamp, json.loads(_json)) )
+        for id, space, timestamp, _json in c.fetchall():
+            objs.append( Obj(id, space, timestamp, json.loads(_json)) )
         return iter(objs)
 
     def get(self, id):
         c = get_cursor()
-        c.execute("select id, timestamp, json from cur_obj where id = ?", [id])
-        id, timestamp, _json = c.fetchone()
-        return Obj(id, timestamp, json.loads(_json))
+        c.execute("select id, space, timestamp, json from cur_obj where id = ?", [id])
+        id, space, timestamp, _json = c.fetchone()
+        return Obj(id, space, timestamp, json.loads(_json))
 
     def remove(self, id):
         c = get_cursor()
@@ -155,9 +156,14 @@ class ObjSet:
         for remove_listener in self.remove_listeners:
             remove_listener(id)
 
-    def add(self, timestamp, props):
+    def get_spaces(self):
+        c = get_cursor()
+        c.execute("select distinct space from cur_obj")
+        return set([x[0] for x in c.fetchall()] + ["public"])
+
+    def add(self, space, timestamp, props):
         # first check to see if this already exists
-        match = self.find_by_key(props)
+        match = self.find_by_key(space, props)
 
         if match != None:
             if match.timestamp == timestamp:
@@ -166,19 +172,19 @@ class ObjSet:
             self.remove(match.id)
 
         c = get_cursor()
-        c.execute("insert into cur_obj (timestamp, json) values (?, ?)", [timestamp, json.dumps(props)])
+        c.execute("insert into cur_obj (space, timestamp, json) values (?, ?, ?)", [space, timestamp, json.dumps(props)])
         id = c.lastrowid
 
-        obj = Obj(id, timestamp, props)
+        obj = Obj(id, space, timestamp, props)
 
         for add_listener in self.add_listeners:
             add_listener(obj)
 
         return id
 
-    def find_by_key(self, props):
+    def find_by_key(self, space, props):
         key_props = split_props_into_key_and_other(props)[0]
-        matches = self.find(key_props)
+        matches = self.find(space, key_props)
         if len(matches) > 1:
             raise Exception("Too many matches: key_props={}, matches={}".format(key_props, matches))
         elif len(matches) == 1:
@@ -186,16 +192,21 @@ class ObjSet:
         else:
             return None
 
-    def find(self, properties):
+    def find(self, space, properties):
         result = []
         for o in self:
+            if o.space != space:
+                continue
+
             skip = False
             for k, v in properties.items():
                 if not ((k in o.props) and (o.props[k] == v)):
                     skip = True
                     break
+
             if not skip:
                 result.append(o)
+
         return result
 
 def assertInputsValid(inputs):
@@ -208,9 +219,10 @@ class RuleExecution:
     """
     Represents a statement describing what transform to run to generate a set of Objs (outputs) from a different set of Objs (inputs)
     """
-    def __init__(self, id, inputs, transform, state):
+    def __init__(self, id, space, inputs, transform, state):
         assertInputsValid(inputs)
 
+        self.space = space
         self.inputs = inputs
         self.transform = transform
         self.id = id
@@ -218,7 +230,7 @@ class RuleExecution:
         self.execution_id = None
 
     def __repr__(self):
-        return "<Rule {} in:{} transform:{} state:{}>".format(self.id, self.inputs, self.transform, self.state)
+        return "<Rule {} in:{}:{} transform:{} state:{}>".format(self.space, self.id, self.inputs, self.transform, self.state)
 
 
 class RuleSet:
@@ -255,7 +267,7 @@ class RuleSet:
     def get(self, id):
         return self.rules_by_id[id]
 
-    def add_rule(self, inputs, transform):
+    def add_rule(self, space, inputs, transform):
         # first check to make sure rule isn't duplicated
         key = self._mk_rule_natural_key(inputs, transform)
 
@@ -270,7 +282,7 @@ class RuleSet:
             if not isinstance(obj, Obj):
                 state = RE_STATUS_DEFERRED
 
-        rule = RuleExecution(id, inputs, transform, state)
+        rule = RuleExecution(id, space, inputs, transform, state)
         self.rule_by_key[key] = rule
         self.rules_by_id[id] = rule
         for name, _obj in rule.inputs:
@@ -325,6 +337,12 @@ class RuleSet:
         rule.execution_id = execution_id
         self.rule_by_execution_id[execution_id] = rule
         rule.state = RE_STATUS_STARTED
+
+    def get_space_by_execution_id(self, execution_id):
+        rule = self._get_by_execution_id(execution_id)
+        if rule == None:
+            return None
+        return rule.space
 
     def completed_execution(self, execution_id, new_status):
         assert execution_id != None
@@ -589,7 +607,7 @@ class Template:
                 return False
         return True
 
-    def _create_rules(self, obj_set, bindings, queries):
+    def _create_rules(self, obj_set, space, bindings, queries):
         if len(queries) == 0:
             if self._predicate_satisifed(bindings):
                 return [bindings]
@@ -600,17 +618,17 @@ class Template:
         q = queries[-1]
 
         results = []
-        for obj in obj_set.find(q.const_constraints):
+        for obj in obj_set.find(space, q.const_constraints):
             new_binding = dict(bindings)
             new_binding[q.variable] = obj
 
-            results.extend(self._create_rules(obj_set, new_binding, q_rest))
+            results.extend(self._create_rules(obj_set, space, new_binding, q_rest))
         return results
 
-    def _execute_forall_queries(self, bindings, obj_set):
+    def _execute_forall_queries(self, bindings, obj_set, space):
         bindings = dict(bindings)
         for q in self.forall_queries:
-            objs = tuple(obj_set.find(q.const_constraints))
+            objs = tuple(obj_set.find(space, q.const_constraints))
             if len(objs) == 0:
                 return None
             bindings[q.variable] = objs
@@ -618,17 +636,20 @@ class Template:
 
     def create_rules(self, obj_set):
         #print ("create_rules, transform:",self.transform,", queries: ", self.foreach_queries)
-        if len(self.foreach_queries) == 0:
-            bindings = [{}]
-        else:
-            bindings = self._create_rules(obj_set, {}, self.foreach_queries)
-
         results = []
-        for b in bindings:
-            b = self._execute_forall_queries(b, obj_set)
-            if b == None:
-                continue
-            results.append( (tuple(b.items()), self.transform) )
+        for space in obj_set.get_spaces():
+            if len(self.foreach_queries) == 0 and space == "public":
+                bindings = [{}]
+            else:
+                bindings = self._create_rules(obj_set, space, {}, self.foreach_queries)
+
+            # after all for-eaches are resolved, try the for-alls
+            for b in bindings:
+                b = self._execute_forall_queries(b, obj_set, space)
+                if b == None:
+                    continue
+                inputs = tuple(b.items())
+                results.append( (space, inputs, self.transform) )
 
         log.debug("Created rules for %s: %s", self.transform, results)
         return results
@@ -687,21 +708,20 @@ class Jobs:
         for template in self.rule_templates:
             new_rules.extend(template.create_rules(self.objects))
 
-        for rule in new_rules:
-            self._add_rule(rule)
+        for space, inputs, transform in new_rules:
+            self._add_rule(space, inputs, transform)
 
     def _object_added(self, obj):
         new_rules = []
         for template in self.rule_templates:
             new_rules.extend(template.create_rules(self.objects))
 
-        for rule in new_rules:
-            self._add_rule(rule)
+        for space, inputs, transform in new_rules:
+            self._add_rule(space, inputs, transform)
 
-    def _add_rule(self, rule):
-        inputs, transform = rule
+    def _add_rule(self, space, inputs, transform):
         if self.rule_allowed(inputs, transform):
-            self.rule_set.add_rule(*rule)
+            self.rule_set.add_rule(space, inputs, transform)
 
     def add_new_obj_listener(self, listener):
         self.objects.add_listeners.append(listener)
@@ -719,9 +739,9 @@ class Jobs:
             self.rule_templates.append(template)
             new_rules = template.create_rules(self.objects)
             for rule in new_rules:
-                self._add_rule(rule)
+                self._add_rule(*rule)
 
-    def add_obj(self, timestamp, obj_props, overwrite=True):
+    def add_obj(self, space, timestamp, obj_props, overwrite=True):
         """
         Used to record the creation of an object with a given timestamp
 
@@ -731,11 +751,11 @@ class Jobs:
 
         with transaction(self.db):
             if not overwrite:
-                existing = self.objects.find_by_key(obj_props)
+                existing = self.objects.find_by_key(space, obj_props)
                 if existing != None:
                     return existing.id
 
-            return self.objects.add(timestamp, obj_props)
+            return self.objects.add(space, timestamp, obj_props)
 
     def remove_obj(self, obj_id, with_invalidate):
         with transaction(self.db):
@@ -745,9 +765,9 @@ class Jobs:
                     self.rule_set.remove_rule(x.rule_id)
             self.objects.remove(obj_id)
 
-    def find_objs(self, query):
+    def find_objs(self, space, query):
         with transaction(self.db):
-            return self.objects.find(query)
+            return self.objects.find(space, query)
 
     def get_pending(self):
         return self.rule_set.get_pending()
@@ -769,12 +789,27 @@ class Jobs:
 
     def record_completed(self, timestamp, execution_id, new_status, outputs):
         with transaction(self.db):
-            interned_outputs = []
-            for output in outputs:
-                obj_id = self.add_obj(timestamp, output)
-                interned_outputs.append( self.objects.get(obj_id) )
-            self.log.record_completed(execution_id, new_status, interned_outputs)
-            self.rule_set.completed_execution(execution_id, new_status)
+            default_space = self.rule_set.get_space_by_execution_id(execution_id)
+            if default_space == None:
+                log.warn("No associated rule execution.  Dropping outputs: %s", outputs)
+                self.log.record_completed(execution_id, new_status, [])
+            else:
+                def get_space(obj):
+                    if "$space" in obj:
+                        o = dict(obj)
+                        del o["$space"]
+                        return obj["$space"], o
+                    else:
+                        return default_space, obj
+
+                interned_outputs = []
+                for output in outputs:
+                    space, output = get_space(output)
+
+                    obj_id = self.add_obj(space, timestamp, output)
+                    interned_outputs.append( self.objects.get(obj_id) )
+                self.log.record_completed(execution_id, new_status, interned_outputs)
+                self.rule_set.completed_execution(execution_id, new_status)
 
     def update_exec_xref(self, exec_id, xref, job_dir):
         with transaction(self.db):
@@ -837,8 +872,8 @@ def open_job_db(filename):
     if needs_create:
         stmts = [
             "create table rule (id INTEGER PRIMARY KEY AUTOINCREMENT, transform STRING, key STRING)",
-            "create table cur_obj (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp STRING, json STRING)",
-            "create table past_obj (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp STRING, json STRING)",
+            "create table cur_obj (id INTEGER PRIMARY KEY AUTOINCREMENT, space string, timestamp STRING, json STRING)",
+            "create table past_obj (id INTEGER PRIMARY KEY AUTOINCREMENT, space string, timestamp STRING, json STRING)",
             "create table execution (id INTEGER PRIMARY KEY AUTOINCREMENT, transform STRING, status STRING, execution_xref STRING, job_dir STRING)",
             "create table execution_input (id INTEGER PRIMARY KEY AUTOINCREMENT, execution_id INTEGER, name STRING, obj_id INTEGER, is_list INTEGER)",
             "create table execution_output (id INTEGER PRIMARY KEY AUTOINCREMENT, execution_id INTEGER, obj_id INTEGER)",

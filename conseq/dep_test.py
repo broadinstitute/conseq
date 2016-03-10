@@ -20,7 +20,7 @@ def test_limit_to_rule(tmpdir):
     len(j.get_pending()) == 1
 
     # however if we add an object, template3 can also execute
-    j.add_obj(1, dict(type="a"))
+    j.add_obj("public", 1, dict(type="a"))
     len(j.get_pending()) == 2
 
 def test_overwrite_obj(tmpdir):
@@ -32,16 +32,16 @@ def test_overwrite_obj(tmpdir):
     )
 
     # add the object, which results in a rule execution
-    id1 = j.add_obj(1, {"A":"a", "mut":{"$value": "1"}})
-    objs = j.find_objs({"A":"a"})
+    id1 = j.add_obj("public", 1, {"A":"a", "mut":{"$value": "1"}})
+    objs = j.find_objs("public", {"A":"a"})
     assert len(objs) == 1
     assert len(j.get_pending()) == 1
     assert len(j.get_all_executions()) == 0
     rule_exec_id1 = j.get_pending()[0].id
 
     # add object with same "key" which should result in the old rule execution being replaced
-    id2 = j.add_obj(2, {"A":"a", "mut":{"$value": "2"}})
-    objs = j.find_objs({"A":"a"})
+    id2 = j.add_obj("public", 2, {"A":"a", "mut":{"$value": "2"}})
+    objs = j.find_objs("public", {"A":"a"})
     assert len(objs) == 1
     assert len(j.get_pending()) == 1
     # there should still only be a single rule, but it should be a new rule with the new input
@@ -50,11 +50,11 @@ def test_overwrite_obj(tmpdir):
     assert rule_exec_id1 != rule_exec_id2
 
     # now, try with a different key to make sure it's not that all objects overwrite one another
-    id1 = j.add_obj(1, {"B":"b", "mut":{"$filename": "1"}})
-    objs = j.find_objs({"B":"b"})
+    id1 = j.add_obj("public", 1, {"B":"b", "mut":{"$filename": "1"}})
+    objs = j.find_objs("public", {"B":"b"})
     assert len(objs) == 1
-    id2 = j.add_obj(2, {"B":"b", "mut":{"$filename": "2"}})
-    objs = j.find_objs({"B":"b"})
+    id2 = j.add_obj("public", 2, {"B":"b", "mut":{"$filename": "2"}})
+    objs = j.find_objs("public", {"B":"b"})
     assert len(objs) == 1
     assert id1 != id2
 
@@ -76,9 +76,9 @@ def test_foreach(tmpdir):
     for t in templates:
         j.add_template(t)
 
-    j.add_obj(1, dict(type="contexts", name="a"))
+    j.add_obj("public", 1, dict(type="contexts", name="a"))
     assert len(j.get_pending()) == 1
-    j.add_obj(1, dict(type="contexts", name="b"))
+    j.add_obj("public", 1, dict(type="contexts", name="b"))
     assert len(j.get_pending()) == 2
 
 def test_input_changed(tmpdir):
@@ -93,7 +93,7 @@ def test_input_changed(tmpdir):
     for t in templates:
         j.add_template(t)
 
-    j.add_obj(1, dict(type="contexts", name="a"))
+    j.add_obj("public", 1, dict(type="contexts", name="a"))
     pending = j.get_pending()
     assert len(pending) == 1
     exec_id = j.record_started(pending[0].id)
@@ -102,7 +102,7 @@ def test_input_changed(tmpdir):
     pending = j.get_pending()
     assert len(pending) == 0
 
-    j.add_obj(2, dict(type="contexts", name="a"))
+    j.add_obj("public", 2, dict(type="contexts", name="a"))
     assert len(j.get_pending()) == 1
 
 def test_completion(tmpdir):
@@ -120,7 +120,7 @@ def test_completion(tmpdir):
     for t in templates:
         j.add_template(t)
 
-    j.add_obj(1, dict(type="contexts", name="a"))
+    j.add_obj("public", 1, dict(type="contexts", name="a"))
     pending = (j.get_pending())
     assert len(pending) == 1
 
@@ -168,11 +168,11 @@ def test_stuff(tmpdir):
         if transform == "MakeContexts":
             j.record_completed(2, execution_id, dep.STATUS_COMPLETED, [dict(name="a", type="context"), dict(name="b", type="context")])
 
-    j.add_obj(1, dict(type="contexts"))
-    j.add_obj(1, dict(type="atlantis_params", parameters="p1"))
-    j.add_obj(1, dict(type="atlantis_params", parameters="p2"))
-    j.add_obj(1, dict(type="crispr_dataset", library="Avana"))
-    j.add_obj(1, dict(type="crispr_dataset", library="Gecko"))
+    j.add_obj("public", 1, dict(type="contexts"))
+    j.add_obj("public", 1, dict(type="atlantis_params", parameters="p1"))
+    j.add_obj("public", 1, dict(type="atlantis_params", parameters="p2"))
+    j.add_obj("public", 1, dict(type="crispr_dataset", library="Avana"))
+    j.add_obj("public", 1, dict(type="crispr_dataset", library="Gecko"))
 
     for pending in j.get_pending():
         execute(pending.id, pending.transform, pending.inputs)

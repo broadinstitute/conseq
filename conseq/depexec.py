@@ -172,7 +172,7 @@ def preprocess_inputs(j, resolver, inputs):
                 obj_copy[k] = {"$value": v}
             timestamp = datetime.datetime.now().isoformat()
             # persist new version of object with extra properties
-            j.add_obj(timestamp, obj_copy)
+            j.add_obj(obj_.space, timestamp, obj_copy)
             xrefs_resolved[0] = True
             obj = obj_copy
         assert isinstance(obj, dict)
@@ -375,7 +375,7 @@ def add_xref(j, xref):
     timestamp = datetime.datetime.now().isoformat()
     d = dict(xref.obj)
     d["$xref_url"] = xref.url
-    return j.add_obj(timestamp, d, overwrite=False)
+    return j.add_obj("public", timestamp, d, overwrite=False)
 
 class Rules:
     def __init__(self):

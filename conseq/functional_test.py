@@ -24,9 +24,9 @@ def test_rule_with_no_inputs(tmpdir):
         outputs: {"finished": "true"}
         run "bash" with "echo test"
     """)
-    assert len(j.find_objs({}))==1
+    assert len(j.find_objs("public", {}))==1
     print("objs ------------------------------")
-    print(j.find_objs({}))
+    print(j.find_objs("public", {}))
 
 def test_rule_depending_on_xref(tmpdir):
     j = run_conseq(tmpdir, """
@@ -37,7 +37,7 @@ def test_rule_depending_on_xref(tmpdir):
         outputs: {"finished": "true"}
         run "bash" with "echo test"
     """)
-    assert len(j.find_objs({}))==2
+    assert len(j.find_objs("public", {}))==2
 
 def test_rule_depending_on_local_xref(tmpdir):
     filename = str(tmpdir)+"/xref_file"
@@ -51,7 +51,7 @@ def test_rule_depending_on_local_xref(tmpdir):
         outputs: {"finished": "true"}
         run "bash" with "cat {{ inputs.in.filename }}"
     """)
-    assert len(j.find_objs({}))==2
+    assert len(j.find_objs("public", {}))==2
 
 def test_no_results_failure(tmpdir):
     j = run_conseq(tmpdir, """
@@ -66,7 +66,7 @@ def test_rerun_multiple_times(tmpdir):
         outputs: {"finished": "true", "mut":{"$value": "1"}}
         run "bash -c echo test"
     """)
-    objs = j.find_objs({})
+    objs = j.find_objs("public", {})
     assert len(objs)==1
     assert objs[0]["mut"] == {"$value" : "1"}
 
@@ -76,7 +76,7 @@ def test_rerun_multiple_times(tmpdir):
         outputs: {"finished": "true", "mut":{"$value": "2"}}
         run "bash -c echo test"
     """, assert_clean=False)
-    objs = j.find_objs({})
+    objs = j.find_objs("public", {})
     assert len(objs)==1
     assert objs[0]["mut"] == {"$value" : "2"}
 
@@ -86,7 +86,7 @@ def test_rerun_multiple_times(tmpdir):
         outputs: {"finished": "true", "mut":{"$value": "3"}}
         run "bash -c echo test"
     """, targets=["b"], assert_clean=False)
-    objs = j.find_objs({})
+    objs = j.find_objs("public", {})
     assert len(objs)==1
     assert objs[0]["mut"] == {"$value" : "3"}
 
@@ -102,7 +102,7 @@ def test_non_key_values(tmpdir):
         outputs: {"finished": "true", "other": {"$value": "apple"}}
         run "bash" with "echo test"
     """)
-    assert len(j.find_objs({}))==1
+    assert len(j.find_objs("public", {}))==1
 
     j = run_conseq(tmpdir, """
     rule b:
@@ -110,7 +110,7 @@ def test_non_key_values(tmpdir):
         outputs: {"name": "result", "filename": {"$filename":"foo.txt"}}
         run "bash" with "echo {{inputs.in.other}} > foo.txt"
     """, assert_clean=False)
-    results = j.find_objs({"name":"result"})
+    results = j.find_objs("public", {"name":"result"})
     assert len(results)==1
     stdout = open(results[0]["filename"]["$filename"]).read()
     assert "apple\n" == stdout
@@ -128,16 +128,16 @@ def test_gc(tmpdir):
         outputs: {"finished": "true", "other": {"$value": "a"}}
         run "bash" with "echo test"
     """)
-    print("objs", j.find_objs({}))
-    assert len(j.find_objs({}))==1
+    print("objs", j.find_objs("public", {}))
+    assert len(j.find_objs("public", {}))==1
 
     j = run_conseq(tmpdir, """
     rule b:
         outputs: {"finished": "true", "other": {"$value": "b"}}
         run "bash" with "echo test"
     """, assert_clean=False)
-    print("objs", j.find_objs({}))
-    assert len(j.find_objs({}))==1
+    print("objs", j.find_objs("public", {}))
+    assert len(j.find_objs("public", {}))==1
 
     # make sure we have both executions
     assert len(j.get_all_executions()) == 2
