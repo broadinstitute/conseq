@@ -119,6 +119,39 @@ def assert_transaction_closed():
     if hasattr(dep.current_db_cursor_state, "cursor"):
         assert dep.current_db_cursor_state.cursor == None
 
+def test_spaces(tmpdir):
+    j = run_conseq(tmpdir, """
+
+    rule b:
+        inputs: in={"type": "example"}
+        outputs: {"type": "derived", "value":"{{inputs.in.value}}"}
+        run "bash" with "echo running b"
+
+    rule a:
+        outputs: {"type": "example", "value": "a"}, {"type": "example", "value": "b", "$space": "pocket"}
+        run "bash" with "echo running a"
+
+    """)
+
+    with dep.transaction(j.db):
+        spaces = j.objects.get_spaces()
+    spaces = list(spaces)
+    spaces.sort()
+
+    assert spaces == ['pocket', "public"]
+
+    results = j.find_objs("public", {"type": "example"})
+    assert len(results)==1
+    results = j.find_objs("public", {"type": "derived"})
+    assert len(results)==1
+    assert results[0].props["value"] == "a"
+
+    results = j.find_objs("pocket", {"type": "example"})
+    assert len(results)==1
+    results = j.find_objs("pocket", {"type": "derived"})
+    assert len(results)==1
+    assert results[0].props["value"] == "b"
+
 def test_gc(tmpdir):
     print("---------------------gc")
     assert_transaction_closed()
