@@ -297,10 +297,6 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, m
             active_job_ids.add(job.id)
             did_useful_work = True
 
-            job_dir = get_job_dir(state_dir, job.id)
-            if not os.path.exists(job_dir):
-                os.makedirs(job_dir)
-
             rule = rules.get_rule(job.transform)
             inputs, xrefs_resolved = preprocess_inputs(j, resolver, job.inputs)
             if xrefs_resolved:
@@ -320,8 +316,13 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, m
                     abort = True
                     break
 
-            j.record_started(job.id)
-            e = execute(job.transform, resolver, jinja2_env, job.id, job_dir, inputs, rule, rules.get_vars(), capture_output)
+            exec_id = j.record_started(job.id)
+
+            job_dir = get_job_dir(state_dir, exec_id)
+            if not os.path.exists(job_dir):
+                os.makedirs(job_dir)
+
+            e = execute(job.transform, resolver, jinja2_env, exec_id, job_dir, inputs, rule, rules.get_vars(), capture_output)
             executing.append(e)
             j.update_exec_xref(e.id, "PID:{}".format(e.proc.pid), job_dir)
 

@@ -35,19 +35,15 @@ def transaction(db):
         cursor = current_db_cursor_state.cursor
         depth = current_db_cursor_state.depth
     if cursor == None:
-        print("created cursor")
         cursor = db.cursor()
         current_db_cursor_state.cursor = cursor
     depth += 1
-    print("prior to yield depth:", depth)
     current_db_cursor_state.depth = depth
     try:
         yield
     finally:
-        print("post yield depth:", depth)
         current_db_cursor_state.depth -= 1
         if current_db_cursor_state.depth == 0:
-            print("close cursor")
             current_db_cursor_state.cursor.close()
             current_db_cursor_state.cursor = None
             db.commit()
@@ -332,6 +328,7 @@ class RuleSet:
                 rule.state = RE_STATUS_PENDING
 
     def started(self, rule_id, execution_id):
+        print("started, rule:", rule_id, " exec_id:", execution_id)
         rule = self.get(rule_id)
         assert rule.execution_id == None
         rule.execution_id = execution_id
@@ -340,6 +337,7 @@ class RuleSet:
 
     def get_space_by_execution_id(self, execution_id):
         rule = self._get_by_execution_id(execution_id)
+        print("get_space_by_Exec", execution_id, rule, self.rule_by_execution_id)
         if rule == None:
             return None
         return rule.space
@@ -789,6 +787,7 @@ class Jobs:
 
     def record_completed(self, timestamp, execution_id, new_status, outputs):
         with transaction(self.db):
+            print("get-by-exec-id =------------------------")
             default_space = self.rule_set.get_space_by_execution_id(execution_id)
             if default_space == None:
                 log.warn("No associated rule execution.  Dropping outputs: %s", outputs)
