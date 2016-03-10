@@ -35,7 +35,8 @@ Special variables:
 
 Xrefs create artifacts which represent entities, identified by a url-style names, that are outside of conseq.  Supported urls are:
 
-```taiga://...
+```
+taiga://...
 ssh://host/path/...
 http://host/path/...
 ```
@@ -59,7 +60,8 @@ For example:
 
 Assume we have the following artifacts:
 
-```type       name
+```
+type       name
 cell_line  NCI-543
 cell_line  MM3
 
@@ -69,7 +71,8 @@ WGS        NCI-433
 ```
 And the following rule:
 
-```rule process_cellline:
+```
+rule process_cellline:
   inputs: cellline={"type": "cell_line"}
   ...
 ```
@@ -77,7 +80,8 @@ Will run the "process_cellline" rule once for each artifact that has a "type" pr
 
 One can fetch multiple objects, by providing a comma seperated list such as:
 
-```rule process_cellline:
+```
+rule process_cellline:
   inputs: cellline={"type": "cell_line"}, data={"type": "WGS"}
   ...
 ```
@@ -133,5 +137,6 @@ example:
      conseq.publish(dict(name=X, ...), dict(...), ... )
      """
 ```
+
 
 
