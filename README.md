@@ -26,9 +26,10 @@ This variable is accessible in as "config.label" and can be overriden by the com
 Individual scripts should only define new lowercase variables.  Variables in uppercase are used by conseq for configuration and are defined under special variables below. 
 
 Special variables:
-DL_CACHE_DIR The directory that remote files are cached in after downloading.
-SCRIPT_DIR The directory containing the conseq script being run.
-PROLOGUE Text which is preprended to each shell script that's generated for executing a rule.  Useful for configuring the environment before the command runs.
+
+* **DL_CACHE_DIR** The directory that remote files are cached in after downloading.
+* **SCRIPT_DIR** The directory containing the conseq script being run.
+* **PROLOGUE** Text which is preprended to each shell script that's generated for executing a rule.  Useful for configuring the environment before the command runs.
 
 ### Xref
 
