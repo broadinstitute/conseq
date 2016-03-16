@@ -3,13 +3,18 @@ from . import depexec
 from . import dep
 import os
 
-def run_conseq(tmpdir, config, targets=[]):
+def run_conseq(tmpdir, config, targets=[], assert_clean=True):
     state_dir=str(tmpdir)+"/state"
     filename = str(tmpdir)+"/t.conseq"
     with open(filename, "wt") as fd:
         fd.write(config)
+
+    db_path = os.path.join(state_dir, "db.sqlite3")
+    if assert_clean:
+        assert not os.path.exists(db_path)
+
     depexec.main(filename, state_dir, targets, {}, 10, False, False)
-    j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
+    j = dep.open_job_db(db_path)
     return j
 
 def test_rule_with_no_inputs(tmpdir):
@@ -19,9 +24,9 @@ def test_rule_with_no_inputs(tmpdir):
         outputs: {"finished": "true"}
         run "bash" with "echo test"
     """)
-    assert len(j.find_objs({}))==1
+    assert len(j.find_objs("public", {}))==1
     print("objs ------------------------------")
-    print(j.find_objs({}))
+    print(j.find_objs("public", {}))
 
 def test_rule_depending_on_xref(tmpdir):
     j = run_conseq(tmpdir, """
@@ -32,7 +37,7 @@ def test_rule_depending_on_xref(tmpdir):
         outputs: {"finished": "true"}
         run "bash" with "echo test"
     """)
-    assert len(j.find_objs({}))==2
+    assert len(j.find_objs("public", {}))==2
 
 def test_rule_depending_on_local_xref(tmpdir):
     filename = str(tmpdir)+"/xref_file"
@@ -46,7 +51,7 @@ def test_rule_depending_on_local_xref(tmpdir):
         outputs: {"finished": "true"}
         run "bash" with "cat {{ inputs.in.filename }}"
     """)
-    assert len(j.find_objs({}))==2
+    assert len(j.find_objs("public", {}))==2
 
 def test_no_results_failure(tmpdir):
     j = run_conseq(tmpdir, """
@@ -61,7 +66,7 @@ def test_rerun_multiple_times(tmpdir):
         outputs: {"finished": "true", "mut":{"$value": "1"}}
         run "bash -c echo test"
     """)
-    objs = j.find_objs({})
+    objs = j.find_objs("public", {})
     assert len(objs)==1
     assert objs[0]["mut"] == {"$value" : "1"}
 
@@ -70,8 +75,8 @@ def test_rerun_multiple_times(tmpdir):
     rule b:
         outputs: {"finished": "true", "mut":{"$value": "2"}}
         run "bash -c echo test"
-    """)
-    objs = j.find_objs({})
+    """, assert_clean=False)
+    objs = j.find_objs("public", {})
     assert len(objs)==1
     assert objs[0]["mut"] == {"$value" : "2"}
 
@@ -80,8 +85,8 @@ def test_rerun_multiple_times(tmpdir):
     rule b:
         outputs: {"finished": "true", "mut":{"$value": "3"}}
         run "bash -c echo test"
-    """, targets=["b"])
-    objs = j.find_objs({})
+    """, targets=["b"], assert_clean=False)
+    objs = j.find_objs("public", {})
     assert len(objs)==1
     assert objs[0]["mut"] == {"$value" : "3"}
 
@@ -97,34 +102,75 @@ def test_non_key_values(tmpdir):
         outputs: {"finished": "true", "other": {"$value": "apple"}}
         run "bash" with "echo test"
     """)
-    assert len(j.find_objs({}))==1
+    assert len(j.find_objs("public", {}))==1
 
     j = run_conseq(tmpdir, """
     rule b:
         inputs: in={"finished": "true"}
         outputs: {"name": "result", "filename": {"$filename":"foo.txt"}}
         run "bash" with "echo {{inputs.in.other}} > foo.txt"
-    """)
-    results = j.find_objs({"name":"result"})
+    """, assert_clean=False)
+    results = j.find_objs("public", {"name":"result"})
     assert len(results)==1
     stdout = open(results[0]["filename"]["$filename"]).read()
     assert "apple\n" == stdout
 
+def assert_transaction_closed():
+    if hasattr(dep.current_db_cursor_state, "cursor"):
+        assert dep.current_db_cursor_state.cursor == None
+
+def test_spaces(tmpdir):
+    j = run_conseq(tmpdir, """
+
+    rule b:
+        inputs: in={"type": "example"}
+        outputs: {"type": "derived", "value":"{{inputs.in.value}}"}
+        run "bash" with "echo running b"
+
+    rule a:
+        outputs: {"type": "example", "value": "a"}, {"type": "example", "value": "b", "$space": "pocket"}
+        run "bash" with "echo running a"
+
+    """)
+
+    with dep.transaction(j.db):
+        spaces = j.objects.get_spaces()
+    spaces = list(spaces)
+    spaces.sort()
+
+    assert spaces == ['pocket', "public"]
+
+    results = j.find_objs("public", {"type": "example"})
+    assert len(results)==1
+    results = j.find_objs("public", {"type": "derived"})
+    assert len(results)==1
+    assert results[0].props["value"] == "a"
+
+    results = j.find_objs("pocket", {"type": "example"})
+    assert len(results)==1
+    results = j.find_objs("pocket", {"type": "derived"})
+    assert len(results)==1
+    assert results[0].props["value"] == "b"
 
 def test_gc(tmpdir):
+    print("---------------------gc")
+    assert_transaction_closed()
+
     j = run_conseq(tmpdir, """
     rule a:
         outputs: {"finished": "true", "other": {"$value": "a"}}
         run "bash" with "echo test"
     """)
-    assert len(j.find_objs({}))==1
+    print("objs", j.find_objs("public", {}))
+    assert len(j.find_objs("public", {}))==1
 
     j = run_conseq(tmpdir, """
     rule b:
-        outputs: {"finished": "true", "other": {"$value": "a"}}
+        outputs: {"finished": "true", "other": {"$value": "b"}}
         run "bash" with "echo test"
-    """)
-    assert len(j.find_objs({}))==1
+    """, assert_clean=False)
+    print("objs", j.find_objs("public", {}))
+    assert len(j.find_objs("public", {}))==1
 
     # make sure we have both executions
     assert len(j.get_all_executions()) == 2

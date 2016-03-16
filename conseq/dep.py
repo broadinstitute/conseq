@@ -12,11 +12,15 @@ class InstanceTemplate:
         pass
 
 STATUS_UNKNOWN = "unknown"
-STATUS_READY = "ready"
-STATUS_DEFERRED = "deferred"
-STATUS_CANCELED = "canceled"
+STATUS_STARTED = "started"
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
+
+RE_STATUS_PENDING = "pending"
+RE_STATUS_STARTED = "started"
+RE_STATUS_COMPLETE = "complete"
+RE_STATUS_FAILED = "failed"
+RE_STATUS_DEFERRED = "deferred"
 
 from contextlib import contextmanager
 import threading
@@ -35,12 +39,15 @@ def transaction(db):
         current_db_cursor_state.cursor = cursor
     depth += 1
     current_db_cursor_state.depth = depth
-    yield
-    current_db_cursor_state.depth -= 1
-    if current_db_cursor_state.depth == 0:
-        current_db_cursor_state.cursor.close()
-        current_db_cursor_state.cursor = None
-        db.commit()
+    try:
+        yield
+    finally:
+        current_db_cursor_state.depth -= 1
+        if current_db_cursor_state.depth == 0:
+            current_db_cursor_state.cursor.close()
+            current_db_cursor_state.cursor = None
+            db.commit()
+
 
 def get_cursor():
     assert current_db_cursor_state.cursor != None
@@ -60,13 +67,14 @@ def split_props_into_key_and_other(props):
 
 class Obj:
     "Models an any input or output artifact by a set of key-value pairs"
-    def __init__(self, id, timestamp, props):
+    def __init__(self, id, space, timestamp, props):
         """
         :param id:
         :param props: either a dictionary or a sequence of (key, value) tuples
         :return:
         """
         self.id = id
+        self.space = space
         self.timestamp = timestamp
         self.props = props
 
@@ -91,7 +99,7 @@ class Obj:
     #     return d
 
     def __repr__(self):
-        return "<{} {}>".format(self.id, repr(self.props))
+        return "<{}:{} {}>".format(self.space, self.id, repr(self.props))
 
 class ObjHistory:
     def __init__(self):
@@ -99,12 +107,12 @@ class ObjHistory:
 
     def get(self, id):
         c = get_cursor()
-        c.execute("select id, timestamp, json from past_obj where id = ?", [id])
+        c.execute("select id, space, timestamp, json from past_obj where id = ?", [id])
         o = c.fetchone()
         if o == None:
             return None
-        id, timestamp, _json = o
-        return Obj(id, timestamp, json.loads(_json))
+        id, space, timestamp, _json = o
+        return Obj(id, space, timestamp, json.loads(_json))
 
     def add(self, obj):
         # first check to see if this already exists
@@ -112,7 +120,7 @@ class ObjHistory:
             return
 
         c = get_cursor()
-        c.execute("insert into past_obj (id, timestamp, json) values (?, ?, ?)", [obj.id, obj.timestamp, json.dumps(obj.props)])
+        c.execute("insert into past_obj (id, space, timestamp, json) values (?, ?, ?, ?)", [obj.id, obj.space, obj.timestamp, json.dumps(obj.props)])
 
 class ObjSet:
     """
@@ -126,17 +134,17 @@ class ObjSet:
 
     def __iter__(self):
         c = get_cursor()
-        c.execute("select id, timestamp, json from cur_obj")
+        c.execute("select id, space, timestamp, json from cur_obj")
         objs = []
-        for id, timestamp, _json in c.fetchall():
-            objs.append( Obj(id, timestamp, json.loads(_json)) )
+        for id, space, timestamp, _json in c.fetchall():
+            objs.append( Obj(id, space, timestamp, json.loads(_json)) )
         return iter(objs)
 
     def get(self, id):
         c = get_cursor()
-        c.execute("select id, timestamp, json from cur_obj where id = ?", [id])
-        id, timestamp, _json = c.fetchone()
-        return Obj(id, timestamp, json.loads(_json))
+        c.execute("select id, space, timestamp, json from cur_obj where id = ?", [id])
+        id, space, timestamp, _json = c.fetchone()
+        return Obj(id, space, timestamp, json.loads(_json))
 
     def remove(self, id):
         c = get_cursor()
@@ -144,9 +152,14 @@ class ObjSet:
         for remove_listener in self.remove_listeners:
             remove_listener(id)
 
-    def add(self, timestamp, props):
+    def get_spaces(self):
+        c = get_cursor()
+        c.execute("select distinct space from cur_obj")
+        return set([x[0] for x in c.fetchall()] + ["public"])
+
+    def add(self, space, timestamp, props):
         # first check to see if this already exists
-        match = self.find_by_key(props)
+        match = self.find_by_key(space, props)
 
         if match != None:
             if match.timestamp == timestamp:
@@ -155,19 +168,19 @@ class ObjSet:
             self.remove(match.id)
 
         c = get_cursor()
-        c.execute("insert into cur_obj (timestamp, json) values (?, ?)", [timestamp, json.dumps(props)])
+        c.execute("insert into cur_obj (space, timestamp, json) values (?, ?, ?)", [space, timestamp, json.dumps(props)])
         id = c.lastrowid
 
-        obj = Obj(id, timestamp, props)
+        obj = Obj(id, space, timestamp, props)
 
         for add_listener in self.add_listeners:
             add_listener(obj)
 
         return id
 
-    def find_by_key(self, props):
+    def find_by_key(self, space, props):
         key_props = split_props_into_key_and_other(props)[0]
-        matches = self.find(key_props)
+        matches = self.find(space, key_props)
         if len(matches) > 1:
             raise Exception("Too many matches: key_props={}, matches={}".format(key_props, matches))
         elif len(matches) == 1:
@@ -175,16 +188,21 @@ class ObjSet:
         else:
             return None
 
-    def find(self, properties):
+    def find(self, space, properties):
         result = []
         for o in self:
+            if o.space != space:
+                continue
+
             skip = False
             for k, v in properties.items():
                 if not ((k in o.props) and (o.props[k] == v)):
                     skip = True
                     break
+
             if not skip:
                 result.append(o)
+
         return result
 
 def assertInputsValid(inputs):
@@ -193,19 +211,22 @@ def assertInputsValid(inputs):
         name, value = x
         assert isinstance(value, Obj) or (isinstance(value, tuple) and isinstance(value[0], Obj))
 
-class Rule:
+class RuleExecution:
     """
     Represents a statement describing what transform to run to generate a set of Objs (outputs) from a different set of Objs (inputs)
     """
-    def __init__(self, id, inputs, transform):
+    def __init__(self, id, space, inputs, transform, state):
         assertInputsValid(inputs)
 
+        self.space = space
         self.inputs = inputs
         self.transform = transform
         self.id = id
+        self.state = state
+        self.execution_id = None
 
     def __repr__(self):
-        return "<Rule in:{} out:{} transform:{}>".format(self.inputs, self.outputs, self.transform)
+        return "<Rule {} in:{}:{} transform:{} state:{}>".format(self.space, self.id, self.inputs, self.transform, self.state)
 
 
 class RuleSet:
@@ -217,21 +238,14 @@ class RuleSet:
     def __init__(self):
         self.remove_rule_listeners = []
         self.add_rule_listeners = []
+        self.rule_by_key = {}
+        self.rules_by_id = {}
+        self.rules_by_input = collections.defaultdict(lambda: set())
+        self.next_rule_id = 1
+        self.rule_by_execution_id = {}
 
     def __iter__(self):
-        c = get_cursor()
-        c.execute("select id, transform from rule")
-        rules = c.fetchall()
-        return iter(rules)
-
-    def remove_rule(self, rule_id):
-        c = get_cursor()
-        c.execute("delete from rule where id = ?", [rule_id])
-        rows = c.rowcount
-        if rows > 0:
-            for remove_rule_listener in self.remove_rule_listeners:
-                remove_rule_listener(rule_id)
-        return rows
+        return iter(self.rules_by_id.values())
 
     def _mk_rule_natural_key(self, inputs, transform):
         flattened_inputs = []
@@ -243,83 +257,149 @@ class RuleSet:
         return repr((tuple(flattened_inputs), transform))
 
     def find_by_input(self, input_id):
-        c = get_cursor()
-        c.execute("select rule_id from rule_input where obj_id = ?", [input_id])
-        return [x[0] for x in c.fetchall()]
+        rule_ids = list(self.rules_by_input[input_id])
+        return rule_ids
 
-    def add_rule(self, inputs, transform):
+    def get(self, id):
+        return self.rules_by_id[id]
+
+    def add_rule(self, space, inputs, transform):
         # first check to make sure rule isn't duplicated
         key = self._mk_rule_natural_key(inputs, transform)
 
-        c = get_cursor()
-        c.execute("select id from rule where key = ?", [key])
-        rule_id = c.fetchone()
-        if rule_id != None:
-            return rule_id[0]
+        if key in self.rule_by_key:
+            return self.rule_by_key[key].id
 
-        c.execute("insert into rule (transform, key) values (?, ?)", [transform, key])
-        rule_id = c.lastrowid
-        for name, objs in inputs:
-            if not isinstance(objs, tuple):
-                objs = [objs]
+        id = self.next_rule_id
+        self.next_rule_id += 1
+
+        state = RE_STATUS_PENDING
+        for name, obj in inputs:
+            if not isinstance(obj, Obj):
+                state = RE_STATUS_DEFERRED
+
+        rule = RuleExecution(id, space, inputs, transform, state)
+        self.rule_by_key[key] = rule
+        self.rules_by_id[id] = rule
+        for name, _obj in rule.inputs:
+            if isinstance(_obj, Obj):
+                objs = [_obj]
+            else:
+                objs = _obj
             for obj in objs:
-                c.execute("insert into rule_input (rule_id, name, obj_id) values (?, ?, ?)", [rule_id, name, obj.id])
-
-        rule = Rule(rule_id, inputs, transform)
+                self.rules_by_input[obj.id].add(rule.id)
 
         for add_rule_listener in self.add_rule_listeners:
             add_rule_listener(rule)
 
-        return rule_id
+        return id
 
+    def remove_rule(self, rule_id):
+        rule = self.rules_by_id[rule_id]
+        key = self._mk_rule_natural_key(rule.inputs, rule.transform)
 
-class RulePending:
-    def __init__(self, id, rule_id, inputs, outputs, transform, status, exec_xref, job_dir):
+        for name, _obj in rule.inputs:
+            if isinstance(_obj, Obj):
+                objs = [_obj]
+            else:
+                objs = _obj
+            for obj in objs:
+                self.rules_by_input[obj.id].remove(rule_id)
+
+        del self.rules_by_id[rule_id]
+        del self.rule_by_key[key]
+        if rule.execution_id != None:
+            del self.rule_by_execution_id[rule.execution_id]
+
+        for l in self.remove_rule_listeners:
+            l(rule_id)
+
+    def get_pending(self):
+        print("get_pending", self.rules_by_id)
+        pending = []
+        for rule in self.rules_by_id.values():
+            if rule.state == RE_STATUS_PENDING:
+                pending.append(rule)
+        return pending
+
+    def enable_deferred(self):
+        for rule in self.rules_by_id.values():
+            if rule.state == RE_STATUS_DEFERRED:
+                rule.state = RE_STATUS_PENDING
+
+    def started(self, rule_id, execution_id):
+        print("started, rule:", rule_id, " exec_id:", execution_id)
+        rule = self.get(rule_id)
+        assert rule.execution_id == None
+        rule.execution_id = execution_id
+        self.rule_by_execution_id[execution_id] = rule
+        rule.state = RE_STATUS_STARTED
+
+    def get_space_by_execution_id(self, execution_id):
+        rule = self._get_by_execution_id(execution_id)
+        print("get_space_by_Exec", execution_id, rule, self.rule_by_execution_id)
+        if rule == None:
+            return None
+        return rule.space
+
+    def completed_execution(self, execution_id, new_status):
+        assert execution_id != None
+        if new_status == STATUS_COMPLETED:
+            s = RE_STATUS_COMPLETE
+        elif new_status == STATUS_FAILED:
+            s = RE_STATUS_FAILED
+        else:
+            raise Exception("invalid state")
+
+        rule = self._get_by_execution_id(execution_id)
+        if rule != None:
+            rule.state = s
+        print("set rule", rule, "state to", s, "execution_id=",execution_id, self.rule_by_execution_id)
+
+    def _get_by_execution_id(self, execution_id):
+        return self.rule_by_execution_id.get(execution_id)
+
+    def remove_incomplete(self):
+        incomplete = []
+        for rule in self.rules_by_id.values():
+            if rule.state != RE_STATUS_COMPLETE:
+                incomplete.append(rule.id)
+        for rule_id in incomplete:
+            self.remove_rule(rule_id)
+
+class Execution:
+    def __init__(self, id, inputs, outputs, transform, status, exec_xref, job_dir):
         assertInputsValid(inputs)
 
         self.id = id
         self.transform = transform
         self.inputs = inputs
-        self.rule_id = rule_id
         self.status = status
         self.outputs = outputs
         self.exec_xref = exec_xref
         self.job_dir = job_dir
 
     def __repr__(self):
-        return "<Rule id:{} rule_id:{} inputs:{} outputs:{} transform:{} status:{} exec_xref:{}>".format(self.id, self.rule_id, self.inputs, self.outputs, self.transform, self.status, self.exec_xref)
+        return "<Rule id:{} inputs:{} outputs:{} transform:{} status:{} exec_xref:{}>".format(self.id, self.inputs, self.outputs, self.transform, self.status, self.exec_xref)
 
 
 class ExecutionLog:
     def __init__(self, obj_history):
         self.obj_history = obj_history
 
-    def enable_deferred(self):
+    def mark_incomplete(self):
         c = get_cursor()
-        c.execute("update execution set status = ? where status = ?", [STATUS_READY, STATUS_DEFERRED])
-
-    def cancel_execution(self, rule_id=None, exec_id=None):
-        assert rule_id != None or exec_id != None
-        c = get_cursor()
-        if rule_id != None:
-            c.execute("update execution set status = ? where rule_id = ?", [STATUS_CANCELED, rule_id])
-        else:
-            c.execute("update execution set status = ? where id = ?", [STATUS_CANCELED, exec_id])
+        c.execute("update execution set status = ? where status = ?", [STATUS_UNKNOWN, STATUS_STARTED])
 
     def _make_copy_get_id(self, x):
         self.obj_history.add(x)
         return x.id
 
-    def add_execution(self, rule):
-        status = STATUS_READY
-
-        # look at the inputs, if any obj is a list (not a Obj), that implies this was a "forall" and we want to mark this as deferred
-        for name, objs in rule.inputs:
-            if not isinstance(objs, Obj):
-                status = STATUS_DEFERRED
+    def started_execution(self, rule):
+        status = STATUS_STARTED
 
         c = get_cursor()
-        c.execute("insert into execution (rule_id, transform, status) values (?, ?, ?)", [rule.id, rule.transform, status])
+        c.execute("insert into execution (transform, status) values (?, ?)", [rule.transform, status])
         exec_id = c.lastrowid
         for name, objs in rule.inputs:
             is_list = True
@@ -333,7 +413,7 @@ class ExecutionLog:
 
     def _as_RuleList(self, c):
         pending = []
-        for exec_id, rule_id, transform, status, exec_xref, job_dir in c.fetchall():
+        for exec_id, transform, status, exec_xref, job_dir in c.fetchall():
             inputs = collections.defaultdict(lambda: [])
             var_is_list = {}
             c.execute("select name, obj_id, is_list from execution_input where execution_id = ?", [exec_id])
@@ -356,7 +436,7 @@ class ExecutionLog:
             for obj_id, in c.fetchall():
                 outputs.append(self.obj_history.get(obj_id))
 
-            pending.append(RulePending(exec_id, rule_id, tuple(in_name_values), outputs, transform, status, exec_xref, job_dir))
+            pending.append(Execution(exec_id, tuple(in_name_values), outputs, transform, status, exec_xref, job_dir))
         return pending
 
     def get(self, id):
@@ -376,21 +456,16 @@ class ExecutionLog:
         c.execute("delete from execution_output where execution_id = ?", [id])
         c.execute("delete from execution where id = ?", [id])
 
-    def get_pending(self):
-        c = get_cursor()
-        c.execute("select id, rule_id, transform, status, execution_xref, job_dir from execution where status = ?", [STATUS_READY])
-        return self._as_RuleList(c)
-
     def get_by_output(self, obj):
         # probably won't really make a copy, just want to get the corresponding id
         obj_id = self._make_copy_get_id(obj)
         c = get_cursor()
-        c.execute("select id, rule_id, transform, status, execution_xref, job_dir from execution e where exists (select 1 from execution_output o where o.execution_id = e.id and obj_id = ?)", [obj_id])
+        c.execute("select id, transform, status, execution_xref, job_dir from execution e where exists (select 1 from execution_output o where o.execution_id = e.id and obj_id = ?)", [obj_id])
         return self._as_RuleList(c)
 
     def get_all(self):
         c = get_cursor()
-        c.execute("select id, rule_id, transform, status, execution_xref, job_dir from execution")
+        c.execute("select id, transform, status, execution_xref, job_dir from execution")
         return self._as_RuleList(c)
 
     def update_exec_xref(self, exec_id, xref, job_dir):
@@ -423,14 +498,6 @@ class ExecutionLog:
                     continue
                 objs_to_explore.append(input_obj_id)
         return objs_reached
-
-#    def compute_inputs_for_obj_map(self):
-#        inputs_for_obj = {}
-#        for rule in self.get_all():
-#            obj_ids = [x.obj_id for x in rule.inputs]
-#            for output in rule.outputs:
-#                inputs_for_obj[output.id] = obj_ids
-
 
     def to_dot(self, detailed):
         """
@@ -538,7 +605,7 @@ class Template:
                 return False
         return True
 
-    def _create_rules(self, obj_set, bindings, queries):
+    def _create_rules(self, obj_set, space, bindings, queries):
         if len(queries) == 0:
             if self._predicate_satisifed(bindings):
                 return [bindings]
@@ -549,17 +616,17 @@ class Template:
         q = queries[-1]
 
         results = []
-        for obj in obj_set.find(q.const_constraints):
+        for obj in obj_set.find(space, q.const_constraints):
             new_binding = dict(bindings)
             new_binding[q.variable] = obj
 
-            results.extend(self._create_rules(obj_set, new_binding, q_rest))
+            results.extend(self._create_rules(obj_set, space, new_binding, q_rest))
         return results
 
-    def _execute_forall_queries(self, bindings, obj_set):
+    def _execute_forall_queries(self, bindings, obj_set, space):
         bindings = dict(bindings)
         for q in self.forall_queries:
-            objs = tuple(obj_set.find(q.const_constraints))
+            objs = tuple(obj_set.find(space, q.const_constraints))
             if len(objs) == 0:
                 return None
             bindings[q.variable] = objs
@@ -567,17 +634,20 @@ class Template:
 
     def create_rules(self, obj_set):
         #print ("create_rules, transform:",self.transform,", queries: ", self.foreach_queries)
-        if len(self.foreach_queries) == 0:
-            bindings = [{}]
-        else:
-            bindings = self._create_rules(obj_set, {}, self.foreach_queries)
-
         results = []
-        for b in bindings:
-            b = self._execute_forall_queries(b, obj_set)
-            if b == None:
-                continue
-            results.append( (tuple(b.items()), self.transform) )
+        for space in obj_set.get_spaces():
+            if len(self.foreach_queries) == 0 and space == "public":
+                bindings = [{}]
+            else:
+                bindings = self._create_rules(obj_set, space, {}, self.foreach_queries)
+
+            # after all for-eaches are resolved, try the for-alls
+            for b in bindings:
+                b = self._execute_forall_queries(b, obj_set, space)
+                if b == None:
+                    continue
+                inputs = tuple(b.items())
+                results.append( (space, inputs, self.transform) )
 
         log.debug("Created rules for %s: %s", self.transform, results)
         return results
@@ -620,8 +690,6 @@ class Jobs:
         self.add_new_obj_listener(self._object_added)
         self.objects.remove_listeners.append(self._object_removed)
         self.log = ExecutionLog(ObjHistory())
-        self.rule_set.add_rule_listeners.append(self.log.add_execution)
-        self.rule_set.remove_rule_listeners.append(self.log.cancel_execution)
         self.rule_allowed = lambda inputs, transform: True
 
     def limitStartToTemplates(self, templateNames):
@@ -638,21 +706,20 @@ class Jobs:
         for template in self.rule_templates:
             new_rules.extend(template.create_rules(self.objects))
 
-        for rule in new_rules:
-            self._add_rule(rule)
+        for space, inputs, transform in new_rules:
+            self._add_rule(space, inputs, transform)
 
     def _object_added(self, obj):
         new_rules = []
         for template in self.rule_templates:
             new_rules.extend(template.create_rules(self.objects))
 
-        for rule in new_rules:
-            self._add_rule(rule)
+        for space, inputs, transform in new_rules:
+            self._add_rule(space, inputs, transform)
 
-    def _add_rule(self, rule):
-        inputs, transform = rule
+    def _add_rule(self, space, inputs, transform):
         if self.rule_allowed(inputs, transform):
-            self.rule_set.add_rule(*rule)
+            self.rule_set.add_rule(space, inputs, transform)
 
     def add_new_obj_listener(self, listener):
         self.objects.add_listeners.append(listener)
@@ -670,9 +737,9 @@ class Jobs:
             self.rule_templates.append(template)
             new_rules = template.create_rules(self.objects)
             for rule in new_rules:
-                self._add_rule(rule)
+                self._add_rule(*rule)
 
-    def add_obj(self, timestamp, obj_props, overwrite=True):
+    def add_obj(self, space, timestamp, obj_props, overwrite=True):
         """
         Used to record the creation of an object with a given timestamp
 
@@ -682,11 +749,11 @@ class Jobs:
 
         with transaction(self.db):
             if not overwrite:
-                existing = self.objects.find_by_key(obj_props)
+                existing = self.objects.find_by_key(space, obj_props)
                 if existing != None:
                     return existing.id
 
-            return self.objects.add(timestamp, obj_props)
+            return self.objects.add(space, timestamp, obj_props)
 
     def remove_obj(self, obj_id, with_invalidate):
         with transaction(self.db):
@@ -696,13 +763,12 @@ class Jobs:
                     self.rule_set.remove_rule(x.rule_id)
             self.objects.remove(obj_id)
 
-    def find_objs(self, query):
+    def find_objs(self, space, query):
         with transaction(self.db):
-            return self.objects.find(query)
+            return self.objects.find(space, query)
 
     def get_pending(self):
-        with transaction(self.db):
-            return self.log.get_pending()
+        return self.rule_set.get_pending()
 
     def get_all_executions(self):
         with transaction(self.db):
@@ -710,36 +776,56 @@ class Jobs:
 
     def enable_deferred(self):
         with transaction(self.db):
-            return self.log.enable_deferred()
+            return self.rule_set.enable_deferred()
+
+    def record_started(self, rule_id):
+        with transaction(self.db):
+            rule = self.rule_set.get(rule_id)
+            execution_id = self.log.started_execution(rule)
+            self.rule_set.started(rule_id, execution_id)
+            return execution_id
 
     def record_completed(self, timestamp, execution_id, new_status, outputs):
         with transaction(self.db):
-            interned_outputs = []
-            for output in outputs:
-                obj_id = self.add_obj(timestamp, output)
-                interned_outputs.append( self.objects.get(obj_id) )
-            self.log.record_completed(execution_id, new_status, interned_outputs)
-            if new_status == STATUS_FAILED:
-                e = self.log.get(execution_id)
-                self.rule_set.remove_rule(e.rule_id)
+            print("get-by-exec-id =------------------------")
+            default_space = self.rule_set.get_space_by_execution_id(execution_id)
+            if default_space == None:
+                log.warn("No associated rule execution.  Dropping outputs: %s", outputs)
+                self.log.record_completed(execution_id, new_status, [])
+            else:
+                def get_space(obj):
+                    if "$space" in obj:
+                        o = dict(obj)
+                        del o["$space"]
+                        return obj["$space"], o
+                    else:
+                        return default_space, obj
+
+                interned_outputs = []
+                for output in outputs:
+                    space, output = get_space(output)
+
+                    obj_id = self.add_obj(space, timestamp, output)
+                    interned_outputs.append( self.objects.get(obj_id) )
+                self.log.record_completed(execution_id, new_status, interned_outputs)
+                self.rule_set.completed_execution(execution_id, new_status)
 
     def update_exec_xref(self, exec_id, xref, job_dir):
         with transaction(self.db):
             self.log.update_exec_xref(exec_id, xref, job_dir)
 
-    def cancel_execution(self, exec_id):
+    def cleanup_incomplete(self):
         with transaction(self.db):
-            e = self.log.get(exec_id)
-            self.rule_set.remove_rule(e.rule_id)
-            self.log.cancel_execution(exec_id=exec_id)
+            self.rule_set.remove_incomplete()
+            self.log.mark_incomplete()
 
     def invalidate_rule_execution(self, transform):
         with transaction(self.db):
             count = 0
-            for r in self.log.get_all():
+            for r in self.get_pending():
                 if r.transform != transform:
                     continue
-                count += self.rule_set.remove_rule(r.rule_id)
+                count += self.rule_set.remove_rule(r.id)
         return count
 
     def gc(self, rm_callback):
@@ -786,10 +872,9 @@ def open_job_db(filename):
     if needs_create:
         stmts = [
             "create table rule (id INTEGER PRIMARY KEY AUTOINCREMENT, transform STRING, key STRING)",
-            "create table rule_input (id INTEGER PRIMARY KEY AUTOINCREMENT, rule_id INTEGER, name string, obj_id INTEGER)",
-            "create table cur_obj (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp STRING, json STRING)",
-            "create table past_obj (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp STRING, json STRING)",
-            "create table execution (id INTEGER PRIMARY KEY AUTOINCREMENT, rule_id INTEGER, transform STRING, status STRING, execution_xref STRING, job_dir STRING)",
+            "create table cur_obj (id INTEGER PRIMARY KEY AUTOINCREMENT, space string, timestamp STRING, json STRING)",
+            "create table past_obj (id INTEGER PRIMARY KEY AUTOINCREMENT, space string, timestamp STRING, json STRING)",
+            "create table execution (id INTEGER PRIMARY KEY AUTOINCREMENT, transform STRING, status STRING, execution_xref STRING, job_dir STRING)",
             "create table execution_input (id INTEGER PRIMARY KEY AUTOINCREMENT, execution_id INTEGER, name STRING, obj_id INTEGER, is_list INTEGER)",
             "create table execution_output (id INTEGER PRIMARY KEY AUTOINCREMENT, execution_id INTEGER, obj_id INTEGER)",
             ]

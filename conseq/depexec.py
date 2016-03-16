@@ -86,7 +86,6 @@ def exec_script(name, id, language, job_dir, run_stmts, outputs, capture_output,
     stderr_path = os.path.abspath(stderr_path)
     retcode_path = os.path.abspath(os.path.join(job_dir, "retcode.txt"))
 
-
     wrapper_path = os.path.join(job_dir, "wrapper.sh")
     with open(wrapper_path, "w") as fd:
         fd.write("set -ex\n")
@@ -173,7 +172,7 @@ def preprocess_inputs(j, resolver, inputs):
                 obj_copy[k] = {"$value": v}
             timestamp = datetime.datetime.now().isoformat()
             # persist new version of object with extra properties
-            j.add_obj(timestamp, obj_copy)
+            j.add_obj(obj_.space, timestamp, obj_copy)
             xrefs_resolved[0] = True
             obj = obj_copy
         assert isinstance(obj, dict)
@@ -285,7 +284,7 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, m
 
         did_useful_work = False
         for job in pending_jobs:
-            assert isinstance(job, dep.RulePending)
+            assert isinstance(job, dep.RuleExecution)
 
             # if we've hit our cap on concurrent executions, just bail before spawning anything new
             if len(executing) >= max_concurrent_executions:
@@ -297,10 +296,6 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, m
 
             active_job_ids.add(job.id)
             did_useful_work = True
-
-            job_dir = get_job_dir(state_dir, job.id)
-            if not os.path.exists(job_dir):
-                os.makedirs(job_dir)
 
             rule = rules.get_rule(job.transform)
             inputs, xrefs_resolved = preprocess_inputs(j, resolver, job.inputs)
@@ -321,7 +316,13 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, m
                     abort = True
                     break
 
-            e = execute(job.transform, resolver, jinja2_env, job.id, job_dir, inputs, rule, rules.get_vars(), capture_output)
+            exec_id = j.record_started(job.id)
+
+            job_dir = get_job_dir(state_dir, exec_id)
+            if not os.path.exists(job_dir):
+                os.makedirs(job_dir)
+
+            e = execute(job.transform, resolver, jinja2_env, exec_id, job_dir, inputs, rule, rules.get_vars(), capture_output)
             executing.append(e)
             j.update_exec_xref(e.id, "PID:{}".format(e.proc.pid), job_dir)
 
@@ -375,7 +376,7 @@ def add_xref(j, xref):
     timestamp = datetime.datetime.now().isoformat()
     d = dict(xref.obj)
     d["$xref_url"] = xref.url
-    return j.add_obj(timestamp, d, overwrite=False)
+    return j.add_obj("public", timestamp, d, overwrite=False)
 
 class Rules:
     def __init__(self):
