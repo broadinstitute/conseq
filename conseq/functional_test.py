@@ -178,3 +178,19 @@ def test_gc(tmpdir):
     j.gc()
     # after GC there's only one
     assert len(j.get_all_executions()) == 1
+
+def test_rules_with_all_exec_once(tmpdir):
+    j = run_conseq(tmpdir, """
+    rule a:
+        outputs: {"type": "thing", "value": "a"}
+        run "bash" with "echo test"
+    rule b:
+        outputs: {"type": "thing", "value": "b"}
+        run "bash" with "echo test"
+    rule c:
+        inputs: x={"type": "thing"}
+        outputs: {"done": "true"}
+        run "bash" with "echo test"
+    """)
+    assert len(j.find_objs("public", {})) == 3
+    assert len(j.get_all_executions()) == 3

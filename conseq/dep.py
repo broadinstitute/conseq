@@ -247,10 +247,14 @@ class RuleSet:
     def __iter__(self):
         return iter(self.rules_by_id.values())
 
-    def _mk_rule_natural_key(self, inputs, transform):
+    def _mk_rule_natural_key(self, inputs, transform, include_all_inputs):
         flattened_inputs = []
         for n, vs in inputs:
-            if not isinstance(vs, tuple):
+            if isinstance(vs, tuple):
+                # if this is an "all" parameter, skip if include_all_inputs is not set
+                if not include_all_inputs:
+                    continue
+            else:
                 vs = (vs,)
             flattened_inputs.append( (n, tuple([x.id for x in vs]))  )
         flattened_inputs.sort()
@@ -265,10 +269,22 @@ class RuleSet:
 
     def add_rule(self, space, inputs, transform):
         # first check to make sure rule isn't duplicated
-        key = self._mk_rule_natural_key(inputs, transform)
+        key = self._mk_rule_natural_key(inputs, transform, False)
 
         if key in self.rule_by_key:
-            return self.rule_by_key[key].id
+            existing_rule = self.rule_by_key[key]
+            # now, "all" parameters get treated differently.  We allow all parameters to change a rule.  Compare
+            # this one and the existing rule with all parameters to see if we need to replace it.
+
+            existing_key_with_all = self._mk_rule_natural_key(existing_rule.inputs, existing_rule.transform, True)
+            new_key_with_all = self._mk_rule_natural_key(inputs, transform, True)
+
+            if existing_key_with_all == new_key_with_all:
+                return existing_rule.id
+            else:
+                # key mismatches, meaning the all params must have changed.  Remove the existing and let the add
+                # continue
+                self.remove_rule(existing_rule.id)
 
         id = self.next_rule_id
         self.next_rule_id += 1
@@ -296,7 +312,7 @@ class RuleSet:
 
     def remove_rule(self, rule_id):
         rule = self.rules_by_id[rule_id]
-        key = self._mk_rule_natural_key(rule.inputs, rule.transform)
+        key = self._mk_rule_natural_key(rule.inputs, rule.transform, False)
 
         for name, _obj in rule.inputs:
             if isinstance(_obj, Obj):
@@ -315,7 +331,6 @@ class RuleSet:
             l(rule_id)
 
     def get_pending(self):
-        print("get_pending", self.rules_by_id)
         pending = []
         for rule in self.rules_by_id.values():
             if rule.state == RE_STATUS_PENDING:
@@ -328,7 +343,6 @@ class RuleSet:
                 rule.state = RE_STATUS_PENDING
 
     def started(self, rule_id, execution_id):
-        print("started, rule:", rule_id, " exec_id:", execution_id)
         rule = self.get(rule_id)
         assert rule.execution_id == None
         rule.execution_id = execution_id
@@ -337,7 +351,6 @@ class RuleSet:
 
     def get_space_by_execution_id(self, execution_id):
         rule = self._get_by_execution_id(execution_id)
-        print("get_space_by_Exec", execution_id, rule, self.rule_by_execution_id)
         if rule == None:
             return None
         return rule.space
@@ -354,7 +367,6 @@ class RuleSet:
         rule = self._get_by_execution_id(execution_id)
         if rule != None:
             rule.state = s
-        print("set rule", rule, "state to", s, "execution_id=",execution_id, self.rule_by_execution_id)
 
     def _get_by_execution_id(self, execution_id):
         return self.rule_by_execution_id.get(execution_id)
@@ -787,7 +799,6 @@ class Jobs:
 
     def record_completed(self, timestamp, execution_id, new_status, outputs):
         with transaction(self.db):
-            print("get-by-exec-id =------------------------")
             default_space = self.rule_set.get_space_by_execution_id(execution_id)
             if default_space == None:
                 log.warn("No associated rule execution.  Dropping outputs: %s", outputs)
@@ -832,9 +843,6 @@ class Jobs:
         with transaction(self.db):
             root_objs = [o.id for o in self.objects]
             obj_ids = self.log.find_all_reachable_objs(root_objs)
-
-            print("root_objs", root_objs)
-            print("obj_ids", obj_ids)
 
             def has_reachable_output(e):
                 for o in e.outputs:
