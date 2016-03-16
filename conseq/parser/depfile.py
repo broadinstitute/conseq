@@ -17,7 +17,7 @@ from grako.parsing import graken, Parser
 from grako.util import re, RE_FLAGS  # noqa
 
 
-__version__ = (2016, 2, 26, 15, 48, 12, 4)
+__version__ = (2016, 3, 16, 19, 33, 12, 2)
 
 __all__ = [
     'depfileParser',
@@ -102,15 +102,22 @@ class depfileParser(Parser):
 
     @graken()
     def _query_name_value_pair_(self):
-        self._quoted_string_()
-        self._token(':')
-        with self._group():
-            with self._choice():
-                with self._option():
-                    self._json_value_()
-                with self._option():
-                    self._query_variable_()
-                self._error('no available options')
+        with self._choice():
+            with self._option():
+                self._quoted_string_()
+                self._token(':')
+                with self._group():
+                    with self._choice():
+                        with self._option():
+                            self._json_value_()
+                        with self._option():
+                            self._query_variable_()
+                        self._error('no available options')
+            with self._option():
+                self._quoted_string_()
+                self._token('~')
+                self._quoted_string_()
+            self._error('no available options')
 
     @graken()
     def _query_obj_(self):

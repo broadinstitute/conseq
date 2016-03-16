@@ -269,7 +269,7 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, m
     abort = False
     while not abort:
         pending_jobs = j.get_pending()
-        msg = "%d processes running, %d executions pending" % ( len(executing), len(pending_jobs) - len(executing) )
+        msg = "%d processes running, %d executions pending" % ( len(executing), len(pending_jobs) )
         if prev_msg != msg:
             log.info(msg)
         prev_msg = msg
@@ -498,12 +498,19 @@ def expand_outputs(jinja2_env, output, config, **kwargs):
     return expand_dict(jinja2_env, output, config, **kwargs)
 
 def expand_input_spec(jinja2_env, spec, config):
-    return expand_dict(jinja2_env, spec, config)
-    # assert isinstance(config, dict)
-    # return parser.InputSpec(
-    #     render_template(jinja2_env, spec.variable, config),
-    #     expand_dict(jinja2_env, spec.json_obj, config)
-    # )
+    spec = dict(spec)
+    regexps = {}
+    for k, v in spec.items():
+        # if the value is a regexp, don't expand
+        if not isinstance(v, str):
+            regexps[k] = v
+    for k in regexps.keys():
+        del spec[k]
+
+    expanded = expand_dict(jinja2_env, spec, config)
+    for k, v in regexps.items():
+        expanded[k] = v
+    return expanded
 
 def expand_xref(jinja2_env, xref, config):
     return parser.XRef(
@@ -585,13 +592,14 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
         os.makedirs(dlcache)
     db_path = os.path.join(state_dir, "db.sqlite3")
     j = dep.open_job_db(db_path)
+    j.cleanup_incomplete()
 
     # handle case where we explicitly state some templates to execute.  Make sure nothing else executes
     if len(forced_targets) > 0:
         j.limitStartToTemplates(forced_targets)
         for target in forced_targets:
-            count = j.invalidate_rule_execution(target)
-            log.info("Cleared %d old executions of %s", count, target)
+            j.invalidate_rule_execution(target)
+            log.info("Cleared old executions of %s", target)
 
     script_dir = os.path.dirname(os.path.abspath(depfile))
 

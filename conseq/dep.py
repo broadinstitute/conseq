@@ -235,17 +235,42 @@ class RuleSet:
 
         This prototype implementation does everything in memory but is intended to be replaced with one that read/writes to a persistent DB
     """
-    def __init__(self):
+    def __init__(self, objects):
         self.remove_rule_listeners = []
         self.add_rule_listeners = []
-        self.rule_by_key = {}
-        self.rules_by_id = {}
-        self.rules_by_input = collections.defaultdict(lambda: set())
-        self.next_rule_id = 1
-        self.rule_by_execution_id = {}
+        self.objects = objects
+
+    def _find_rule_execs(self, where_class="", where_params=() ):
+        results = []
+        c = get_cursor()
+        query = "select id, space, transform, key, state, execution_id from rule_execution re"
+        if where_class != "":
+            query += " WHERE "+where_class
+        c.execute(query, where_params)
+        for id, space, transform, key, state, execution_id in list(c.fetchall()):
+            c.execute("select name, obj_id, is_list from rule_execution_input where rule_execution_id = ?", (id,))
+
+            is_list_by_name = {}
+            objs_by_name = collections.defaultdict(lambda: [])
+            for name, obj_id, is_list in c.fetchall():
+                is_list_by_name[name] = is_list
+                objs_by_name[name].append(obj_id)
+
+            inputs = []
+            for name, is_list in is_list_by_name.items():
+                obj_ids = objs_by_name[name]
+                objs = tuple([self.objects.get(obj_id) for obj_id in obj_ids])
+                if is_list:
+                    inputs.append( (name, objs))
+                else:
+                    inputs.append( (name, objs[0]))
+
+            results.append( RuleExecution(id, space, tuple(inputs), transform, state) )
+        return results
+
 
     def __iter__(self):
-        return iter(self.rules_by_id.values())
+        return iter(self._find_rule_execs())
 
     def _mk_rule_natural_key(self, inputs, transform, include_all_inputs):
         flattened_inputs = []
@@ -260,19 +285,27 @@ class RuleSet:
         flattened_inputs.sort()
         return repr((tuple(flattened_inputs), transform))
 
+    def find_by_name(self, transform):
+        return self._find_rule_execs("transform = ?", (transform,))
+
     def find_by_input(self, input_id):
-        rule_ids = list(self.rules_by_input[input_id])
+        rules = self._find_rule_execs("EXISTS (select 1 from rule_execution_input rei where rei.rule_execution_id = re.id and rei.obj_id = ?)", (input_id,))
+        rule_ids = [x.id for x in rules]
         return rule_ids
 
     def get(self, id):
-        return self.rules_by_id[id]
+        rules = self._find_rule_execs("id = ?", (id,))
+        if len(rules) == 0:
+            return None
+        return rules[0]
 
     def add_rule(self, space, inputs, transform):
         # first check to make sure rule isn't duplicated
         key = self._mk_rule_natural_key(inputs, transform, False)
 
-        if key in self.rule_by_key:
-            existing_rule = self.rule_by_key[key]
+        existing_rules = self._find_rule_execs("key = ?", (key,))
+        if len(existing_rules) != 0:
+            existing_rule = existing_rules[0]
             # now, "all" parameters get treated differently.  We allow all parameters to change a rule.  Compare
             # this one and the existing rule with all parameters to see if we need to replace it.
 
@@ -286,68 +319,50 @@ class RuleSet:
                 # continue
                 self.remove_rule(existing_rule.id)
 
-        id = self.next_rule_id
-        self.next_rule_id += 1
-
         state = RE_STATUS_PENDING
         for name, obj in inputs:
             if not isinstance(obj, Obj):
                 state = RE_STATUS_DEFERRED
 
-        rule = RuleExecution(id, space, inputs, transform, state)
-        self.rule_by_key[key] = rule
-        self.rules_by_id[id] = rule
-        for name, _obj in rule.inputs:
-            if isinstance(_obj, Obj):
-                objs = [_obj]
-            else:
-                objs = _obj
-            for obj in objs:
-                self.rules_by_input[obj.id].add(rule.id)
+        c = get_cursor()
+        c.execute("insert into rule_execution (space, transform, key, state) values (?, ?, ?, ?)", (space, transform, key, state))
+        rule_execution_id = c.lastrowid
+        for name, objs in inputs:
 
+            if isinstance(objs, Obj):
+                is_list = False
+                objs = [objs]
+            else:
+                is_list = True
+
+            for obj in objs:
+                self.objects.add(obj)
+                c.execute("insert into rule_execution_input (rule_execution_id, name, obj_id, is_list) values (?, ?, ?, ?)", (rule_execution_id, name, obj.id, is_list))
+
+        rule = RuleExecution(id, space, inputs, transform, state)
         for add_rule_listener in self.add_rule_listeners:
             add_rule_listener(rule)
 
         return id
 
     def remove_rule(self, rule_id):
-        rule = self.rules_by_id[rule_id]
-        key = self._mk_rule_natural_key(rule.inputs, rule.transform, False)
-
-        for name, _obj in rule.inputs:
-            if isinstance(_obj, Obj):
-                objs = [_obj]
-            else:
-                objs = _obj
-            for obj in objs:
-                self.rules_by_input[obj.id].remove(rule_id)
-
-        del self.rules_by_id[rule_id]
-        del self.rule_by_key[key]
-        if rule.execution_id != None:
-            del self.rule_by_execution_id[rule.execution_id]
+        c = get_cursor()
+        c.execute("delete from rule_execution_input where rule_execution_id = ?", (rule_id,))
+        c.execute("delete from rule_execution where id = ?", (rule_id,))
 
         for l in self.remove_rule_listeners:
             l(rule_id)
 
     def get_pending(self):
-        pending = []
-        for rule in self.rules_by_id.values():
-            if rule.state == RE_STATUS_PENDING:
-                pending.append(rule)
-        return pending
+        return self._find_rule_execs("state = ?", (RE_STATUS_PENDING,))
 
     def enable_deferred(self):
-        for rule in self.rules_by_id.values():
-            if rule.state == RE_STATUS_DEFERRED:
-                rule.state = RE_STATUS_PENDING
+        c = get_cursor()
+        c.execute("update rule_execution set state = ? where state = ?", (RE_STATUS_PENDING, RE_STATUS_DEFERRED))
 
     def started(self, rule_id, execution_id):
-        rule = self.get(rule_id)
-        assert rule.execution_id == None
-        rule.execution_id = execution_id
-        self.rule_by_execution_id[execution_id] = rule
-        rule.state = RE_STATUS_STARTED
+        c = get_cursor()
+        c.execute("update rule_execution set state = ?, execution_id = ? where id = ?", (RE_STATUS_STARTED, execution_id, rule_id))
 
     def get_space_by_execution_id(self, execution_id):
         rule = self._get_by_execution_id(execution_id)
@@ -364,20 +379,19 @@ class RuleSet:
         else:
             raise Exception("invalid state")
 
-        rule = self._get_by_execution_id(execution_id)
-        if rule != None:
-            rule.state = s
+        c = get_cursor()
+        c.execute("update rule_execution set state = ? where execution_id = ?", (s, execution_id))
 
     def _get_by_execution_id(self, execution_id):
-        return self.rule_by_execution_id.get(execution_id)
+        rules = self._find_rule_execs("execution_id = ?", (execution_id,))
+        if len(rules) == 0:
+            return None
+        return rules[0]
 
     def remove_incomplete(self):
-        incomplete = []
-        for rule in self.rules_by_id.values():
-            if rule.state != RE_STATUS_COMPLETE:
-                incomplete.append(rule.id)
-        for rule_id in incomplete:
-            self.remove_rule(rule_id)
+        incomplete = self._find_rule_execs("state != ?", (RE_STATUS_COMPLETE,))
+        for rule in incomplete:
+            self.remove_rule(rule.id)
 
 class Execution:
     def __init__(self, id, inputs, outputs, transform, status, exec_xref, job_dir):
@@ -696,12 +710,13 @@ class Jobs:
     """
     def __init__(self, db):
         self.db = db
-        self.rule_set = RuleSet()
-        self.rule_templates = []
         self.objects = ObjSet()
+        object_history = ObjHistory()
+        self.rule_set = RuleSet(object_history)
+        self.rule_templates = []
         self.add_new_obj_listener(self._object_added)
         self.objects.remove_listeners.append(self._object_removed)
-        self.log = ExecutionLog(ObjHistory())
+        self.log = ExecutionLog(object_history)
         self.rule_allowed = lambda inputs, transform: True
 
     def limitStartToTemplates(self, templateNames):
@@ -780,7 +795,8 @@ class Jobs:
             return self.objects.find(space, query)
 
     def get_pending(self):
-        return self.rule_set.get_pending()
+        with transaction(self.db):
+            return self.rule_set.get_pending()
 
     def get_all_executions(self):
         with transaction(self.db):
@@ -832,12 +848,8 @@ class Jobs:
 
     def invalidate_rule_execution(self, transform):
         with transaction(self.db):
-            count = 0
-            for r in self.get_pending():
-                if r.transform != transform:
-                    continue
-                count += self.rule_set.remove_rule(r.id)
-        return count
+            for r in self.rule_set.find_by_name(transform):
+                self.rule_set.remove_rule(r.id)
 
     def gc(self, rm_callback):
         with transaction(self.db):
@@ -882,6 +894,8 @@ def open_job_db(filename):
             "create table rule (id INTEGER PRIMARY KEY AUTOINCREMENT, transform STRING, key STRING)",
             "create table cur_obj (id INTEGER PRIMARY KEY AUTOINCREMENT, space string, timestamp STRING, json STRING)",
             "create table past_obj (id INTEGER PRIMARY KEY AUTOINCREMENT, space string, timestamp STRING, json STRING)",
+            "create table rule_execution (id INTEGER PRIMARY KEY AUTOINCREMENT, space STRING, transform STRING, key STRING, state STRING, execution_id integer)",
+            "create table rule_execution_input (id INTEGER PRIMARY KEY AUTOINCREMENT, rule_execution_id INTEGER, name STRING, obj_id INTEGER, is_list INTEGER)",
             "create table execution (id INTEGER PRIMARY KEY AUTOINCREMENT, transform STRING, status STRING, execution_xref STRING, job_dir STRING)",
             "create table execution_input (id INTEGER PRIMARY KEY AUTOINCREMENT, execution_id INTEGER, name STRING, obj_id INTEGER, is_list INTEGER)",
             "create table execution_output (id INTEGER PRIMARY KEY AUTOINCREMENT, execution_id INTEGER, obj_id INTEGER)",
