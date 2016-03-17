@@ -196,7 +196,20 @@ class ObjSet:
 
             skip = False
             for k, v in properties.items():
-                if not ((k in o.props) and (o.props[k] == v)):
+                if not (k in o.props):
+                    skip = True
+                    break
+
+                ov = o.props[k]
+                if isinstance(ov, dict) and "$value" in ov:
+                    ov = ov["$value"]
+
+                if hasattr(v, "match"):
+                    matched = v.match(ov) != None
+                else:
+                    matched = (ov == v)
+
+                if not matched:
                     skip = True
                     break
 
@@ -586,7 +599,10 @@ class PropMatchesRegexp:
     def __init__(self, variable, property, regexp):
         self.variable = variable
         self.property = property
-        self.regexp = re.compile(regexp)
+        if isinstance(regexp, str):
+            self.regexp = re.compile(regexp)
+        else:
+            self.regexp = regexp
 
     def satisfied(self, bindings):
         return self.regexp.match(bindings[self.variable][self.property]) != None
@@ -632,6 +648,7 @@ class Template:
         return True
 
     def _create_rules(self, obj_set, space, bindings, queries):
+        # queries is a list of ForEach
         if len(queries) == 0:
             if self._predicate_satisifed(bindings):
                 return [bindings]
@@ -881,8 +898,8 @@ class Jobs:
                 print("rule:", rs)
             for job in self.log.get_all():
                 print("all job:", job)
-            for job in self.log.get_pending():
-                print("pending job:", job)
+#            for job in self.log.get_pending():
+#                print("pending job:", job)
 
 def open_job_db(filename):
     needs_create = not os.path.exists(filename)

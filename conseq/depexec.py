@@ -75,6 +75,16 @@ class Execution:
 
         log.info("Rule {} completed ({}). Results: {}".format(self.transform, self.job_dir, results))
         outputs = [self._resolve_filenames(o) for o in results['outputs']]
+
+        # print summary of output files with full paths
+        files_written = []
+        for output in outputs:
+            for value in output.values():
+                if isinstance(value, dict) and "$filename" in value:
+                    files_written.append(value["$filename"])
+        if len(files_written):
+            log.warn("Rule %s wrote the following files:\n%s", self.transform, "\n".join(["\t"+x for x in files_written]))
+
         return None, outputs
 
 def exec_script(name, id, language, job_dir, run_stmts, outputs, capture_output, prologue, desc_name):
@@ -203,27 +213,34 @@ def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, captu
     desc_name = "{} with inputs {} ({})".format(name, inputs, job_dir)
 
     run_stmts = []
-    for i, x in enumerate(rule.run_stmts):
-        command, script_body = x
-        command, script_body = expand_run(jinja2_env, command, script_body, config, inputs)
-        if script_body != None:
-            formatted_script_body = textwrap.dedent(script_body)
-            script_name = os.path.abspath(os.path.join(job_dir, "script_%d"%i))
-            with open(script_name, "w") as fd:
-                fd.write(formatted_script_body)
-            command += " "+script_name
+    if len(rule.run_stmts) > 0:
+        for i, x in enumerate(rule.run_stmts):
+            command, script_body = x
+            command, script_body = expand_run(jinja2_env, command, script_body, config, inputs)
+            if script_body != None:
+                formatted_script_body = textwrap.dedent(script_body)
+                script_name = os.path.abspath(os.path.join(job_dir, "script_%d"%i))
+                with open(script_name, "w") as fd:
+                    fd.write(formatted_script_body)
+                command += " "+script_name
 
-        run_stmts.append(command)
+            run_stmts.append(command)
 
-    execution = exec_script(name,
-                       id,
-                       language,
-                       job_dir,
-                       run_stmts,
-                       outputs, capture_output, prologue, desc_name)
+        execution = exec_script(name,
+                           id,
+                           language,
+                           job_dir,
+                           run_stmts,
+                           outputs, capture_output, prologue, desc_name)
+    else:
+        # fast path when there's no need to spawn an external process.  (mostly used by tests)
+        execution = Execution(name, id, job_dir, ReportSuccessProcStub(), outputs, None, desc_name)
+        retcode_file = os.path.join(job_dir, "retcode.txt")
+        with open(retcode_file, "wt") as fd:
+            fd.write("0")
     return execution
 
-class ProcStub:
+class PidProcStub:
     def __init__(self, xref):
         assert xref.startswith("PID:")
         self.pid = int(xref[4:])
@@ -234,6 +251,13 @@ class ProcStub:
             return None
         except OSError:
             return 0
+
+class ReportSuccessProcStub:
+    def __init__(self):
+        self.pid = 10000000
+
+    def poll(self):
+        return 0
 
 def reattach(j, rules):
     pending_jobs = j.get_pending()
@@ -247,7 +271,7 @@ def reattach(j, rules):
             with open(os.path.join(e.job_dir, "description.txt")) as fd:
                 desc_name = fd.read()
 
-            ee = Execution(e.transform, e.id, e.job_dir, ProcStub(e.exec_xref), rule.outputs, (stdout_path, stderr_path), desc_name)
+            ee = Execution(e.transform, e.id, e.job_dir, PidProcStub(e.exec_xref), rule.outputs, (stdout_path, stderr_path), desc_name)
             executing.append(ee)
             log.warn("Reattaching existing job {}: {}".format(e.transform, e.exec_xref))
         else:

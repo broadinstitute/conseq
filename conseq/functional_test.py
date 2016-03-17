@@ -22,7 +22,6 @@ def test_rule_with_no_inputs(tmpdir):
     j = run_conseq(tmpdir, """
     rule a:
         outputs: {"finished": "true"}
-        run "bash" with "echo test"
     """)
     assert len(j.find_objs("public", {}))==1
     print("objs ------------------------------")
@@ -35,7 +34,6 @@ def test_rule_depending_on_xref(tmpdir):
     rule a:
         inputs: in={"name": "webpage"}
         outputs: {"finished": "true"}
-        run "bash" with "echo test"
     """)
     assert len(j.find_objs("public", {}))==2
 
@@ -64,7 +62,6 @@ def test_rerun_multiple_times(tmpdir):
     j = run_conseq(tmpdir, """
     rule a:
         outputs: {"finished": "true", "mut":{"$value": "1"}}
-        run "bash -c echo test"
     """)
     objs = j.find_objs("public", {})
     assert len(objs)==1
@@ -74,7 +71,6 @@ def test_rerun_multiple_times(tmpdir):
     j = run_conseq(tmpdir, """
     rule b:
         outputs: {"finished": "true", "mut":{"$value": "2"}}
-        run "bash -c echo test"
     """, assert_clean=False)
     objs = j.find_objs("public", {})
     assert len(objs)==1
@@ -84,7 +80,6 @@ def test_rerun_multiple_times(tmpdir):
     j = run_conseq(tmpdir, """
     rule b:
         outputs: {"finished": "true", "mut":{"$value": "3"}}
-        run "bash -c echo test"
     """, targets=["b"], assert_clean=False)
     objs = j.find_objs("public", {})
     assert len(objs)==1
@@ -125,11 +120,9 @@ def test_spaces(tmpdir):
     rule b:
         inputs: in={"type": "example"}
         outputs: {"type": "derived", "value":"{{inputs.in.value}}"}
-        run "bash" with "echo running b"
 
     rule a:
         outputs: {"type": "example", "value": "a"}, {"type": "example", "value": "b", "$space": "pocket"}
-        run "bash" with "echo running a"
 
     """)
 
@@ -159,7 +152,6 @@ def test_gc(tmpdir):
     j = run_conseq(tmpdir, """
     rule a:
         outputs: {"finished": "true", "other": {"$value": "a"}}
-        run "bash" with "echo test"
     """)
     print("objs", j.find_objs("public", {}))
     assert len(j.find_objs("public", {}))==1
@@ -167,7 +159,6 @@ def test_gc(tmpdir):
     j = run_conseq(tmpdir, """
     rule b:
         outputs: {"finished": "true", "other": {"$value": "b"}}
-        run "bash" with "echo test"
     """, assert_clean=False)
     print("objs", j.find_objs("public", {}))
     assert len(j.find_objs("public", {}))==1
@@ -183,14 +174,11 @@ def test_rules_with_all_exec_once(tmpdir):
     j = run_conseq(tmpdir, """
     rule a:
         outputs: {"type": "thing", "value": "a"}
-        run "bash" with "echo test"
     rule b:
         outputs: {"type": "thing", "value": "b"}
-        run "bash" with "echo test"
     rule c:
         inputs: x=all {"type": "thing"}
         outputs: {"done": "true"}
-        run "bash" with "echo test"
     """)
     assert len(j.find_objs("public", {})) == 3
     assert len(j.get_all_executions()) == 3
@@ -199,14 +187,21 @@ def test_rule_executes_once(tmpdir):
     j = run_conseq(tmpdir, """
     rule a:
         outputs: {"type": "thing", "value": "a"}
-        run "bash" with "echo test"
     """)
     assert len(j.find_objs("public", {})) == 1
     assert len(j.get_all_executions()) == 1
     j = run_conseq(tmpdir, """
     rule a:
         outputs: {"type": "thing", "value": "a"}
-        run "bash" with "echo test"
     """, assert_clean=False)
     assert len(j.find_objs("public", {})) == 1
     assert len(j.get_all_executions()) == 1
+
+def test_regexp_queries(tmpdir):
+    j = run_conseq(tmpdir, """
+    rule a:
+        outputs: {"type": "thing"}
+    rule b:
+        inputs: in={"type" ~ "t.*"}
+    """)
+    assert len(j.get_all_executions()) == 2
