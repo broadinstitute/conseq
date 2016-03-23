@@ -65,8 +65,8 @@ class Semantics(object):
     def json_obj(self, ast):
         pairs = [ast[1]]
         rest = ast[2]
-        for x in range(0, len(rest), 2):
-            pairs.append(rest[x+1])
+        for x in rest:
+            pairs.append(x[1])
         return dict(pairs)
 
     def query_name_value_pair(self, ast):
@@ -78,8 +78,8 @@ class Semantics(object):
     def query_obj(self, ast):
         pairs = [ast[1]]
         rest = ast[2]
-        for x in range(0, len(rest), 2):
-            pairs.append(rest[x+1])
+        for x in rest:
+            pairs.append(x[1])
         return dict(pairs)
 
     def xref(self, ast):
@@ -125,15 +125,15 @@ class Semantics(object):
     def input_specs(self, ast):
         specs = [ast[0]]
         rest = ast[1]
-        for i in range(0,len(rest),2):
-            specs.append(rest[i+1])
+        for x in rest:
+            specs.append(x[1])
         return specs
 
     def output_specs(self, ast):
         specs = [ast[0]]
         rest = ast[1]
-        for i in range(0,len(rest),2):
-            specs.append(rest[1])
+        for x in rest:
+            specs.append(x[1])
         return specs
 
     def var_stmt(self, ast):
