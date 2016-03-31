@@ -17,6 +17,16 @@ def http_fetch(url, dest):
         for chunk in iter(lambda: fd.read(10000), b""):
             fdo.write(chunk)
 
+from boto.s3.connection import S3Connection
+from boto.s3.key import Key
+
+def s3_fetch(bucket_name, path, destination_filename):
+    c = S3Connection()
+    bucket = c.get_bucket(bucket_name)
+    k = Key(bucket)
+    k.key = path
+    k.get_contents_to_filename(destination_filename)
+
 class Pull:
     def __init__(self):
         self.ssh_client_cache = {}
@@ -47,6 +57,8 @@ class Pull:
             transport = client.get_transport()
             sftp = transport.open_sftp_client()
             sftp.get(parts.path, dest_path)
+        elif parts.scheme in ["s3"]:
+            s3_fetch(parts.netloc, parts.path, dest_path)
         elif parts.scheme in ["http", "https"]:
             http_fetch(url, dest_path)
         else:

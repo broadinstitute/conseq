@@ -82,6 +82,24 @@ def add_dot(sub):
 def dot(args):
     depexec.dot_cmd(args.dir, args.detailed)
 
+def add_export(sub):
+    parser = sub.add_parser("export", help="export all artifacts to S3")
+    parser.add_argument("url", help="should be of the form s3://bucket/path")
+    parser.set_defaults(func=export)
+
+def export(args):
+    from conseq import export_cmd
+    export_cmd.export(args.dir, args.url)
+
+def add_import(sub):
+    parser = sub.add_parser("import", help="import artifacts from S3")
+    parser.add_argument("url", help="should be of the form s3://bucket/path")
+    parser.set_defaults(func=_import)
+
+def _import(args):
+    from conseq import export_cmd
+    export_cmd.import_artifacts(args.dir, args.url)
+
 def main(argv):
     parser = argparse.ArgumentParser()
     parser.add_argument('--dir', metavar="DIR", help="The directory to write working versions of files to", default="state")
@@ -97,6 +115,8 @@ def main(argv):
     add_rules(sub)
     add_debugrun(sub)
     add_dot(sub)
+    add_export(sub)
+    add_import(sub)
 
     args = parser.parse_args()
     if args.verbose:

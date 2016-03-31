@@ -9,5 +9,5 @@ setup(name='conseq',
       author_email='pmontgom@broadinstitute.org',
       packages=['conseq'],
       scripts=['scripts/conseq'],
-      install_requires=[ "colorlog", "grako", "jinja2", "paramiko", "requests" ]
+      install_requires=[ "colorlog", "grako", "jinja2", "paramiko", "requests", "boto", "tabulate" ]
      )

@@ -161,6 +161,23 @@ def flatten_parameters(d):
         pairs.append( (k,v) )
     return dict(pairs)
 
+def needs_url_fetch(obj):
+    for v in obj.values():
+        if isinstance(v, dict) and "$file_url" in v:
+            return True
+    return False
+
+def fetch_urls(obj, resolver):
+    new_obj = {}
+    for k,v in obj.items():
+        if isinstance(v, dict) and "$file_url" in v:
+            url = v["$file_url"]
+            filename = resolver.resolve(url)['filename']
+            new_obj[k] = {"$filename": filename}
+        else:
+            new_obj[k] = v
+    return new_obj
+
 def needs_resolution(obj):
     if not ("$xref_url" in obj):
         return False
@@ -175,16 +192,23 @@ def preprocess_inputs(j, resolver, inputs):
     def resolve(obj_):
         assert isinstance(obj_, dep.Obj)
         obj = obj_.props
-        if needs_resolution(obj):
+        obj_copy = None
+        if needs_url_fetch(obj):
+            obj_copy = fetch_urls(obj, resolver)
+
+        elif needs_resolution(obj):
             extra_params = resolver.resolve(obj["$xref_url"])
             obj_copy = dict(obj)
             for k, v in extra_params.items():
                 obj_copy[k] = {"$value": v}
+
+        if not obj_copy is None:
             timestamp = datetime.datetime.now().isoformat()
             # persist new version of object with extra properties
             j.add_obj(obj_.space, timestamp, obj_copy)
             xrefs_resolved[0] = True
             obj = obj_copy
+
         assert isinstance(obj, dict)
         return flatten_parameters(obj)
 

@@ -19,6 +19,8 @@ def count_unique_values_per_property(instances):
                     v = v["$value"]
                 elif "$filename" in v:
                     v = v["$filename"]
+                elif "$file_url" in v:
+                    v = v["$file_url"]
                 else:
                     raise Exception("key: {} had dict: {}".format(k, v))
             per_prop[k].add(v)
