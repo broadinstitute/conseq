@@ -79,7 +79,7 @@ class Resolver:
         if os.path.exists(url):
             return dict(filename=os.path.abspath(url))
         elif url.startswith("taiga://"):
-            from . import taiga_pull
+            from conseq import taiga_pull
             permaname = url.replace("taiga://", "")
             dataset_id = taiga_pull.get_id_by_name(self.config, permaname)
             assert dataset_id != None
@@ -93,7 +93,7 @@ class Resolver:
         if os.path.exists(url):
             return False
         elif url.startswith("taiga://"):
-            from . import taiga_pull
+            from conseq import taiga_pull
             permaname = url.replace("taiga://", "")
             dataset_id = taiga_pull.get_id_by_name(self.config, permaname)
             assert dataset_id != None

@@ -1,5 +1,5 @@
-from . import parser
-from . import depexec
+from conseq import parser
+from conseq import depexec
 
 pair_of_rules = """
 xref http://foo.org {"a": "b"}

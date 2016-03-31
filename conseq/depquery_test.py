@@ -1,4 +1,4 @@
-from . import depquery
+from conseq import depquery
 
 store = depquery.AugmentedStore([
     dict(type="atlantis", name="alpha", id="A"),

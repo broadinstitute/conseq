@@ -7,7 +7,7 @@ setup(name='conseq',
       description='ConSeq dependency tracker',
       author='Philip Montgomery',
       author_email='pmontgom@broadinstitute.org',
-      packages=['conseq'],
+      packages=['conseq', 'cpdshelpers'],
       scripts=['scripts/conseq'],
       install_requires=[ "colorlog", "grako", "jinja2", "paramiko", "requests", "boto", "tabulate" ]
      )

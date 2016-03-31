@@ -1,4 +1,4 @@
-from . import dep
+from conseq import dep
 
 def test_limit_to_rule(tmpdir):
     jobdb = str(tmpdir.join("db"))

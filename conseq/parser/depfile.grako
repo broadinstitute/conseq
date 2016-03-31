@@ -1,8 +1,10 @@
 @@eol_comments :: /#.*?$/
 
-triple_quoted_string = /"""(?:[^"]|"{1,2}(?!"))+"""/;
-single_quoted_string = /"[^"]*"/ ;
-quoted_string = triple_quoted_string | single_quoted_string ;
+triple_dbl_quoted_string = /"""(?:[^"]|"{1,2}(?!"))+"""/ ;
+dbl_quoted_string = /"[^"]*"/ ;
+triple_squoted_string = /'''(?:[^']|'{1,2}(?!'))+'''/ ;
+squoted_string = /'[^']*'/ ;
+quoted_string = triple_dbl_quoted_string | dbl_quoted_string | squoted_string | triple_squoted_string ;
 
 identifier = /[A-Za-z_]+[A-Za-z0-9_-]*/ ;
 url = /\S+/ ;
@@ -38,5 +40,3 @@ var_stmt = "let" identifier "=" quoted_string ;
 include_stmt = "include" quoted_string ;
 
 declarations =  { rule | xref | include_stmt | var_stmt }+  $ ;
-
-

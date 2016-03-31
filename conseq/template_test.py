@@ -1,5 +1,5 @@
 import jinja2
-from . import depexec
+from conseq import depexec
 
 def test_recursive_config_values():
     jinja2_env = jinja2.Environment(undefined=jinja2.StrictUndefined)

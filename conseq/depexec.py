@@ -9,8 +9,8 @@ import logging
 import collections
 import shutil
 
-from . import dep
-from . import parser
+from conseq import dep
+from conseq import parser
 
 log = logging.getLogger(__name__)
 
@@ -307,7 +307,7 @@ def get_job_dir(state_dir, job_id):
     working_dir = os.path.join(state_dir, "working")
     return working_dir + "/r" + str(job_id)
 
-from . import xref
+from conseq import xref
 def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, max_concurrent_executions, capture_output, req_confirm):
     active_job_ids = set([e.id for e in executing])
 

@@ -1,4 +1,4 @@
-from . import xref
+from conseq import xref
 import pytest
 
 at_broad = False

@@ -1,6 +1,6 @@
-#from . import parser
-from . import depexec
-from . import dep
+#from conseq import parser
+from conseq import depexec
+from conseq import dep
 import os
 
 def run_conseq(tmpdir, config, targets=[], assert_clean=True):

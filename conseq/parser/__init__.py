@@ -1,5 +1,5 @@
 from collections import namedtuple
-from . import depfile
+from conseq import depfile
 import re
 
 QueryVariable = namedtuple("QueryVariable", ["name"])
@@ -36,13 +36,20 @@ IncludeStatement = namedtuple("IncludeStatement", ["filename"])
 LetStatement = namedtuple("LetStatement", ["name", "value"])
 
 def unquote(s):
+    # TODO: Handle escaped quotes
     if len(s) > 0 and s[:3] == '"""':
         assert s[-3:] == '"""'
         return s[3:-3]
-    assert s[0] == '"'
-    assert s[-1] == '"'
-    return s[1:-1]
-
+    if s[:3] == "'''":
+        assert s[-3:] == "'''"
+        return s[3:-3]
+    if s[0] == "\"":
+        assert s[-1] == '"'
+        return s[1:-1]
+    if s[0] == "'":
+        assert s[-1] == "'"
+        return s[1:-1]
+    raise Exception("{} does not look like a valid string".format(s))
 
 class Semantics(object):
     def statement(self, ast):
