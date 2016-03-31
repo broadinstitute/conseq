@@ -4,9 +4,16 @@ PropConst = collections.namedtuple("PropConst", ["property", "value"])
 
 def count_unique_values_per_property(instances):
     per_prop = collections.defaultdict(lambda: set())
+
+    # first determine all properties
+    all_properties = set()
     for x in instances:
         assert isinstance(x, dict)
-        for k, v in x.items():
+        all_properties.update(x.keys())
+
+    for x in instances:
+        for k in all_properties:
+            v = x.get(k)
             if isinstance(v, dict):
                 if "$value" in v:
                     v = v["$value"]

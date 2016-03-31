@@ -22,6 +22,8 @@ RE_STATUS_COMPLETE = "complete"
 RE_STATUS_FAILED = "failed"
 RE_STATUS_DEFERRED = "deferred"
 
+PUBLIC_SPACE = "public"
+
 from contextlib import contextmanager
 import threading
 

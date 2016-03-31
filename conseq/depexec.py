@@ -456,6 +456,50 @@ def read_deps(filename, initial_vars={}):
             rules.set_rule(dec.name, dec)
     return rules
 
+def ls_cmd(state_dir, space, predicates, groupby, columns):
+    from tabulate import tabulate
+    from conseq import depquery
+
+    j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
+    subset = j.find_objs(space, dict(predicates))
+    subset = [o.props for o in subset]
+
+    def indent_str(s, depth):
+        pad = " "*depth
+        return "\n".join([pad + x for x in s.split("\n")])
+
+    def print_table(subset, indent):
+        if len(subset) > 1 and columns == None:
+            counts = depquery.count_unique_values_per_property(subset)
+            common_keys, variable_keys = depquery.split_props_by_counts(counts)
+            common_table = [ [subset[0][k] for k in common_keys] ]
+            if len(common_keys) > 0:
+                print(indent_str("Properties shared by all {} rows:".format(len(subset)), indent))
+                print(indent_str(tabulate(common_table, common_keys, tablefmt="simple"), indent+2))
+
+        elif columns != None:
+            variable_keys = columns
+        else:
+            # remaining case: columns == None and len(subset) == 1
+            variable_keys = list(subset[0].keys())
+
+        variable_table = []
+        for row in subset:
+            variable_table.append( [row.get(k) for k in variable_keys] )
+        print(indent_str(tabulate(variable_table, variable_keys, tablefmt="simple"), indent))
+
+    if groupby == None:
+        print_table(subset, 0)
+    else:
+        by_pred = collections.defaultdict(lambda: [])
+        for row in subset:
+            by_pred[row.get(groupby)].append(row)
+
+        for group, rows in by_pred.items():
+            print("For {}={}:".format(groupby, group))
+            print_table(rows, 2)
+            print()
+
 def rm_cmd(state_dir, dry_run, json_query, with_invalidate):
     query = json.loads(json_query)
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))

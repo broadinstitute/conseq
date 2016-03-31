@@ -1,13 +1,55 @@
 import argparse
 import logging
 import colorlog
-from . import depexec
+from conseq import depexec, dep
+
+def add_list(sub):
+    parser = sub.add_parser("list", help="List all objects, executions, etc")
+    parser.set_defaults(func=_list)
+
+def _list(args):
+    depexec.list_cmd(args.dir)
+
+def add_ls(sub):
+    parser = sub.add_parser("ls", help="List artifacts")
+    parser.add_argument('predicates', nargs='*', help="predicates to match in form 'key=value' ")
+    parser.add_argument('--groupby')
+    parser.add_argument('--columns')
+    parser.add_argument('--space', default=dep.PUBLIC_SPACE)
+    parser.set_defaults(func=ls)
+
+def ls(args):
+    key_value_pairs = [p.split("=", maxsplit=1) for p in args.predicates]
+    for pair in key_value_pairs:
+        assert len(pair) == 2
+
+    depexec.ls_cmd(args.dir, args.space, key_value_pairs, args.groupby, args.columns)
+
+def add_gc(sub):
+    parser = sub.add_parser("gc", help="Garbage collect (clean up unused files)")
+    parser.set_defaults(func=gc)
 
 def gc(args):
     depexec.gc(args.dir)
 
+def add_rm(sub):
+    parser = sub.add_parser("rm", help="Remove objects that satisfy given query")
+    parser.add_argument('--dry-run', action="store_true", dest="dry_run")
+    parser.add_argument('--no-invalidate', action="store_false", dest="with_invalidate")
+    parser.add_argument('predicates', nargs='+', help="predicates to match in form 'key=value' ")
+    parser.set_defaults(func=rm)
+
 def rm(args):
     depexec.rm_cmd(args.dir, args.dry_run, args.json_query, args.with_invalidate)
+
+def add_run(sub):
+    parser = sub.add_parser("run", help="Run rules in the specified file")
+    parser.add_argument('file', metavar="FILE", help="the input file to parse")
+    parser.add_argument("--concurrent", type=int, default=5)
+    parser.add_argument("--nocapture", action="store_true")
+    parser.add_argument("--confirm", action="store_true")
+    parser.add_argument('targets', nargs='*')
+    parser.set_defaults(func=run)
 
 def run(args):
     concurrent = args.concurrent
@@ -15,57 +57,46 @@ def run(args):
         concurrent = 1
     depexec.main(args.file, args.dir, args.targets, {}, concurrent, not args.nocapture, args.confirm)
 
+def add_rules(sub):
+    parser = sub.add_parser("rules", help="Print the names all rules in the file")
+    parser.add_argument('file', metavar="FILE", help="the input file to parse")
+    parser.set_defaults(func=rules)
+
 def rules(args):
     depexec.print_rules(args.file)
+
+def add_debugrun(sub):
+    parser = sub.add_parser("debugrun", help="perform query associated with a given target and report what matched (for debugging why rule doesn't run)")
+    parser.add_argument('file', metavar="FILE", help="the input file to parse")
+    parser.add_argument('target')
+    parser.set_defaults(func=debugrun)
 
 def debugrun(args):
     depexec.debugrun(args.dir, args.file, args.target, {})
 
+def add_dot(sub):
+    parser = sub.add_parser("dot", help="Write out a .dot file of the execution history")
+    parser.add_argument("--detailed", action="store_true")
+    parser.set_defaults(func=dot)
+
 def dot(args):
     depexec.dot_cmd(args.dir, args.detailed)
-
-def _list(args):
-    depexec.list_cmd(args.dir)
 
 def main(argv):
     parser = argparse.ArgumentParser()
     parser.add_argument('--dir', metavar="DIR", help="The directory to write working versions of files to", default="state")
     parser.add_argument('--verbose', dest='verbose', action='store_true')
     parser.set_defaults(func=None)
+
     sub = parser.add_subparsers()
-
-    gc_cmd = sub.add_parser("gc", help="Garbage collect (clean up unused files)")
-    gc_cmd.set_defaults(func=gc)
-
-    rules_cmd = sub.add_parser("rules", help="Print the names all rules in the file")
-    rules_cmd.add_argument('file', metavar="FILE", help="the input file to parse")
-    rules_cmd.set_defaults(func=rules)
-
-    run_cmd = sub.add_parser("run", help="Run rules in the specified file")
-    run_cmd.add_argument('file', metavar="FILE", help="the input file to parse")
-    run_cmd.add_argument("--concurrent", type=int, default=5)
-    run_cmd.add_argument("--nocapture", action="store_true")
-    run_cmd.add_argument("--confirm", action="store_true")
-    run_cmd.add_argument('targets', nargs='*')
-    run_cmd.set_defaults(func=run)
-
-    debugrun_cmd = sub.add_parser("debugrun", help="perform query associated with a given target and report what matched (for debugging why rule doesn't run)")
-    debugrun_cmd.add_argument('file', metavar="FILE", help="the input file to parse")
-    debugrun_cmd.add_argument('target')
-    debugrun_cmd.set_defaults(func=debugrun)
-
-    dot_cmd = sub.add_parser("dot", help="Write out a .dot file of the execution history")
-    dot_cmd.add_argument("--detailed", action="store_true")
-    dot_cmd.set_defaults(func=dot)
-
-    list_cmd = sub.add_parser("list", help="List all objects, executions, etc")
-    list_cmd.set_defaults(func=_list)
-
-    rm_cmd = sub.add_parser("rm", help="Remove objects that satisfy given query")
-    rm_cmd.add_argument('--dry-run', action="store_true", dest="dry_run")
-    rm_cmd.add_argument('--no-invalidate', action="store_false", dest="with_invalidate")
-    rm_cmd.add_argument("json_query")
-    rm_cmd.set_defaults(func=rm)
+    add_list(sub)
+    add_ls(sub)
+    add_gc(sub)
+    add_rm(sub)
+    add_run(sub)
+    add_rules(sub)
+    add_debugrun(sub)
+    add_dot(sub)
 
     args = parser.parse_args()
     if args.verbose:
@@ -83,3 +114,15 @@ def main(argv):
         args.func(args)
     else:
         parser.print_help()
+
+
+
+
+
+
+
+
+
+
+
+
