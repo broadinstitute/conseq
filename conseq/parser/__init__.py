@@ -1,5 +1,5 @@
 from collections import namedtuple
-from conseq import depfile
+from conseq.parser import depfile
 import re
 
 QueryVariable = namedtuple("QueryVariable", ["name"])
