@@ -1,18 +1,17 @@
 import os
 import tempfile
 from six.moves.urllib.parse import urlparse
+from six.moves.urllib import request
+
 import paramiko
 import logging
 import os
 
 log = logging.getLogger(__name__)
 
-import urllib
-import urllib.request
-
 def http_fetch(url, dest):
     with open(dest, "wb") as fdo:
-        fd = urllib.request.urlopen(url)
+        fd = request.urlopen(url)
         for chunk in iter(lambda: fd.read(10000), b""):
             fdo.write(chunk)
 
