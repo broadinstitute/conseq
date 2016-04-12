@@ -1,7 +1,6 @@
 import os
 import tempfile
-import six
-from urllib.parse import urlparse
+from six.moves.urllib.parse import urlparse
 import paramiko
 import logging
 import os

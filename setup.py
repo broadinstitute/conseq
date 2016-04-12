@@ -10,5 +10,5 @@ setup(name='conseq',
       packages=['conseq', 'conseq.parser', 'cpdshelpers'],
       entry_points={   'console_scripts': ['conseq=conseq.main:main']
       },
-      install_requires=[ "colorlog", "grako", "jinja2", "paramiko", "requests", "boto", "tabulate" ]
+      install_requires=[ "colorlog", "grako", "jinja2", "paramiko", "requests", "boto", "tabulate", "six" ]
      )
