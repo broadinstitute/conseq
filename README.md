@@ -1,16 +1,13 @@
+##### Table of Contents  
+* [Conseq Config Reference](#conseq-config-reference)
+* [Command Line Reference](#command-line-reference)
+
 # Conseq 
 (Pronounced "con-SIK" as in "consequence")
 
 Conseq is a tool for running sequences of transformations or other operations.
 
 More on the motivation and details seen this slide deck: https://docs.google.com/a/broadinstitute.com/presentation/d/1LsRymTEKmqDxACDnMIx1z_Y2dQtY7TNpb5PAFyK0OQM/edit?usp=sharing
-
-# Table of Contents
-
-##### Table of Contents  
-[Conseq Config Reference](#conseq-config-reference)
-[Command Line Reference](#command-line-reference)
-
 
 <a name="conseq-config-reference"/>
 # Conseq Config Reference
