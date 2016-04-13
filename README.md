@@ -5,11 +5,15 @@ Conseq is a tool for running sequences of transformations or other operations.
 
 More on the motivation and details seen this slide deck: https://docs.google.com/a/broadinstitute.com/presentation/d/1LsRymTEKmqDxACDnMIx1z_Y2dQtY7TNpb5PAFyK0OQM/edit?usp=sharing
 
-## Framework
+# Table of Contents
 
-Artifacts: a set of key/value pairs.  Special values are denoted as objects with a special key, which starts with "$".  For example {"A": {"$value": "B"}}
+##### Table of Contents  
+[Conseq Config Reference](#conseq-config-reference)
+[Command Line Reference](#command-line-reference)
 
-## Reference
+
+<a name="conseq-config-reference"/>
+# Conseq Config Reference
 
 A conseq config file consists of xrefs, variables and rules.  
 
@@ -138,5 +142,19 @@ example:
      """
 ```
 
+<a name="conseq-command-line-reference"/>
 
+# Command Line Reference
+
+You can get help on all conseq commands by running `conseq --help`
+
+However, the most common commmand you will run is: running all rules in a config file. (Assuming name of file is "all.conseq" in this case):
+```
+conseq run all.conseq
+```
+
+Another common case is listing all of the artifacts stored in the conseq database:
+```
+conseq ls
+```
 

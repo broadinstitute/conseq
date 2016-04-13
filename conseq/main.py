@@ -13,7 +13,7 @@ def _list(args):
 def add_ls(sub):
     parser = sub.add_parser("ls", help="List artifacts")
     parser.add_argument('predicates', nargs='*', help="predicates to match in form 'key=value' ")
-    parser.add_argument('--groupby')
+    parser.add_argument('--groupby', default='type')
     parser.add_argument('--columns')
     parser.add_argument('--space', default=dep.PUBLIC_SPACE)
     parser.set_defaults(func=ls)
