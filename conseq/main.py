@@ -55,7 +55,7 @@ def run(args):
     concurrent = args.concurrent
     if args.nocapture:
         concurrent = 1
-    depexec.main(args.file, args.dir, args.targets, {}, concurrent, not args.nocapture, args.confirm)
+    depexec.main(args.file, args.dir, args.targets, {}, concurrent, not args.nocapture, args.confirm, args.config)
 
 def add_rules(sub):
     parser = sub.add_parser("rules", help="Print the names all rules in the file")
@@ -72,7 +72,7 @@ def add_debugrun(sub):
     parser.set_defaults(func=debugrun)
 
 def debugrun(args):
-    depexec.debugrun(args.dir, args.file, args.target, {})
+    depexec.debugrun(args.dir, args.file, args.target, {}, args.config)
 
 def add_dot(sub):
     parser = sub.add_parser("dot", help="Write out a .dot file of the execution history")
@@ -89,7 +89,7 @@ def add_export(sub):
 
 def export(args):
     from conseq import export_cmd
-    export_cmd.export(args.dir, args.url)
+    export_cmd.export_artifacts(args.dir, args.url, args.config)
 
 def add_import(sub):
     parser = sub.add_parser("import", help="import artifacts from S3")
@@ -98,12 +98,13 @@ def add_import(sub):
 
 def _import(args):
     from conseq import export_cmd
-    export_cmd.import_artifacts(args.dir, args.url)
+    export_cmd.import_artifacts(args.dir, args.url, args.config)
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dir', metavar="DIR", help="The directory to write working versions of files to", default="state")
     parser.add_argument('--verbose', dest='verbose', action='store_true')
+    parser.add_argument('--config', help="Path to initial config", default="~/.conseq")
     parser.set_defaults(func=None)
 
     sub = parser.add_subparsers()

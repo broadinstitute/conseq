@@ -18,16 +18,17 @@ def http_fetch(url, dest):
 from boto.s3.connection import S3Connection
 from boto.s3.key import Key
 
-def s3_fetch(bucket_name, path, destination_filename):
-    c = S3Connection()
+def s3_fetch(bucket_name, path, destination_filename, config):
+    c = S3Connection(config["AWS_ACCESS_KEY_ID"], config["AWS_SECRET_ACCESS_KEY"])
     bucket = c.get_bucket(bucket_name)
     k = Key(bucket)
     k.key = path
     k.get_contents_to_filename(destination_filename)
 
 class Pull:
-    def __init__(self):
+    def __init__(self, config):
         self.ssh_client_cache = {}
+        self.config = config
 
     def _get_ssh_client(self, host):
         client = paramiko.SSHClient()
@@ -56,7 +57,7 @@ class Pull:
             sftp = transport.open_sftp_client()
             sftp.get(parts.path, dest_path)
         elif parts.scheme in ["s3"]:
-            s3_fetch(parts.netloc, parts.path, dest_path)
+            s3_fetch(parts.netloc, parts.path, dest_path, self.config)
         elif parts.scheme in ["http", "https"]:
             http_fetch(url, dest_path)
         else:
@@ -70,7 +71,7 @@ class Pull:
 
 class Resolver:
     def __init__(self, config):
-        self.puller = Pull()
+        self.puller = Pull(config)
         self.config = config
 
     def resolve(self, url):

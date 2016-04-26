@@ -473,7 +473,7 @@ def read_deps(filename, initial_vars={}):
         elif isinstance(dec, parser.LetStatement):
             rules.set_var(dec.name, dec.value)
         elif isinstance(dec, parser.IncludeStatement):
-            child_rules = read_deps(dec.filename)
+            child_rules = read_deps(os.path.expanduser(dec.filename))
             rules.merge(child_rules)
         else:
             assert isinstance(dec, parser.Rule)
@@ -540,14 +540,15 @@ def list_cmd(state_dir):
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
     j.dump()
 
-def debugrun(state_dir, depfile, target, override_vars):
+def debugrun(state_dir, depfile, target, override_vars, config_file):
     jinja2_env = create_jinja2_env()
 
     db_path = os.path.join(state_dir, "db.sqlite3")
     print("opening", db_path)
     j = dep.open_job_db(db_path)
 
-    rules = read_deps(depfile)
+    inital_config = load_config(config_file)
+    rules = read_deps(depfile, initial_vars=initial_config)
 
     for var, value in override_vars.items():
         rules.set_var(var, value)
@@ -670,7 +671,19 @@ def gc(state_dir):
 
     j.gc(rm_job_dir)
 
-def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_executions, capture_output, req_confirm):
+def load_config(config_file):
+    config = {}
+
+    p = parser.parse(os.path.expanduser(config_file))
+    for dec in p:
+        if isinstance(dec, parser.LetStatement):
+            config[dec.name] = dec.value
+        else:
+            raise Exception("Initial config is only allowed to use 'let' statements but encountered {}".format(dec))
+
+    return config
+
+def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_executions, capture_output, req_confirm, config_file):
     jinja2_env = create_jinja2_env()
 
     if not os.path.exists(state_dir):
@@ -695,9 +708,11 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
 
     script_dir = os.path.dirname(os.path.abspath(depfile))
 
-    rules = read_deps(depfile, dict(DL_CACHE_DIR=dlcache,
+    initial_config = dict(DL_CACHE_DIR=dlcache,
                                     SCRIPT_DIR=script_dir,
-                                    PROLOGUE=""))
+                                    PROLOGUE="")
+    initial_config.update(load_config(config_file))
+    rules = read_deps(depfile, initial_vars=initial_config)
 
     for var, value in override_vars.items():
         rules.set_var(var, value)

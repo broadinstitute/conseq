@@ -1,4 +1,5 @@
 from conseq import dep
+from conseq import depexec
 from boto.s3.connection import S3Connection
 from boto.s3.key import Key
 import re
@@ -35,17 +36,33 @@ def split_url(s):
         raise Exception("Could not parse s3 url: {}".format(s))
     return m.groups()
 
+def upload_single_file(bucket, path, filename):
+    k = Key(bucket)
+    k.key = path
+    k.set_contents_from_filename(filename)
+
+def drop_prefix(x, prefix):
+    assert x[:len(prefix)] == prefix
+    return x[len(prefix):]
+
 def upload_files(bucket, path_pairs):
     for filename, new_url in path_pairs:
         print("Uploading {} -> {}".format(filename, new_url))
 
         bucket_name, path = split_url(new_url)
         assert bucket_name == bucket.name
-        k = Key(bucket)
-        k.key = path
-        k.set_contents_from_filename(filename)
+        if os.path.isdir(filename):
+            for root, directories, filenames in os.walk(filename):
+                for _filename in filenames:
+                    src_filename = os.path.join(root,_filename)
+                    dest_path = path+drop_prefix(src_filename, filename)
+                    print("Uploading subfile {} -> {}".format(src_filename, dest_path))
+                    upload_single_file(bucket, dest_path, src_filename)
+        else:
+            upload_single_file(bucket, path, filename)
 
-def export(state_dir, url):
+def export_artifacts(state_dir, url, config_file):
+    config = depexec.load_config(config_file)
     j = dep.open_state_dir(state_dir)
 
     # I wonder if a repo will every get large enough that we won't want to do this in memory.  My guess is, no.
@@ -59,7 +76,7 @@ def export(state_dir, url):
 
     artifacts = json.dumps(new_objs)
 
-    c = S3Connection()
+    c = S3Connection(config["AWS_ACCESS_KEY_ID"], config["AWS_SECRET_ACCESS_KEY"])
     bucket_name, path = split_url(url)
     bucket = c.get_bucket(bucket_name)
     upload_files(bucket, all_translations)
@@ -68,11 +85,14 @@ def export(state_dir, url):
     k.key = path+"/artifacts.json"
     k.set_contents_from_string(artifacts)
 
-def import_artifacts(state_dir, url):
+def import_artifacts(state_dir, url, config_file):
+    config = depexec.load_config(config_file)
+
     if not os.path.exists(state_dir):
         os.makedirs(state_dir)
     j = dep.open_state_dir(state_dir)
-    c = S3Connection()
+
+    c = S3Connection(config["AWS_ACCESS_KEY_ID"], config["AWS_SECRET_ACCESS_KEY"])
     bucket_name, path = split_url(url)
     bucket = c.get_bucket(bucket_name)
 
