@@ -136,7 +136,7 @@ class LazyConfig:
         return self._render_template(v)
 
 def render_template(jinja2_env, template_text, config, **kwargs):
-    assert isinstance(template_text, str)
+    assert isinstance(template_text, str), "Expected string for template but got {}".format(repr(template_text))
     kwargs = dict(kwargs)
 
     def render_template_callback(text):
