@@ -4,8 +4,46 @@ import subprocess
 from conseq import dep
 import json
 import datetime
+import xml.etree.ElementTree as ETree
 
 log = logging.getLogger(__name__)
+
+def _tail_file(filename, line_count=20):
+    if not os.path.exists(filename):
+        log.error("Cannot tail {} because no such file exists".format(filename))
+        return
+
+    with open(filename, "rt") as fd:
+        fd.seek(0, 2)
+        file_len = fd.tell()
+        # read at most, the last 100k of the file
+        fd.seek(max(0, file_len-100000), 0)
+        lines = fd.read().split("\n")
+        for line in lines[-line_count:]:
+            print(line)
+
+def log_job_output(job_dir, captured_stdouts, line_count=20):
+    stdout_path, stderr_path = captured_stdouts
+    log.error("Dumping last {} lines of {}".format(line_count, stdout_path))
+    _tail_file(stdout_path)
+    log.error("Dumping last {} lines of {}".format(line_count, stderr_path))
+    _tail_file(stderr_path)
+
+class SuccessfulExecutionStub:
+    def __init__(self, id, outputs):
+        self.id = id
+        self.outputs = outputs
+
+    def get_external_id(self):
+        return "SuccessfulExecutionStub:{}".format(self.id)
+
+    def get_completion(self):
+        return None, self.outputs
+
+# Execution(name, id, job_dir, ReportSuccessProcStub(), outputs, None, desc_name)
+#         retcode_file = os.path.join(job_dir, "retcode.txt")
+#         with open(retcode_file, "wt") as fd:
+#             fd.write("0")
 
 class Execution:
     def __init__(self, transform, id, job_dir, proc, outputs, captured_stdouts, desc_name):
@@ -29,11 +67,25 @@ class Execution:
             props_copy[k] = v
         return props_copy
 
+    def get_external_id(self):
+        return "PID:{}".format(self.proc.pid)
+
     @property
     def results_path(self):
         return os.path.join(self.job_dir, "results.json")
 
+    def _log_failure(self, failure):
+        log.error("Task failed %s: %s", self.desc_name, failure)
+        if self.captured_stdouts != None:
+            log_job_output(self.job_dir, self.captured_stdouts)
+
     def get_completion(self):
+        failure, outputs = self._get_completion()
+        if failure is not None:
+            self._log_failure(failure)
+        return failure, outputs
+
+    def _get_completion(self):
         retcode = self.proc.poll()
 
         if retcode == None:
@@ -116,7 +168,6 @@ def exec_script(name, id, job_dir, run_stmts, outputs, capture_output, prologue,
 
     return Execution(name, id, job_dir, proc, outputs, captured_stdouts, desc_name)
 
-
 def needs_url_fetch(obj):
     for v in obj.values():
         if isinstance(v, dict) and "$file_url" in v:
@@ -191,34 +242,102 @@ def preprocess_inputs(j, resolver, inputs):
 class LocalExecClient:
     def reattach(self, external_ref):
         raise Exception("unimp")
+        # stdout_path = os.path.join(e.job_dir, "stdout.txt")
+        # stderr_path = os.path.join(e.job_dir, "stderr.txt")
+        # with open(os.path.join(e.job_dir, "description.txt")) as fd:
+        #     desc_name = fd.read()
+        # ee = Execution(e.transform, e.id, e.job_dir, PidProcStub(e.exec_xref), rule.outputs, (stdout_path, stderr_path), desc_name)
 
-    def localize(self, j, resolver, inputs):
+    def preprocess_inputs(self, j, resolver, inputs):
         return preprocess_inputs(j, resolver, inputs)
 
     def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name):
         return exec_script(name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name)
 
-# class SgeExecClient:
-#     def __init__(self, remote_workdir, s3_workdir):
-#         self.remote_workdir = remote_workdir
-#         self.s3_workdir = s3_workdir
-#
-#     def reattach(self, external_ref):
-#         raise Exception("unimp")
-#
+import collections
+import time
+
+SgeState = collections.namedtuple("SgeState", ["update_timestamp", "status", "refresh_id"])
+
+SGE_STATUS_SUBMITTED = "submitted"
+SGE_STATUS_PENDING = "pending"
+SGE_STATUS_RUNNING = "running"
+SGE_STATUS_COMPLETE = "complete"
+SGE_STATUS_UNKNOWN = "unknown"
+
+class SgeExecClient:
+    def __init__(self, host, sge_prologue, remote_workdir):
+        self.ssh_host = host
+        self.sge_prologue = sge_prologue
+        self.remote_workdir
+
+        self.status_cache_expiry = 30
+        self.job_completion_delay = 10
+        self.last_status_refresh = None
+        self.last_refresh_id = 1
+
+        # map of sge_job_id to sge status
+        self.last_status = {}
+
+    def reattach(self, external_ref):
+        raise Exception("unimp")
+
 #     def localize(self, inputs):
 #         raise Exception("unimp")
-#
-#     def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name):
-#         raise Exception("unimp")
-#         wrapper_path = ""
-#         job_dir = "{}/{}".format(self.remote_workdir, self.job_dir)
-#         run_stmts = [download_command] + run_stmts + [upload_command]
-#         write_wrapper_script(wrapper_path, job_dir, prologue, run_stmts, "retcode.txt")
-#
-#         # scp wrapper_path remote_wrapper_path
-#         # copy all files from job_dir to remote?
-#
-#         qsub_id = subprocess.check_output(['qsub', remote_wrapper_path])
-#
-#         return Execution(name, id, job_dir, proc, outputs, captured_stdouts, desc_name)
+
+    def _saw_job_id(self, sge_job_id, status):
+        self.last_status[sge_job_id] = SgeState(time.time(), status, self.last_refresh_id)
+
+    def _refresh_job_statuses(self):
+        handle = subprocess.Popen(["qstat", "-xml"], stdout=subprocess.PIPE)
+        stdout, stderr = handle.communicate()
+
+        self.last_refresh_id += 1
+
+        doc = ETree.fromstring(stdout)
+        job_list = doc.findall(".//job_list")
+
+        for job in job_list:
+            job_id = job.find("JB_job_number").text
+
+            state = job.attrib['state']
+            if state == "running":
+                self._saw_job_id(job_id, SGE_STATUS_RUNNING)
+            elif state == "pending":
+                self._saw_job_id(job_id, SGE_STATUS_PENDING)
+            else:
+                self._saw_job_id(job_id, SGE_STATUS_UNKNOWN)
+
+    def get_status(self, sge_job_id):
+        now = time.time()
+        if self.last_status_refresh is None or (now - self.last_status_refresh) > self.status_cache_expiry:
+            self._refresh_job_statuses()
+
+        status_obj = self.last_status[sge_job_id]
+        if status_obj.refresh_id != self.last_refresh_id:
+            # this job was missing the last time we refreshed
+            if now - status_obj.update_timestamp > self.job_completion_delay:
+                return SGE_STATUS_COMPLETE
+
+        return status_obj.status
+
+    def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name):
+        wrapper_path = ""
+        remote_url = "{}/{}".format(self.remote_url, self.job_dir)
+        job_dir = "{}/{}".format(self.remote_workdir, self.job_dir)
+
+        file_mappings_str = " ".join(need_to_get_files_that_were_uploaded)
+        download_command = "conseq-helper pull {} {}".format(remote_url, job_dir, file_mappings_str)
+        upload_command = "conseq-helper publish {} {} {}/results.json".format(remote_url, job_dir, job_dir)
+
+        run_stmts = [download_command] + run_stmts + [upload_command]
+        write_wrapper_script(wrapper_path, job_dir, prologue, run_stmts, "retcode.txt")
+
+        # scp wrapper_path remote_wrapper_path
+        # copy all files from job_dir to remote?
+
+        command = "use UGER ; cd {job_dir} ; qsub -terse -cwd -o {stdout} -e {stderr} {remote_wrapper_path}"
+        sge_job_id = subprocess.check_output(['qsub', remote_wrapper_path])
+        self._saw_job_id(sge_job_id, SGE_STATUS_SUBMITTED)
+
+        return Execution(name, id, job_dir, sge_job_id, desc_name)

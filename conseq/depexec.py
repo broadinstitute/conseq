@@ -86,10 +86,8 @@ def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, captu
                            outputs, capture_output, prologue, desc_name)
     else:
         # fast path when there's no need to spawn an external process.  (mostly used by tests)
-        execution = exec_client.Execution(name, id, job_dir, ReportSuccessProcStub(), outputs, None, desc_name)
-        retcode_file = os.path.join(job_dir, "retcode.txt")
-        with open(retcode_file, "wt") as fd:
-            fd.write("0")
+        execution = exec_client.SuccessfulExecutionStub()
+
     return execution
 
 class PidProcStub:
@@ -200,7 +198,7 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, m
 
             e = execute(job.transform, resolver, jinja2_env, exec_id, job_dir, inputs, rule, rules.get_vars(), capture_output)
             executing.append(e)
-            j.update_exec_xref(e.id, "PID:{}".format(e.proc.pid), job_dir)
+            j.update_exec_xref(e.id, e.get_external_id(), job_dir)
 
         for i, e in reversed(list(enumerate(executing))):
             failure, completion = e.get_completion()
@@ -212,9 +210,6 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, m
             timestamp = datetime.datetime.now().isoformat()
 
             if failure != None:
-                log.error("Task failed %s: %s", e.desc_name, failure)
-                if e.captured_stdouts != None:
-                    log_job_output(e.job_dir, e.captured_stdouts)
                 j.record_completed(timestamp, e.id, dep.STATUS_FAILED, {})
             elif completion != None:
                 j.record_completed(timestamp, e.id, dep.STATUS_COMPLETED, completion)
@@ -224,28 +219,6 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, m
         if not did_useful_work:
             time.sleep(0.5)
 
-def _tail_file(filename, line_count=20):
-    if not os.path.exists(filename):
-        log.error("Cannot tail {} because no such file exists".format(filename))
-        return
-
-    with open(filename, "rt") as fd:
-        fd.seek(0, 2)
-        file_len = fd.tell()
-        # read at most, the last 100k of the file
-        fd.seek(max(0, file_len-100000), 0)
-        lines = fd.read().split("\n")
-        for line in lines[-line_count:]:
-            print(line)
-
-def log_job_output(job_dir, captured_stdouts, line_count=20):
-    stdout_path, stderr_path = captured_stdouts
-    #stdout_path = os.path.relpath(os.path.join(job_dir, "stdout.txt"))
-    #stderr_path = os.path.relpath(os.path.join(job_dir, "stderr.txt"))
-    log.error("Dumping last {} lines of {}".format(line_count, stdout_path))
-    _tail_file(stdout_path)
-    log.error("Dumping last {} lines of {}".format(line_count, stderr_path))
-    _tail_file(stderr_path)
 
 
 def add_xref(j, xref):
