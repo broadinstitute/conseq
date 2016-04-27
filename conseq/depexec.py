@@ -12,6 +12,8 @@ import shutil
 from conseq import dep
 from conseq import parser
 
+from conseq import exec_client
+
 log = logging.getLogger(__name__)
 
 class FatalUserError(Exception):
@@ -19,112 +21,6 @@ class FatalUserError(Exception):
 
 class JobFailedError(FatalUserError):
     pass
-
-class Execution:
-    def __init__(self, transform, id, job_dir, proc, outputs, captured_stdouts, desc_name):
-        self.transform = transform
-        self.id = id
-        self.proc = proc
-        self.job_dir = job_dir
-        self.outputs = outputs
-        self.captured_stdouts = captured_stdouts
-        self.desc_name = desc_name
-        assert job_dir != None
-
-    def _resolve_filenames(self, props):
-        props_copy = {}
-        for k, v in props.items():
-            if isinstance(v, dict) and "$filename" in v:
-                full_filename = os.path.join(self.job_dir, v["$filename"])
-                if not os.path.exists(full_filename):
-                    raise Exception("Attempted to publish results which referenced file that did not exist: {}".format(full_filename))
-                v = {"$filename": full_filename}
-            props_copy[k] = v
-        return props_copy
-
-    @property
-    def results_path(self):
-        return os.path.join(self.job_dir, "results.json")
-
-    def get_completion(self):
-        retcode = self.proc.poll()
-
-        if retcode == None:
-            return None, None
-        
-        if retcode != 0:
-            return("shell command failed with {}".format(retcode), None)
-
-        retcode_file = os.path.join(self.job_dir, "retcode.txt")
-        try:
-            with open(retcode_file) as fd:
-                retcode = int(fd.read())
-                if retcode != 0:
-                    return "failed with {}".format(retcode), None
-        except FileNotFoundError:
-            return "No retcode file {}".format(retcode_file), None
-
-        if self.outputs != None:
-            results = {"outputs": self.outputs}
-        else:
-            if not os.path.exists(self.results_path):
-                return("rule {} completed successfully, but no results.json file written to working directory".format(self.transform), None)
-
-            with open(self.results_path) as fd:
-                results = json.load(fd)
-
-        log.info("Rule {} completed ({}). Results: {}".format(self.transform, self.job_dir, results))
-        outputs = [self._resolve_filenames(o) for o in results['outputs']]
-
-        # print summary of output files with full paths
-        files_written = []
-        for output in outputs:
-            for value in output.values():
-                if isinstance(value, dict) and "$filename" in value:
-                    files_written.append(value["$filename"])
-        if len(files_written):
-            log.warn("Rule %s wrote the following files:\n%s", self.transform, "\n".join(["\t"+x for x in files_written]))
-
-        return None, outputs
-
-def exec_script(name, id, language, job_dir, run_stmts, outputs, capture_output, prologue, desc_name):
-    stdout_path = os.path.join(job_dir, "stdout.txt")
-    stderr_path = os.path.join(job_dir, "stderr.txt")
-    # results_path = os.path.join(job_dir, "results.json")
-
-    stdout_path = os.path.abspath(stdout_path)
-    stderr_path = os.path.abspath(stderr_path)
-    retcode_path = os.path.abspath(os.path.join(job_dir, "retcode.txt"))
-
-    wrapper_path = os.path.join(job_dir, "wrapper.sh")
-    with open(wrapper_path, "w") as fd:
-        fd.write("set -ex\n")
-        fd.write("cd {job_dir}\n".format(**locals()))
-
-        fd.write(prologue+"\n")
-
-        for command in run_stmts:
-            fd.write(command)
-            fd.write(" &&\\\n")
-
-        fd.write("true\n")
-        fd.write("echo $? > {retcode_path}\n".format(**locals()))
-
-    if capture_output:
-        bash_cmd = "exec bash {wrapper_path} > {stdout_path} 2> {stderr_path}".format(**locals())
-        captured_stdouts = (stdout_path, stderr_path)
-    else:
-        bash_cmd = "exec bash {wrapper_path}".format(**locals())
-        captured_stdouts = None
-
-    log.info("Starting task in %s", job_dir)
-    log.debug("executing: %s", bash_cmd)
-    proc = subprocess.Popen(['bash', '-c', bash_cmd])
-
-    with open(os.path.join(job_dir, "description.txt"), "w") as fd:
-        fd.write(desc_name)
-
-    return Execution(name, id, job_dir, proc, outputs, captured_stdouts, desc_name)
 
 class LazyConfig:
     def __init__(self, render_template, config_dict):
@@ -151,114 +47,45 @@ def render_template(jinja2_env, template_text, config, **kwargs):
 
     return render_template_callback(template_text)
 
-def flatten_parameters(d):
-    pairs = []
-    for k, v in d.items():
-        if isinstance(v, dict) and len(v) == 1 and "$value" in v:
-            v = v["$value"]
-        elif isinstance(v, dict) and len(v) == 1 and "$filename" in v:
-            v = os.path.abspath(v["$filename"])
-        pairs.append( (k,v) )
-    return dict(pairs)
+def generate_run_stmts(job_dir, command_and_bodies, jinja2_env, config, inputs):
+    run_stmts = []
+    for i, x in enumerate(command_and_bodies):
+        command, script_body = x
+        command, script_body = expand_run(jinja2_env, command, script_body, config, inputs)
+        if script_body != None:
+            formatted_script_body = textwrap.dedent(script_body)
+            script_name = os.path.abspath(os.path.join(job_dir, "script_%d"%i))
+            with open(script_name, "w") as fd:
+                fd.write(formatted_script_body)
+            command += " "+script_name
 
-def needs_url_fetch(obj):
-    for v in obj.values():
-        if isinstance(v, dict) and "$file_url" in v:
-            return True
-    return False
-
-def fetch_urls(obj, resolver):
-    new_obj = {}
-    for k,v in obj.items():
-        if isinstance(v, dict) and "$file_url" in v:
-            url = v["$file_url"]
-            filename = resolver.resolve(url)['filename']
-            new_obj[k] = {"$filename": filename}
-        else:
-            new_obj[k] = v
-    return new_obj
-
-def needs_resolution(obj):
-    if not ("$xref_url" in obj):
-        return False
-    for v in obj.values():
-        if isinstance(v, dict) and "$value" in v:
-            return False
-    return True
-
-def preprocess_inputs(j, resolver, inputs):
-    xrefs_resolved = [False]
-
-    def resolve(obj_):
-        assert isinstance(obj_, dep.Obj)
-        obj = obj_.props
-        obj_copy = None
-        if needs_url_fetch(obj):
-            obj_copy = fetch_urls(obj, resolver)
-
-        elif needs_resolution(obj):
-            extra_params = resolver.resolve(obj["$xref_url"])
-            obj_copy = dict(obj)
-            for k, v in extra_params.items():
-                obj_copy[k] = {"$value": v}
-
-        if not obj_copy is None:
-            timestamp = datetime.datetime.now().isoformat()
-            # persist new version of object with extra properties
-            j.add_obj(obj_.space, timestamp, obj_copy)
-            xrefs_resolved[0] = True
-            obj = obj_copy
-
-        assert isinstance(obj, dict)
-        return flatten_parameters(obj)
-
-    result = {}
-    for bound_name, obj_or_list in inputs:
-        if isinstance(obj_or_list, list) or isinstance(obj_or_list, tuple):
-            list_ = obj_or_list
-            result[bound_name] = [resolve(obj_) for obj_ in list_]
-        else:
-            obj_ = obj_or_list
-            result[bound_name] = resolve(obj_)
-    return result, xrefs_resolved[0]
+        run_stmts.append(command)
+    return run_stmts
 
 def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, capture_output):
+    client = rule.client
     prologue = render_template(jinja2_env, config["PROLOGUE"], config)
 
-    language = rule.language
     if rule.outputs == None:
         outputs = None
     else:
         outputs = [expand_outputs(jinja2_env, output, config, inputs=inputs) for output in rule.outputs]
     assert isinstance(inputs, dict)
-    #inputs = dict([(k, flatten_parameters(v)) for k,v in inputs.items()])
 
     log.info("Executing %s in %s with inputs %s", name, job_dir, inputs)
     desc_name = "{} with inputs {} ({})".format(name, inputs, job_dir)
 
-    run_stmts = []
     if len(rule.run_stmts) > 0:
-        for i, x in enumerate(rule.run_stmts):
-            command, script_body = x
-            command, script_body = expand_run(jinja2_env, command, script_body, config, inputs)
-            if script_body != None:
-                formatted_script_body = textwrap.dedent(script_body)
-                script_name = os.path.abspath(os.path.join(job_dir, "script_%d"%i))
-                with open(script_name, "w") as fd:
-                    fd.write(formatted_script_body)
-                command += " "+script_name
+        run_stmts = generate_run_stmts(job_dir, rule.run_stmts, jinja2_env, config, inputs)
 
-            run_stmts.append(command)
-
-        execution = exec_script(name,
+        execution = client.exec_script(name,
                            id,
-                           language,
                            job_dir,
                            run_stmts,
                            outputs, capture_output, prologue, desc_name)
     else:
         # fast path when there's no need to spawn an external process.  (mostly used by tests)
-        execution = Execution(name, id, job_dir, ReportSuccessProcStub(), outputs, None, desc_name)
+        execution = exec_client.Execution(name, id, job_dir, ReportSuccessProcStub(), outputs, None, desc_name)
         retcode_file = os.path.join(job_dir, "retcode.txt")
         with open(retcode_file, "wt") as fd:
             fd.write("0")
@@ -290,12 +117,7 @@ def reattach(j, rules):
         if e.exec_xref != None:
             rule = rules.get_rule(e.transform)
 
-            stdout_path = os.path.join(e.job_dir, "stdout.txt")
-            stderr_path = os.path.join(e.job_dir, "stderr.txt")
-            with open(os.path.join(e.job_dir, "description.txt")) as fd:
-                desc_name = fd.read()
-
-            ee = Execution(e.transform, e.id, e.job_dir, PidProcStub(e.exec_xref), rule.outputs, (stdout_path, stderr_path), desc_name)
+            ee = rule.client.reattach(e.exec_xref)
             executing.append(ee)
             log.warn("Reattaching existing job {}: {}".format(e.transform, e.exec_xref))
         else:
@@ -306,6 +128,13 @@ def reattach(j, rules):
 def get_job_dir(state_dir, job_id):
     working_dir = os.path.join(state_dir, "working")
     return working_dir + "/r" + str(job_id)
+
+def confirm_execution(transform, inputs):
+    while True:
+        answer = input("Proceed to run {} on {}? (y)es, (a)lways or (q)uit: ".format(transform, inputs))
+        if not (answer in ["y", "a", "q"]):
+            print("Invalid input")
+        return answer
 
 from conseq import xref
 def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, max_concurrent_executions, capture_output, req_confirm):
@@ -346,18 +175,16 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, m
             did_useful_work = True
 
             rule = rules.get_rule(job.transform)
-            inputs, xrefs_resolved = preprocess_inputs(j, resolver, job.inputs)
+
+            # resolve inputs and then confirm with user
+            inputs, xrefs_resolved = rule.client.preprocess_inputs(j, resolver, job.inputs)
             if xrefs_resolved:
                 log.info("Resolved xrefs on rule, new version will be executed next pass")
                 continue
 
             # if we're required confirmation from the user, do this before we continue
             if req_confirm:
-                while True:
-                    answer = input("Proceed to run {} on {}? (y)es, (a)lways or (q)uit: ".format(job.transform, inputs))
-                    if not (answer in ["y", "a", "q"]):
-                        print("Invalid input")
-                    break
+                answer = confirm_execution(job.transform, inputs)
                 if answer == "a":
                     req_confirm = False
                 elif answer == "q":
@@ -466,6 +293,8 @@ def read_deps(filename, initial_vars={}):
     for name, value in initial_vars.items():
         rules.set_var(name, value)
 
+    local_client = exec_client.LocalExecClient()
+
     p = parser.parse(filename)
     for dec in p:
         if isinstance(dec, parser.XRef):
@@ -477,6 +306,7 @@ def read_deps(filename, initial_vars={}):
             rules.merge(child_rules)
         else:
             assert isinstance(dec, parser.Rule)
+            dec.client = local_client
             rules.set_rule(dec.name, dec)
     return rules
 
@@ -547,7 +377,7 @@ def debugrun(state_dir, depfile, target, override_vars, config_file):
     print("opening", db_path)
     j = dep.open_job_db(db_path)
 
-    inital_config = load_config(config_file)
+    initial_config = load_config(config_file)
     rules = read_deps(depfile, initial_vars=initial_config)
 
     for var, value in override_vars.items():
@@ -711,7 +541,9 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
     initial_config = dict(DL_CACHE_DIR=dlcache,
                                     SCRIPT_DIR=script_dir,
                                     PROLOGUE="")
-    initial_config.update(load_config(config_file))
+    if config_file is not None:
+        initial_config.update(load_config(config_file))
+
     rules = read_deps(depfile, initial_vars=initial_config)
 
     for var, value in override_vars.items():
