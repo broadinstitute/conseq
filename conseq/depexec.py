@@ -11,6 +11,7 @@ import shutil
 
 from conseq import dep
 from conseq import parser
+import six
 
 from conseq import exec_client
 
@@ -32,7 +33,7 @@ class LazyConfig:
         return self._render_template(v)
 
 def render_template(jinja2_env, template_text, config, **kwargs):
-    assert isinstance(template_text, str)
+    assert isinstance(template_text, six.string_types), "Expected string for template but got {}".format(repr(template_text))
     kwargs = dict(kwargs)
 
     def render_template_callback(text):
@@ -425,7 +426,7 @@ def expand_input_spec(jinja2_env, spec, config):
     regexps = {}
     for k, v in spec.items():
         # if the value is a regexp, don't expand
-        if not isinstance(v, str):
+        if not isinstance(v, six.string_types):
             regexps[k] = v
     for k in regexps.keys():
         del spec[k]
