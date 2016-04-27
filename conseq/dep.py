@@ -4,6 +4,7 @@ import os
 import collections
 import logging
 import re
+import six
 
 log = logging.getLogger(__name__)
 
@@ -296,9 +297,9 @@ class RuleSet:
                     continue
             else:
                 vs = (vs,)
-            flattened_inputs.append( (n, tuple([x.id for x in vs]))  )
+            flattened_inputs.append( (str(n), tuple([x.id for x in vs]))  )
         flattened_inputs.sort()
-        return repr((tuple(flattened_inputs), transform))
+        return repr((tuple(flattened_inputs), str(transform)))
 
     def find_by_name(self, transform):
         return self._find_rule_execs("transform = ?", (transform,))
@@ -601,7 +602,7 @@ class PropMatchesRegexp:
     def __init__(self, variable, property, regexp):
         self.variable = variable
         self.property = property
-        if isinstance(regexp, str):
+        if isinstance(regexp, six.string_types):
             self.regexp = re.compile(regexp)
         else:
             self.regexp = regexp

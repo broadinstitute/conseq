@@ -1,6 +1,7 @@
 from collections import namedtuple
 from conseq.parser import depfile
 import re
+import six
 
 QueryVariable = namedtuple("QueryVariable", ["name"])
 RunStmt = namedtuple("RunStmt", ["command", "script"])
@@ -94,7 +95,7 @@ class Semantics(object):
         return XRef(ast[1],ast[2])
 
     def query_variable(self, ast):
-        assert isinstance(ast, str)
+        assert isinstance(ast, six.string_types)
         return QueryVariable(ast)
 
     def rule(self, ast):

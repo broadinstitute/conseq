@@ -11,6 +11,7 @@ import shutil
 
 from conseq import dep
 from conseq import parser
+import six
 
 log = logging.getLogger(__name__)
 
@@ -136,7 +137,7 @@ class LazyConfig:
         return self._render_template(v)
 
 def render_template(jinja2_env, template_text, config, **kwargs):
-    assert isinstance(template_text, str), "Expected string for template but got {}".format(repr(template_text))
+    assert isinstance(template_text, six.string_types), "Expected string for template but got {}".format(repr(template_text))
     kwargs = dict(kwargs)
 
     def render_template_callback(text):
@@ -595,7 +596,7 @@ def expand_input_spec(jinja2_env, spec, config):
     regexps = {}
     for k, v in spec.items():
         # if the value is a regexp, don't expand
-        if not isinstance(v, str):
+        if not isinstance(v, six.string_types):
             regexps[k] = v
     for k in regexps.keys():
         del spec[k]
@@ -711,7 +712,8 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
     initial_config = dict(DL_CACHE_DIR=dlcache,
                                     SCRIPT_DIR=script_dir,
                                     PROLOGUE="")
-    initial_config.update(load_config(config_file))
+    if config_file is not None:
+        initial_config.update(load_config(config_file))
     rules = read_deps(depfile, initial_vars=initial_config)
 
     for var, value in override_vars.items():

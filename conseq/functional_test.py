@@ -13,7 +13,7 @@ def run_conseq(tmpdir, config, targets=[], assert_clean=True):
     if assert_clean:
         assert not os.path.exists(db_path)
 
-    depexec.main(filename, state_dir, targets, {}, 10, False, False)
+    depexec.main(filename, state_dir, targets, {}, 10, False, False, None)
     j = dep.open_job_db(db_path)
     return j
 
