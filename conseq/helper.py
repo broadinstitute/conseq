@@ -4,6 +4,7 @@ import os
 import hashlib
 import argparse
 import json
+import subprocess
 
 from boto.s3.connection import S3Connection
 from boto.s3.key import Key
@@ -35,8 +36,8 @@ class Remote:
     # TODO: make download atomic by dl and rename (assuming get_contents_to_filename doesn't already)
     def download(self, remote, local, ignoreMissing=False):
         # maybe upload and download should use trailing slash to indicate directory should be uploaded instead of just a file
-        remote_path = self.remote_path + "/" + remote
-        local = self.local_dir + "/" + local
+        remote_path =  os.path.normpath(self.remote_path + "/" + remote)
+        local =  os.path.normpath(self.local_dir + "/" + local)
         key = self.bucket.get_key(remote_path)
         if key != None:
             # if it's a file, download it
@@ -59,9 +60,9 @@ class Remote:
 
     def upload(self, local, remote, ignoreMissing=False):
         # maybe upload and download should use trailing slash to indicate directory should be uploaded instead of just a file
-        remote_path = self.remote_path + "/" + remote
-        #local_path = os.path.join(local, remote)
-        local_path = local
+        remote_path = os.path.normpath(self.remote_path + "/" + remote)
+        local_path = os.path.normpath(os.path.join(self.local_dir, local))
+        # local_path = local
 
         if os.path.exists(local_path):
             if os.path.isfile(local_path):
@@ -72,12 +73,12 @@ class Remote:
                 key.set_contents_from_filename(local_path)
             else:
                 # upload everything in the dir
-                for fn in os.listdir(local):
-                    full_fn = os.path.join(local, fn)
+                for fn in os.listdir(local_path):
+                    full_fn = os.path.join(local_path, fn)
                     if os.path.isfile(full_fn):
                         k = Key(self.bucket)
                         k.key = os.path.join(remote_path, fn)
-                        log.info("Uploading dir %s (%s to %s)", local, fn, fn)
+                        log.info("Uploading dir %s (%s to %s)", local_path, fn, fn)
                         k.set_contents_from_filename(full_fn)
         elif not ignoreMissing:
             raise Exception("Could not find {}".format(local))
@@ -121,27 +122,32 @@ def push_to_cas(remote, filenames):
 
     return name_mapping
 
-def pull(remote, filename_mapping):
-    for local_path, remote_path in filename_mapping.items():
-        remote.download(remote_path, local_path)
+# def pull(remote, filename_mapping):
+#     for local_path, remote_path in filename_mapping.items():
+#         remote.download(remote_path, local_path)
 
+def push(remote, filenames):
+    for filename in filenames:
+        remote.upload(filename, filename)
 
 def push_cmd(args, config):
     remote = Remote(args.remote_url, args.local_dir, config["AWS_ACCESS_KEY_ID"], config["AWS_SECRET_ACCESS_KEY"])
     if args.cas:
         push_to_cas(remote, args.filenames)
     else:
-        for filename in args.filenames:
-            remote.upload(filename, filename)
+        push(remote, args.filenames)
 
-def pull_cmd(args, config):
-    remote = Remote(args.remote_url, args.local_dir, config["AWS_ACCESS_KEY_ID"], config["AWS_SECRET_ACCESS_KEY"])
-    for file_mapping in args.file_mappings:
+def pull(remote, file_mappings, ignoreMissing=False):
+    for file_mapping in file_mappings:
         if ":" in file_mapping:
             remote_path, local_path = file_mapping.split(":")
         else:
             remote_path = local_path = file_mapping
-        remote.download(remote_path, local_path)
+        remote.download(remote_path, local_path, ignoreMissing=ignoreMissing)
+
+def pull_cmd(args, config):
+    remote = Remote(args.remote_url, args.local_dir, config["AWS_ACCESS_KEY_ID"], config["AWS_SECRET_ACCESS_KEY"])
+    pull(remote, args.file_mappings)
 
 def read_config(filename):
     config = {}
@@ -173,7 +179,31 @@ def publish_cmd(args, config):
     new_results_json = json.dumps({"outputs": t_published}, fd)
     remote.upload_str(os.path.join(published_files_root, "results.json"), new_results_json)
 
-def main():
+
+def exec_cmd(args, config):
+    remote = Remote(args.remote_url, args.local_dir, config["AWS_ACCESS_KEY_ID"], config["AWS_SECRET_ACCESS_KEY"])
+
+    stderr_fd = None
+    if args.stderr is not None:
+        stderr_fd = os.open(os.path.join(args.local_dir, args.stderr), os.O_WRONLY|os.O_APPEND|os.O_CREAT)
+
+    stdout_fd = None
+    if args.stdout is not None:
+        stdout_fd = os.open(os.path.join(args.local_dir, args.stdout), os.O_WRONLY|os.O_APPEND|os.O_CREAT)
+
+    pull(remote, args.download, ignoreMissing=True)
+
+    retcode = subprocess.call(args.command, stdout=stdout_fd, stderr=stderr_fd, cwd=args.local_dir)
+
+    if args.retcode is not None:
+        fd = open(os.path.join(args.local_dir, args.retcode), "wt")
+        fd.write(str(retcode))
+        fd.close()
+
+    push(remote, args.upload)
+
+
+def main(varg = None):
     parser = argparse.ArgumentParser("push or pull files from cloud storage")
     parser.set_defaults(func=None)
     parser.add_argument("--config", "-c", help="path to config file")
@@ -193,16 +223,30 @@ def main():
     publish_parser.add_argument("publish_json")
     publish_parser.set_defaults(func=publish_cmd)
 
+    exec_parser = subparsers.add_parser("exec")
+    exec_parser.add_argument("remote_url")
+    exec_parser.add_argument("local_dir")
+    exec_parser.add_argument("--download", "-d", nargs="*", default=[])
+    exec_parser.add_argument("--upload", "-u", nargs="*", default=[])
+    exec_parser.add_argument("--stdout", "-o")
+    exec_parser.add_argument("--stderr", "-e")
+    exec_parser.add_argument("--retcode", "-r")
+    exec_parser.add_argument("command", nargs=argparse.REMAINDER)
+    exec_parser.set_defaults(func=exec_cmd)
+
     pull_parser = subparsers.add_parser("pull")
     pull_parser.add_argument("remote_url", help="base remote url to pull from")
     pull_parser.add_argument("local_dir")
     pull_parser.add_argument("file_mappings", help="mappings of remote paths to local paths of the form 'remote:local'", nargs="+")
     pull_parser.set_defaults(func=pull_cmd)
 
-    args = parser.parse_args()
+    args = parser.parse_args(varg)
     config = {}
     if args.config is not None:
         config = read_config(args.config)
+    else:
+        config["AWS_ACCESS_KEY_ID"] = os.getenv("AWS_ACCESS_KEY_ID")
+        config["AWS_SECRET_ACCESS_KEY"] = os.getenv("AWS_SECRET_ACCESS_KEY")
 
     logging.basicConfig(level=logging.INFO)
 
