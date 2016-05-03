@@ -5,6 +5,7 @@ import hashlib
 import argparse
 import json
 import subprocess
+import time
 
 from boto.s3.connection import S3Connection
 from boto.s3.key import Key
@@ -67,28 +68,39 @@ class Remote:
         if os.path.exists(local_path):
             if os.path.isfile(local_path):
                 # if it's a file, upload it
-                key = Key(self.bucket)
-                key.name = remote_path
-                log.info("Uploading file %s to %s", local, remote)
-                key.set_contents_from_filename(local_path)
+                if self.bucket.get_key(remote_path) is None:
+                    key = Key(self.bucket)
+                    key.name = remote_path
+                    log.info("Uploading file %s to %s", local, remote)
+                    key.set_contents_from_filename(local_path)
             else:
                 # upload everything in the dir
                 for fn in os.listdir(local_path):
                     full_fn = os.path.join(local_path, fn)
                     if os.path.isfile(full_fn):
-                        k = Key(self.bucket)
-                        k.key = os.path.join(remote_path, fn)
-                        log.info("Uploading dir %s (%s to %s)", local_path, fn, fn)
-                        k.set_contents_from_filename(full_fn)
+                        r = os.path.join(remote_path, fn)
+                        if self.bucket.get_key(r) is None:
+                            k = Key(self.bucket)
+                            k.key = r
+                            log.info("Uploading dir %s (%s to %s)", local_path, fn, fn)
+                            k.set_contents_from_filename(full_fn)
         elif not ignoreMissing:
             raise Exception("Could not find {}".format(local))
 
-    def download_as_str(self, remote):
+    def download_as_str(self, remote, timeout=5):
         remote_path = self.remote_path+"/"+remote
-        key = self.bucket.get_key(remote_path)
+        for i in range(timeout):
+            key = self.bucket.get_key(remote_path)
+            if key != None:
+                break
+            print("No value for key", remote_path, " sleeping 1 sec")
+            time.sleep(1)
         if key == None:
+            print("No value for key", remote_path)
             return None
-        return key.get_contents_as_string()
+        value = key.get_contents_as_string()
+        print("fetched ", remote_path, " as ", repr(value))
+        return value.decode("utf-8")
 
     def upload_str(self, remote, text):
         remote_path = self.remote_path+"/"+remote
@@ -112,7 +124,8 @@ def push_to_cas(remote, filenames):
     name_mapping = {}
 
     for filename in filenames:
-        hash = calc_hash(filename)
+        local_filename = os.path.normpath(os.path.join(remote.local_dir, filename))
+        hash = calc_hash(local_filename)
         remote_name = "CAS/{}".format(hash)
         if remote.exists(remote_name):
             log.info("Skipping upload of %s because %s already exists", filename, remote_name)
@@ -122,9 +135,22 @@ def push_to_cas(remote, filenames):
 
     return name_mapping
 
-# def pull(remote, filename_mapping):
-#     for local_path, remote_path in filename_mapping.items():
-#         remote.download(remote_path, local_path)
+import tempfile
+
+def push_to_cas_with_pullmap(remote, filenames):
+    name_mapping = push_to_cas(remote, filenames)
+
+    mapping = [ dict(remote="{}/{}".format(remote.remote_url, v), local=k) for k, v in name_mapping.items() ]
+    mapping_str = json.dumps(dict(mapping=mapping))
+    print("Mapping str: ", mapping_str)
+    fd = tempfile.NamedTemporaryFile(mode="wt")
+    fd.write(mapping_str)
+    fd.flush()
+    map_name = list(push_to_cas(remote, [fd.name]).values())[0]
+    fd.close()
+
+    return "{}/{}".format(remote.remote_url, map_name)
+
 
 def push(remote, filenames):
     for filename in filenames:
@@ -138,11 +164,7 @@ def push_cmd(args, config):
         push(remote, args.filenames)
 
 def pull(remote, file_mappings, ignoreMissing=False):
-    for file_mapping in file_mappings:
-        if ":" in file_mapping:
-            remote_path, local_path = file_mapping.split(":")
-        else:
-            remote_path = local_path = file_mapping
+    for remote_path, local_path in file_mappings:
         remote.download(remote_path, local_path, ignoreMissing=ignoreMissing)
 
 def pull_cmd(args, config):
@@ -179,9 +201,26 @@ def publish_cmd(args, config):
     new_results_json = json.dumps({"outputs": t_published}, fd)
     remote.upload_str(os.path.join(published_files_root, "results.json"), new_results_json)
 
+def convert_json_mapping(d):
+    return [ (rec['remote'], rec['local']) for rec in d['mapping']]
+
+def parse_mapping_str(file_mapping):
+    if ":" in file_mapping:
+        remote_path, local_path = file_mapping.split(":")
+    else:
+        remote_path = local_path = file_mapping
+    return (remote_path, local_path)
 
 def exec_cmd(args, config):
     remote = Remote(args.remote_url, args.local_dir, config["AWS_ACCESS_KEY_ID"], config["AWS_SECRET_ACCESS_KEY"])
+
+    pull_map = []
+    if args.download_pull_map is not None:
+        pull_map_dict = json.loads(remote.download_as_str(args.download_pull_map))
+        pull_map.extend(convert_json_mapping(pull_map_dict))
+
+    for mapping_str in args.download:
+        pull_map.append(parse_mapping_str(mapping_str))
 
     stderr_fd = None
     if args.stderr is not None:
@@ -191,7 +230,7 @@ def exec_cmd(args, config):
     if args.stdout is not None:
         stdout_fd = os.open(os.path.join(args.local_dir, args.stdout), os.O_WRONLY|os.O_APPEND|os.O_CREAT)
 
-    pull(remote, args.download, ignoreMissing=True)
+    pull(remote, pull_map, ignoreMissing=True)
 
     retcode = subprocess.call(args.command, stdout=stdout_fd, stderr=stderr_fd, cwd=args.local_dir)
 
@@ -226,6 +265,7 @@ def main(varg = None):
     exec_parser = subparsers.add_parser("exec")
     exec_parser.add_argument("remote_url")
     exec_parser.add_argument("local_dir")
+    exec_parser.add_argument("--download_pull_map", "-f")
     exec_parser.add_argument("--download", "-d", nargs="*", default=[])
     exec_parser.add_argument("--upload", "-u", nargs="*", default=[])
     exec_parser.add_argument("--stdout", "-o")

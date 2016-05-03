@@ -3,6 +3,8 @@ import paramiko.config
 import tempfile
 import os
 import sys
+from io import StringIO
+import getpass
 
 class SimpleSSH:
     def __init__(self):
@@ -42,6 +44,8 @@ class SimpleSSH:
         return result
     
     def exec_cmd(self, host, command):
+        captured_stdout = StringIO()
+
         client = self._get_client(host)
 
         tran = client.get_transport()
@@ -55,9 +59,12 @@ class SimpleSSH:
                 break
             sys.stdout.write(buf.decode("utf-8"))
             sys.stdout.flush()
+            captured_stdout.write(buf.decode("utf-8"))
         print("end remote output --------------------")
         status = chan.recv_exit_status()
         assert status == 0
+
+        return captured_stdout.getvalue()
 
     def _get_client(self, host):
         if host in self.client_cache:
@@ -67,7 +74,13 @@ class SimpleSSH:
 
             client = SSHClient()
             client.set_missing_host_key_policy(paramiko.client.AutoAddPolicy())
-            client.connect(host_config["hostname"], username=host_config['user'], key_filename=host_config['identityfile'])
+            username = getpass.getuser()
+            if 'user' in host_config:
+                username = host_config['user']
+            key_filename = os.path.expanduser("~/.ssh/id_rsa")
+            if 'identityfile' in host_config:
+                key_filename = host_config['identityfile']
+            client.connect(host_config["hostname"], username=username, key_filename=key_filename)
             self.client_cache[host] = client
         assert client != None
         return client

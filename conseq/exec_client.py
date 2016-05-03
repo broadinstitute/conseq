@@ -5,6 +5,9 @@ from conseq import dep
 import json
 import datetime
 import xml.etree.ElementTree as ETree
+import re
+
+from conseq import helper
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +47,8 @@ class SuccessfulExecutionStub:
 #         retcode_file = os.path.join(job_dir, "retcode.txt")
 #         with open(retcode_file, "wt") as fd:
 #             fd.write("0")
+
+
 
 class Execution:
     def __init__(self, transform, id, job_dir, proc, outputs, captured_stdouts, desc_name):
@@ -265,11 +270,18 @@ SGE_STATUS_RUNNING = "running"
 SGE_STATUS_COMPLETE = "complete"
 SGE_STATUS_UNKNOWN = "unknown"
 
+from cpdshelpers import SimpleSSH
+
 class SgeExecClient:
-    def __init__(self, host, sge_prologue, remote_workdir):
+    def __init__(self, host, sge_prologue, local_workdir, remote_workdir, remote_url, helper_path):
         self.ssh_host = host
         self.sge_prologue = sge_prologue
-        self.remote_workdir
+        self.remote_workdir = remote_workdir
+        self.remote_url = remote_url
+        self.local_workdir = local_workdir
+        self.helper_path = helper_path
+
+        self.ssh = SimpleSSH()
 
         self.status_cache_expiry = 30
         self.job_completion_delay = 10
@@ -280,17 +292,22 @@ class SgeExecClient:
         self.last_status = {}
 
     def reattach(self, external_ref):
-        raise Exception("unimp")
+        d = json.loads(external_ref)
+        remote = helper.Remote(d['remote_url'], d['local_job_dir'])
+        return SGEExecution(d['name'], d['id'], d['job_dir'], d['sge_job_id'], d['desc_name'], self, remote, d)
 
-#     def localize(self, inputs):
-#         raise Exception("unimp")
 
     def _saw_job_id(self, sge_job_id, status):
         self.last_status[sge_job_id] = SgeState(time.time(), status, self.last_refresh_id)
 
     def _refresh_job_statuses(self):
-        handle = subprocess.Popen(["qstat", "-xml"], stdout=subprocess.PIPE)
-        stdout, stderr = handle.communicate()
+        qstat_command = "use -q UGER ; qstat -xml"
+        stdout = self.ssh.exec_cmd(self.ssh_host, qstat_command)
+
+        #print("stdout: %s" % repr(stdout))
+
+        #handle = subprocess.Popen(["qstat", "-xml"], stdout=subprocess.PIPE)
+        #stdout, stderr = handle.communicate()
 
         self.last_refresh_id += 1
 
@@ -322,22 +339,128 @@ class SgeExecClient:
         return status_obj.status
 
     def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name):
-        wrapper_path = ""
-        remote_url = "{}/{}".format(self.remote_url, self.job_dir)
-        job_dir = "{}/{}".format(self.remote_workdir, self.job_dir)
+        remote_url = "{}/{}".format(self.remote_url, job_dir)
+        remote_job_dir = "{}/{}".format(self.remote_workdir, job_dir)
+        local_job_dir = "{}/{}".format(self.local_workdir, job_dir)
+        local_wrapper_path = os.path.join(local_job_dir, "wrapper.sh")
+        remote_wrapper_path = os.path.join(remote_job_dir, "wrapper.sh")
 
-        file_mappings_str = " ".join(need_to_get_files_that_were_uploaded)
-        download_command = "conseq-helper pull {} {}".format(remote_url, job_dir, file_mappings_str)
-        upload_command = "conseq-helper publish {} {} {}/results.json".format(remote_url, job_dir, job_dir)
+        filenames = ["script1"]
 
-        run_stmts = [download_command] + run_stmts + [upload_command]
-        write_wrapper_script(wrapper_path, job_dir, prologue, run_stmts, "retcode.txt")
+        if outputs is not None:
+            filenames += ["write_results.py"]
+            run_stmts += ["python write_results.py"]
+            with open("{}/write_results.py".format(local_job_dir), "wt") as fd:
+                fd.write("import json\n"
+                         "results = {}\n"
+                         "fd = open('results.json', 'wt')\n"
+                         "fd.write(json.dumps(results))\n"
+                         "fd.close()\n".format(repr(dict(outputs=outputs))))
 
-        # scp wrapper_path remote_wrapper_path
-        # copy all files from job_dir to remote?
+        remote = helper.Remote(remote_url, local_job_dir)
+        pull_map = helper.push_to_cas_with_pullmap(remote, filenames)
 
-        command = "use UGER ; cd {job_dir} ; qsub -terse -cwd -o {stdout} -e {stderr} {remote_wrapper_path}"
-        sge_job_id = subprocess.check_output(['qsub', remote_wrapper_path])
+        self.ssh.exec_cmd(self.ssh_host, "mkdir -p {}".format(remote_job_dir))
+        helper_script = "source /broad/software/scripts/useuse\n" \
+                        "use Python-2.7\n" \
+                        "cd {remote_job_dir}\n" \
+                        "{helper_path} exec " \
+                        "-u . -o stdout.txt -e stderr.txt -r retcode.txt -f {pull_map} " \
+                        "{remote_url} . " \
+                        "bash wrapper.sh\n".format(helper_path=self.helper_path,
+                                                 remote_url = remote_url,
+                                                 remote_job_dir = remote_job_dir,
+                                                 pull_map = pull_map)
+        pull_and_run_script = "{}/pull_and_run.sh".format(remote_job_dir)
+        self.ssh.put_string(self.ssh_host, helper_script, pull_and_run_script)
+
+        write_wrapper_script(local_wrapper_path, remote_job_dir, prologue, run_stmts, "retcode.txt")
+
+        print("put", local_wrapper_path, remote_wrapper_path)
+        self.ssh.put(self.ssh_host, local_wrapper_path, remote_wrapper_path)
+
+        qsub_command = "use -q UGER ; qsub -terse -o {remote_job_dir}/helper_stdout.txt -e {remote_job_dir}/helper_stderr.txt {pull_and_run_script}".format(
+            remote_job_dir=remote_job_dir, pull_and_run_script=pull_and_run_script)
+        sge_job_id = self.ssh.exec_cmd(self.ssh_host, qsub_command).strip()
+        assert re.match("\\d+", sge_job_id) is not None
         self._saw_job_id(sge_job_id, SGE_STATUS_SUBMITTED)
 
-        return Execution(name, id, job_dir, sge_job_id, desc_name)
+        extern_ref = dict(remote_url=remote_url, local_job_dir=local_job_dir, name=name,
+                          id=id, job_dir=job_dir,
+                          sge_job_id=sge_job_id,
+                          desc_name=desc_name)
+
+        return SGEExecution(name, id, job_dir, sge_job_id, desc_name, self, remote, extern_ref)
+
+
+class SGEExecution:
+    def __init__(self, name, id, job_dir, sge_job_id, desc_name, client, remote, extern_ref):
+        self.name = name
+        self.id = id
+        self.job_dir = job_dir
+        self.sge_job_id = sge_job_id
+        self.desc_name = desc_name
+        self.client = client
+        self.remote = remote
+        self.extern_ref = extern_ref
+
+    def get_external_id(self):
+        return json.dumps(self.extern_ref)
+
+    def _log_failure(self, msg):
+        log.error(msg)
+        # TODO: Add dumping of stderr,stdout
+
+    def get_completion(self):
+        failure, outputs = self._get_completion()
+        if failure is not None:
+            self._log_failure(failure)
+        return failure, outputs
+
+    def _resolve_filenames(self, artifact):
+        new_artifact = dict()
+        for k, v in artifact.items():
+            if type(v) == dict and "$filename" in v:
+                v = {"$file_url": self.remote.remote_url+"/"+v["$filename"]}
+            new_artifact[k] = v
+
+        print("translated %r -> %r"% (artifact, new_artifact))
+
+        return new_artifact
+
+    def _get_completion(self):
+        status = self.client.get_status(self.sge_job_id)
+
+        if status != SGE_STATUS_COMPLETE:
+            return None, None
+
+        retcode = self.remote.download_as_str("retcode.txt")
+
+        print("retcode=", repr(retcode))
+        if retcode != "0":
+            print("WTF", repr(retcode))
+            return("shell command failed with {}".format(repr(retcode)), None)
+        print("okay, everything is fine")
+
+        results_str = self.remote.download_as_str("results.json")
+        if results_str is None:
+            return("script reported success but results.json is missing!", None)
+
+        results = json.loads(results_str)
+
+        log.info("Rule {} completed ({}). Results: {}".format(self.desc_name, self.job_dir, results))
+        assert type(results['outputs']) == list
+        outputs = [self._resolve_filenames(o) for o in results['outputs']]
+
+        # # print summary of output files with full paths
+        # files_written = []
+        # for output in outputs:
+        #     for value in output.values():
+        #         if isinstance(value, dict) and "$filename" in value:
+        #             files_written.append(value["$filename"])
+        #
+        # if len(files_written):
+        #     log.warn("Rule %s wrote the following files:\n%s", self.transform, "\n".join(["\t"+x for x in files_written]))
+
+        return None, outputs
+

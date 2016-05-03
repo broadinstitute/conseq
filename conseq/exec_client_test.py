@@ -1,75 +1,97 @@
 import time
 import textwrap
+import uuid
+import logging
+from conseq import xref
+
 
 from conseq import exec_client
+import os
+
+TEST_HOST = "datasci-dev"
+TEST_PROLOGUE = "use UGER"
+TEST_REMOTE_WORKDIR = "/home/unix/pmontgom/temp_conseq_work"
+TEST_REMOTE_URL_ROOT = "s3://broad-datasci/conseq-test"
+TEST_HELPER_PATH = "python /home/unix/pmontgom/helper.py"
+
+def create_client_for(tmpdir, script, uid=None):
+    workdir = str(tmpdir)
+
+    job_dir = workdir+"/1"
+    if not os.path.exists(job_dir):
+        os.mkdir(job_dir)
+
+    if script is not None:
+        with open(workdir+"/1/script1", "wt") as fd:
+            fd.write(textwrap.dedent(script))
+            fd.close()
+
+    if uid is None:
+        uid = uuid.uuid4().hex
+    remote_url = TEST_REMOTE_URL_ROOT + "/" + uid
+    remote_workdir = TEST_REMOTE_WORKDIR + "/" + uid
+
+    c = exec_client.SgeExecClient(TEST_HOST, TEST_PROLOGUE, workdir, remote_workdir, remote_url, TEST_HELPER_PATH)
+    return job_dir, c, uid
 
 def test_basic_sge_job_exec(tmpdir):
-    job_dir = str(tmpdir)
-    with open(job_dir+"/script1", "wt") as fd:
-        fd.write(textwrap.dedent("""
+    job_dir, c, uid = create_client_for(tmpdir, """
         print("run")
-        """))
-        fd.close()
+        """)
 
-    c = exec_client.SgeExecClient("datasci-dev", "use UGER")
-
-    e = c.exec_script("name", "ID", job_dir, ["python script1"], {"name": "banana"}, True, "", "desc")
+    e = c.exec_script("name", "ID", "1", ["python script1"], [{"name": "banana"}], True, "", "desc")
     while True:
-        output, failure = e.get_completion()
+        failure, output = e.get_completion()
         assert failure is None
         if output is not None:
             break
         time.sleep(5)
 
-    assert output == {"name": "banana"}
+    assert output == [{"name": "banana"}]
 
 def test_sge_job_reattach(tmpdir):
-    job_dir = str(tmpdir)
-    with open(job_dir+"/script1", "wt") as fd:
-        fd.write(textwrap.dedent("""
-        print("ran")
-        """))
-        fd.close()
+    job_dir, c, uid = create_client_for(tmpdir, """
+        print("run")
+        """)
 
-    c = exec_client.SgeExecClient("datasci-dev", "use UGER")
-
-    e = c.exec_script("name", "ID", job_dir, ["python script1"], {"name": "test_sge_job_reattach"}, True, "", "desc")
+    e = c.exec_script("name", "ID", "1", ["python script1"], [{"name": "test_sge_job_reattach"}], True, "", "desc")
     extern_id = e.get_external_id()
 
-    c2 = exec_client.SgeExecClient("datasci-dev", "use UGER")
+    _, c2, _ = create_client_for(tmpdir, None, uid)
     e2 = c2.reattach(extern_id)
 
     while True:
-        output, failure = e2.get_completion()
+        failure, output = e2.get_completion()
         assert failure is None
         if output is not None:
             break
         time.sleep(5)
 
-    assert output == {"name": "test_sge_job_reattach"}
-
-
+    assert output == [{"name": "test_sge_job_reattach"}]
 
 def test_sge_job_write_file(tmpdir):
-    job_dir = str(tmpdir)
-    with open(job_dir+"/script1", "wt") as fd:
-        fd.write(textwrap.dedent("""
+    job_dir, c, _ = create_client_for(tmpdir, """
         fd = open("output.txt", "wt")
         fd.write("hello")
         fd.close()
-        """))
-        fd.close()
+        """)
 
-    c = exec_client.SgeExecClient("datasci-dev", "use UGER")
-
-    e = c.exec_script("name", "ID", job_dir, ["python script1"], {"file": {"$filename": "output.txt"}}, True, "", "desc")
+    e = c.exec_script("name", "ID", "1", ["python script1"], [{"file": {"$filename": "output.txt"}}], True, "", "desc")
     while True:
-        output, failure = e.get_completion()
+        failure, output = e.get_completion()
         assert failure is None
         if output is not None:
             break
         time.sleep(5)
 
+    output = output[0]
     assert "file" in output
-    assert type(output["file"]) == dict and not ("$filename" in output["file"])
+    assert type(output["file"]) == dict and ("$file_url" in output["file"])
 
+    file_url = output["file"]["$file_url"]
+    pull = xref.Pull({"AWS_ACCESS_KEY_ID": os.getenv("AWS_ACCESS_KEY_ID"),
+                      "AWS_SECRET_ACCESS_KEY": os.getenv("AWS_SECRET_ACCESS_KEY")})
+    local_copy = str(tmpdir)+"/remote_file"
+    pull.pull(file_url, local_copy)
+
+    assert open(local_copy, "rt").read() == "hello"
