@@ -287,6 +287,9 @@ class SgeExecClient:
         self.job_completion_delay = 10
         self.last_status_refresh = None
         self.last_refresh_id = 1
+        self.sge_remote_proc_prologue = "source /broad/software/scripts/useuse\n" \
+                        "use -q Python-2.7\n"
+        self.sge_cmd_prologue = "use -q UGER"
 
         # map of sge_job_id to sge status
         self.last_status = {}
@@ -301,7 +304,10 @@ class SgeExecClient:
         self.last_status[sge_job_id] = SgeState(time.time(), status, self.last_refresh_id)
 
     def _refresh_job_statuses(self):
-        qstat_command = "use -q UGER ; qstat -xml"
+        qstat_command = "qstat -xml"
+        if self.sge_cmd_prologue is not None:
+            qstat_command = self.sge_cmd_prologue +" ; " + qstat_command
+
         stdout = self.ssh.exec_cmd(self.ssh_host, qstat_command)
 
         #print("stdout: %s" % repr(stdout))
@@ -361,9 +367,7 @@ class SgeExecClient:
         pull_map = helper.push_to_cas_with_pullmap(remote, filenames)
 
         self.ssh.exec_cmd(self.ssh_host, "mkdir -p {}".format(remote_job_dir))
-        helper_script = "source /broad/software/scripts/useuse\n" \
-                        "use Python-2.7\n" \
-                        "cd {remote_job_dir}\n" \
+        helper_script = "cd {remote_job_dir}\n" \
                         "{helper_path} exec " \
                         "-u . -o stdout.txt -e stderr.txt -r retcode.txt -f {pull_map} " \
                         "{remote_url} . " \
@@ -371,6 +375,10 @@ class SgeExecClient:
                                                  remote_url = remote_url,
                                                  remote_job_dir = remote_job_dir,
                                                  pull_map = pull_map)
+
+        if self.sge_remote_proc_prologue is not None:
+            helper_script = self.sge_remote_proc_prologue + "\n" + helper_script
+
         pull_and_run_script = "{}/pull_and_run.sh".format(remote_job_dir)
         self.ssh.put_string(self.ssh_host, helper_script, pull_and_run_script)
 
@@ -379,8 +387,12 @@ class SgeExecClient:
         print("put", local_wrapper_path, remote_wrapper_path)
         self.ssh.put(self.ssh_host, local_wrapper_path, remote_wrapper_path)
 
-        qsub_command = "use -q UGER ; qsub -terse -o {remote_job_dir}/helper_stdout.txt -e {remote_job_dir}/helper_stderr.txt {pull_and_run_script}".format(
+        qsub_command = "qsub -terse -o {remote_job_dir}/helper_stdout.txt -e {remote_job_dir}/helper_stderr.txt {pull_and_run_script}".format(
             remote_job_dir=remote_job_dir, pull_and_run_script=pull_and_run_script)
+
+        if self.sge_cmd_prologue is not None:
+            qsub_command = self.sge_cmd_prologue +" ; " + qsub_command
+
         sge_job_id = self.ssh.exec_cmd(self.ssh_host, qsub_command).strip()
         assert re.match("\\d+", sge_job_id) is not None
         self._saw_job_id(sge_job_id, SGE_STATUS_SUBMITTED)
