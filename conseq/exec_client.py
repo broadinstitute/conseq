@@ -25,11 +25,10 @@ def _tail_file(filename, line_count=20):
         for line in lines[-line_count:]:
             print(line)
 
-def log_job_output(job_dir, captured_stdouts, line_count=20):
-    stdout_path, stderr_path = captured_stdouts
-    log.error("Dumping last {} lines of {}".format(line_count, stdout_path))
+def log_job_output(stdout_path, stderr_path, line_count=20):
+    log.error("Dumping last {} lines of stdout ({})".format(line_count, stdout_path))
     _tail_file(stdout_path)
-    log.error("Dumping last {} lines of {}".format(line_count, stderr_path))
+    log.error("Dumping last {} lines of stderr ({})".format(line_count, stderr_path))
     _tail_file(stderr_path)
 
 class SuccessfulExecutionStub:
@@ -82,7 +81,7 @@ class Execution:
     def _log_failure(self, failure):
         log.error("Task failed %s: %s", self.desc_name, failure)
         if self.captured_stdouts != None:
-            log_job_output(self.job_dir, self.captured_stdouts)
+            log_job_output(self.captured_stdouts[0], self.captured_stdouts[1])
 
     def get_completion(self):
         failure, outputs = self._get_completion()
@@ -143,7 +142,8 @@ def write_wrapper_script(wrapper_path, job_dir, prologue, run_stmts, retcode_pat
             fd.write(" &&\\\n")
 
         fd.write("true\n")
-        fd.write("echo $? > {retcode_path}\n".format(**locals()))
+        if retcode_path is not None:
+            fd.write("echo $? > {retcode_path}\n".format(**locals()))
 
 def exec_script(name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name):
     stdout_path = os.path.join(job_dir, "stdout.txt")
@@ -208,7 +208,7 @@ def flatten_parameters(d):
         pairs.append( (k,v) )
     return dict(pairs)
 
-def preprocess_inputs(j, resolver, inputs):
+def preprocess_xref_inputs(j, resolver, inputs):
     xrefs_resolved = [False]
 
     def resolve(obj_):
@@ -229,20 +229,20 @@ def preprocess_inputs(j, resolver, inputs):
             # persist new version of object with extra properties
             j.add_obj(obj_.space, timestamp, obj_copy)
             xrefs_resolved[0] = True
-            obj = obj_copy
 
-        assert isinstance(obj, dict)
-        return flatten_parameters(obj)
-
-    result = {}
     for bound_name, obj_or_list in inputs:
         if isinstance(obj_or_list, list) or isinstance(obj_or_list, tuple):
             list_ = obj_or_list
-            result[bound_name] = [resolve(obj_) for obj_ in list_]
         else:
-            obj_ = obj_or_list
-            result[bound_name] = resolve(obj_)
-    return result, xrefs_resolved[0]
+            list_ = [obj_or_list]
+        for obj_ in list_:
+            resolve(obj_)
+
+    return xrefs_resolved[0]
+
+class NullResolveState:
+    def add_script(self, script):
+        pass
 
 class LocalExecClient:
     def reattach(self, external_ref):
@@ -253,10 +253,24 @@ class LocalExecClient:
         #     desc_name = fd.read()
         # ee = Execution(e.transform, e.id, e.job_dir, PidProcStub(e.exec_xref), rule.outputs, (stdout_path, stderr_path), desc_name)
 
-    def preprocess_inputs(self, j, resolver, inputs):
-        return preprocess_inputs(j, resolver, inputs)
+    def preprocess_inputs(self, resolver, inputs):
+        def resolve(obj_):
+            assert isinstance(obj_, dep.Obj)
+            obj = obj_.props
+            assert isinstance(obj, dict)
+            return flatten_parameters(obj)
 
-    def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name):
+        result = {}
+        for bound_name, obj_or_list in inputs:
+            if isinstance(obj_or_list, list) or isinstance(obj_or_list, tuple):
+                list_ = obj_or_list
+                result[bound_name] = [resolve(obj_) for obj_ in list_]
+            else:
+                obj_ = obj_or_list
+                result[bound_name] = resolve(obj_)
+        return result, NullResolveState()
+
+    def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name, resolve_state):
         return exec_script(name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name)
 
 import collections
@@ -272,6 +286,33 @@ SGE_STATUS_UNKNOWN = "unknown"
 
 from cpdshelpers import SimpleSSH
 
+import tempfile
+
+def drop_prefix(prefix, value):
+    assert value[:len(prefix)] == prefix, "prefix=%r, value=%r" % (prefix, value)
+    return value[len(prefix):]
+
+def push_to_cas_with_pullmap(remote, filenames):
+    name_mapping = helper.push_to_cas(remote, filenames)
+
+    mapping = [ dict(remote="{}/{}".format(remote.remote_url, v), local=k) for k, v in name_mapping.items() ]
+
+    print(name_mapping)
+    for rec in mapping:
+        if rec["local"].startswith("/"):
+            rec['local'] = drop_prefix(os.path.abspath(remote.local_dir)+"/", rec['local'])
+
+    mapping_str = json.dumps(dict(mapping=mapping))
+    print("Mapping str: ", mapping_str)
+    fd = tempfile.NamedTemporaryFile(mode="wt")
+    fd.write(mapping_str)
+    fd.flush()
+    map_name = list(helper.push_to_cas(remote, [fd.name]).values())[0]
+    fd.close()
+
+    return "{}/{}".format(remote.remote_url, map_name)
+
+
 class SgeExecClient:
     def __init__(self, host, sge_prologue, local_workdir, remote_workdir, remote_url, helper_path):
         self.ssh_host = host
@@ -283,12 +324,12 @@ class SgeExecClient:
 
         self.ssh = SimpleSSH()
 
-        self.status_cache_expiry = 30
+        self.status_cache_expiry = 5
         self.job_completion_delay = 10
         self.last_status_refresh = None
         self.last_refresh_id = 1
         self.sge_remote_proc_prologue = "source /broad/software/scripts/useuse\n" \
-                        "use -q Python-2.7\n"
+                        "use -q Python-2.7 R-3.2\n"
         self.sge_cmd_prologue = "use -q UGER"
 
         # map of sge_job_id to sge status
@@ -335,6 +376,7 @@ class SgeExecClient:
         now = time.time()
         if self.last_status_refresh is None or (now - self.last_status_refresh) > self.status_cache_expiry:
             self._refresh_job_statuses()
+            self.last_status_refresh = now
 
         status_obj = self.last_status[sge_job_id]
         if status_obj.refresh_id != self.last_refresh_id:
@@ -344,14 +386,56 @@ class SgeExecClient:
 
         return status_obj.status
 
-    def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name):
-        remote_url = "{}/{}".format(self.remote_url, job_dir)
-        remote_job_dir = "{}/{}".format(self.remote_workdir, job_dir)
-        local_job_dir = "{}/{}".format(self.local_workdir, job_dir)
+    def preprocess_inputs(self, resolver, inputs):
+        files_to_upload_and_download = []
+        files_to_download = []
+
+        def next_file_index():
+            return len(files_to_upload_and_download) + len(files_to_download)
+
+        #need to find all files that will be downloaded and update with $filename of what eventual local location will be.
+        def resolve(obj):
+            new_obj = {}
+            for k, v in obj.items():
+                if type(v) == dict and "$filename" in v:
+                    cur_name = v["$filename"]
+                    #Need to do something to avoid collisions.  Store under working dir?  maybe temp/filename-v
+                    new_name = "temp/{}.{}".format(os.path.basename(cur_name), next_file_index())
+                    files_to_upload_and_download.append((cur_name, new_name))
+                    v = {"$filename": new_name}
+                elif isinstance(v, dict) and "$file_url" in v:
+                    cur_name = v["$file_url"]
+                    new_name = "temp/{}.{}".format(os.path.basename(cur_name), next_file_index())
+                    files_to_download.append((cur_name, new_name))
+                    v = {"$filename": new_name}
+                new_obj[k] = v
+            return new_obj
+
+        result = {}
+        for bound_name, obj_or_list in inputs:
+            if isinstance(obj_or_list, list) or isinstance(obj_or_list, tuple):
+                list_ = obj_or_list
+                result[bound_name] = [resolve(obj_) for obj_ in list_]
+            else:
+                obj_ = obj_or_list
+                result[bound_name] = resolve(obj_)
+
+        return result, SGEResolveState(files_to_upload_and_download, files_to_download)
+
+    def add_script(self, resolver_state, filename):
+        resolver_state.files_to_upload_and_download.append((filename, filename))
+
+    def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name, resolver_state):
+        assert job_dir[:len(self.local_workdir)] == self.local_workdir
+        rel_job_dir = job_dir[len(self.local_workdir)+1:]
+
+        remote_url = "{}/{}".format(self.remote_url, rel_job_dir)
+        remote_job_dir = "{}/{}".format(self.remote_workdir, rel_job_dir)
+        local_job_dir = "{}/{}".format(self.local_workdir, rel_job_dir)
         local_wrapper_path = os.path.join(local_job_dir, "wrapper.sh")
         remote_wrapper_path = os.path.join(remote_job_dir, "wrapper.sh")
 
-        filenames = ["script1"]
+        filenames = [x[0] for x in resolver_state.files_to_upload_and_download]
 
         if outputs is not None:
             filenames += ["write_results.py"]
@@ -364,7 +448,7 @@ class SgeExecClient:
                          "fd.close()\n".format(repr(dict(outputs=outputs))))
 
         remote = helper.Remote(remote_url, local_job_dir)
-        pull_map = helper.push_to_cas_with_pullmap(remote, filenames)
+        pull_map = push_to_cas_with_pullmap(remote, filenames)
 
         self.ssh.exec_cmd(self.ssh_host, "mkdir -p {}".format(remote_job_dir))
         helper_script = "cd {remote_job_dir}\n" \
@@ -382,7 +466,7 @@ class SgeExecClient:
         pull_and_run_script = "{}/pull_and_run.sh".format(remote_job_dir)
         self.ssh.put_string(self.ssh_host, helper_script, pull_and_run_script)
 
-        write_wrapper_script(local_wrapper_path, remote_job_dir, prologue, run_stmts, "retcode.txt")
+        write_wrapper_script(local_wrapper_path, remote_job_dir, prologue, run_stmts, None)
 
         print("put", local_wrapper_path, remote_wrapper_path)
         self.ssh.put(self.ssh_host, local_wrapper_path, remote_wrapper_path)
@@ -398,12 +482,19 @@ class SgeExecClient:
         self._saw_job_id(sge_job_id, SGE_STATUS_SUBMITTED)
 
         extern_ref = dict(remote_url=remote_url, local_job_dir=local_job_dir, name=name,
-                          id=id, job_dir=job_dir,
+                          id=id, job_dir=rel_job_dir,
                           sge_job_id=sge_job_id,
                           desc_name=desc_name)
 
         return SGEExecution(name, id, job_dir, sge_job_id, desc_name, self, remote, extern_ref)
 
+class SGEResolveState:
+    def __init__(self, files_to_upload_and_download, files_to_download):
+        self.files_to_upload_and_download = files_to_upload_and_download
+        self.files_to_download = files_to_download
+
+    def add_script(self, filename):
+        self.files_to_upload_and_download.append( (filename, filename) )
 
 class SGEExecution:
     def __init__(self, name, id, job_dir, sge_job_id, desc_name, client, remote, extern_ref):
@@ -421,6 +512,14 @@ class SGEExecution:
 
     def _log_failure(self, msg):
         log.error(msg)
+
+        with tempfile.NamedTemporaryFile() as tmpstderr:
+            with tempfile.NamedTemporaryFile() as tmpstdout:
+                log.info("Fetching error and output logs for failed job")
+                self.remote.download("stderr.txt", tmpstderr.name, ignoreMissing=True)
+                self.remote.download("stdout.txt", tmpstdout.name, ignoreMissing=True)
+                log_job_output(tmpstdout.name, tmpstderr.name)
+
         # TODO: Add dumping of stderr,stdout
 
     def get_completion(self):

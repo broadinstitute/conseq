@@ -38,7 +38,8 @@ class Remote:
     def download(self, remote, local, ignoreMissing=False):
         # maybe upload and download should use trailing slash to indicate directory should be uploaded instead of just a file
         remote_path =  os.path.normpath(self.remote_path + "/" + remote)
-        local =  os.path.normpath(self.local_dir + "/" + local)
+        if not local.startswith("/"):
+            local =  os.path.normpath(self.local_dir + "/" + local)
         key = self.bucket.get_key(remote_path)
         if key != None:
             # if it's a file, download it
@@ -135,21 +136,6 @@ def push_to_cas(remote, filenames):
 
     return name_mapping
 
-import tempfile
-
-def push_to_cas_with_pullmap(remote, filenames):
-    name_mapping = push_to_cas(remote, filenames)
-
-    mapping = [ dict(remote="{}/{}".format(remote.remote_url, v), local=k) for k, v in name_mapping.items() ]
-    mapping_str = json.dumps(dict(mapping=mapping))
-    print("Mapping str: ", mapping_str)
-    fd = tempfile.NamedTemporaryFile(mode="wt")
-    fd.write(mapping_str)
-    fd.flush()
-    map_name = list(push_to_cas(remote, [fd.name]).values())[0]
-    fd.close()
-
-    return "{}/{}".format(remote.remote_url, map_name)
 
 
 def push(remote, filenames):

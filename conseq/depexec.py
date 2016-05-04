@@ -48,7 +48,7 @@ def render_template(jinja2_env, template_text, config, **kwargs):
 
     return render_template_callback(template_text)
 
-def generate_run_stmts(job_dir, command_and_bodies, jinja2_env, config, inputs):
+def generate_run_stmts(job_dir, command_and_bodies, jinja2_env, config, inputs, resolver_state):
     run_stmts = []
     for i, x in enumerate(command_and_bodies):
         command, script_body = x
@@ -58,12 +58,13 @@ def generate_run_stmts(job_dir, command_and_bodies, jinja2_env, config, inputs):
             script_name = os.path.abspath(os.path.join(job_dir, "script_%d"%i))
             with open(script_name, "w") as fd:
                 fd.write(formatted_script_body)
-            command += " "+script_name
+            command += " "+os.path.relpath(script_name, job_dir)
+            resolver_state.add_script(script_name)
 
         run_stmts.append(command)
     return run_stmts
 
-def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, capture_output):
+def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, capture_output, resolver_state):
     client = rule.client
     prologue = render_template(jinja2_env, config["PROLOGUE"], config)
 
@@ -77,16 +78,17 @@ def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, captu
     desc_name = "{} with inputs {} ({})".format(name, inputs, job_dir)
 
     if len(rule.run_stmts) > 0:
-        run_stmts = generate_run_stmts(job_dir, rule.run_stmts, jinja2_env, config, inputs)
+        run_stmts = generate_run_stmts(job_dir, rule.run_stmts, jinja2_env, config, inputs, resolver_state)
 
         execution = client.exec_script(name,
                            id,
                            job_dir,
                            run_stmts,
-                           outputs, capture_output, prologue, desc_name)
+                           outputs, capture_output, prologue, desc_name, resolver_state)
     else:
         # fast path when there's no need to spawn an external process.  (mostly used by tests)
-        execution = exec_client.SuccessfulExecutionStub()
+        assert outputs != None, "No body, nor outputs specified.  This rule does nothing"
+        execution = exec_client.SuccessfulExecutionStub(id, outputs)
 
     return execution
 
@@ -175,11 +177,14 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, m
 
             rule = rules.get_rule(job.transform)
 
-            # resolve inputs and then confirm with user
-            inputs, xrefs_resolved = rule.client.preprocess_inputs(j, resolver, job.inputs)
+            # process xrefs which might require rewriting an artifact
+            xrefs_resolved = exec_client.preprocess_xref_inputs(j, resolver, job.inputs)
             if xrefs_resolved:
                 log.info("Resolved xrefs on rule, new version will be executed next pass")
                 continue
+
+            # localize paths that will be used in scripts
+            inputs, resolver_state = rule.client.preprocess_inputs(resolver, job.inputs)
 
             # if we're required confirmation from the user, do this before we continue
             if req_confirm:
@@ -196,7 +201,7 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, m
             if not os.path.exists(job_dir):
                 os.makedirs(job_dir)
 
-            e = execute(job.transform, resolver, jinja2_env, exec_id, job_dir, inputs, rule, rules.get_vars(), capture_output)
+            e = execute(job.transform, resolver, jinja2_env, exec_id, job_dir, inputs, rule, rules.get_vars(), capture_output, resolver_state)
             executing.append(e)
             j.update_exec_xref(e.id, e.get_external_id(), job_dir)
 
@@ -268,6 +273,7 @@ def read_deps(filename, initial_vars={}):
         rules.set_var(name, value)
 
     local_client = exec_client.LocalExecClient()
+    sge_client = None
 
     p = parser.parse(filename)
     for dec in p:
@@ -280,7 +286,18 @@ def read_deps(filename, initial_vars={}):
             rules.merge(child_rules)
         else:
             assert isinstance(dec, parser.Rule)
-            dec.client = local_client
+            if "sge" in dec.options:
+                if sge_client is None:
+                    config = rules.get_vars()
+                    sge_client = exec_client.SgeExecClient(config["SGE_HOST"],
+                                                           config["SGE_PROLOGUE"],
+                                                           config["WORKING_DIR"],
+                                                           config["SGE_REMOTE_WORKDIR"],
+                                                           config["S3_STAGING_URL"],
+                                                           config["SGE_HELPER_PATH"])
+                dec.client = sge_client
+            else:
+                dec.client = local_client
             rules.set_rule(dec.name, dec)
     return rules
 
@@ -513,8 +530,9 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
     script_dir = os.path.dirname(os.path.abspath(depfile))
 
     initial_config = dict(DL_CACHE_DIR=dlcache,
-                                    SCRIPT_DIR=script_dir,
-                                    PROLOGUE="")
+                          SCRIPT_DIR=script_dir,
+                          PROLOGUE="",
+                          WORKING_DIR=working_dir)
     if config_file is not None:
         initial_config.update(load_config(config_file))
 
