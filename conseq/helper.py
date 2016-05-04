@@ -37,10 +37,17 @@ class Remote:
     # TODO: make download atomic by dl and rename (assuming get_contents_to_filename doesn't already)
     def download(self, remote, local, ignoreMissing=False):
         # maybe upload and download should use trailing slash to indicate directory should be uploaded instead of just a file
-        remote_path =  os.path.normpath(self.remote_path + "/" + remote)
         if not local.startswith("/"):
             local =  os.path.normpath(self.local_dir + "/" + local)
-        key = self.bucket.get_key(remote_path)
+
+        if remote.startswith("s3:"):
+            bucket, remote_path = parse_remote(remote)
+        else:
+            bucket = self.bucket
+            remote_path =  os.path.normpath(self.remote_path + "/" + remote)
+
+        # maybe upload and download should use trailing slash to indicate directory should be uploaded instead of just a file
+        key = bucket.get_key(remote_path)
         if key != None:
             # if it's a file, download it
             log.info("Downloading file %s to %s", remote_path, local)
@@ -48,7 +55,7 @@ class Remote:
         else:
             # download everything with the prefix
             transferred = 0
-            for key in self.bucket.list(prefix=remote_path):
+            for key in bucket.list(prefix=remote_path):
                 rest = drop_prefix(remote_path+"/", key.key)
                 if not os.path.exists(local):
                     os.makedirs(local)
@@ -89,16 +96,23 @@ class Remote:
             raise Exception("Could not find {}".format(local))
 
     def download_as_str(self, remote, timeout=5):
-        remote_path = self.remote_path+"/"+remote
+        if remote.startswith("s3:"):
+            bucket, remote_path = parse_remote(remote)
+        else:
+            bucket = self.bucket
+            remote_path = os.path.normpath(self.remote_path + "/" + remote)
+
         for i in range(timeout):
-            key = self.bucket.get_key(remote_path)
+            key = bucket.get_key(remote_path)
             if key != None:
                 break
             print("No value for key", remote_path, " sleeping 1 sec")
             time.sleep(1)
+
         if key == None:
             print("No value for key", remote_path)
             return None
+
         value = key.get_contents_as_string()
         print("fetched ", remote_path, " as ", repr(value))
         return value.decode("utf-8")
@@ -135,8 +149,6 @@ def push_to_cas(remote, filenames):
         name_mapping[filename] = remote_name
 
     return name_mapping
-
-
 
 def push(remote, filenames):
     for filename in filenames:
@@ -188,7 +200,13 @@ def publish_cmd(args, config):
     remote.upload_str(os.path.join(published_files_root, "results.json"), new_results_json)
 
 def convert_json_mapping(d):
-    return [ (rec['remote'], rec['local']) for rec in d['mapping']]
+    result = []
+    for rec in d['mapping']:
+      remote = rec['remote']
+      local = rec['local']
+      assert not local.startswith("/")
+      result.append( (remote, local) )
+    return result
 
 def parse_mapping_str(file_mapping):
     if ":" in file_mapping:
@@ -202,7 +220,8 @@ def exec_cmd(args, config):
 
     pull_map = []
     if args.download_pull_map is not None:
-        pull_map_dict = json.loads(remote.download_as_str(args.download_pull_map))
+        dl_pull_map_str = remote.download_as_str(args.download_pull_map)
+        pull_map_dict = json.loads(dl_pull_map_str)
         pull_map.extend(convert_json_mapping(pull_map_dict))
 
     for mapping_str in args.download:
@@ -218,7 +237,9 @@ def exec_cmd(args, config):
 
     pull(remote, pull_map, ignoreMissing=True)
 
+    print("executing {}".format(args.command))
     retcode = subprocess.call(args.command, stdout=stdout_fd, stderr=stderr_fd, cwd=args.local_dir)
+    print("Command returned {}".format(retcode))
 
     if args.retcode is not None:
         fd = open(os.path.join(args.local_dir, args.retcode), "wt")
@@ -230,7 +251,6 @@ def exec_cmd(args, config):
 
 def main(varg = None):
     parser = argparse.ArgumentParser("push or pull files from cloud storage")
-    parser.set_defaults(func=None)
     parser.add_argument("--config", "-c", help="path to config file")
 
     subparsers = parser.add_subparsers()
@@ -276,10 +296,13 @@ def main(varg = None):
 
     logging.basicConfig(level=logging.INFO)
 
+    print (args)
+
     if args.func is None:
         parser.print_help()
     else:
         args.func(args, config)
 
 if __name__ == "__main__":
-    main()
+    import sys
+    main(sys.argv[1:])
