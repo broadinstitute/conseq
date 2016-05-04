@@ -203,5 +203,6 @@ def test_regexp_queries(tmpdir):
         outputs: {"type": "thing"}
     rule b:
         inputs: in={"type" ~ "t.*"}
+        outputs: {"type": "otherthing"}
     """)
     assert len(j.get_all_executions()) == 2

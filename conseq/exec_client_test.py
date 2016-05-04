@@ -1,9 +1,13 @@
 import time
 import textwrap
 import uuid
+import os
 import logging
 from conseq import xref
 
+import pytest
+pytestmark = pytest.mark.skipif(os.getenv("AWS_ACCESS_KEY_ID") is None,
+                    reason="requires S3 credentials set as environment variables")
 
 from conseq import exec_client
 import os
@@ -32,14 +36,15 @@ def create_client_for(tmpdir, script, uid=None):
     remote_workdir = TEST_REMOTE_WORKDIR + "/" + uid
 
     c = exec_client.SgeExecClient(TEST_HOST, TEST_PROLOGUE, workdir, remote_workdir, remote_url, TEST_HELPER_PATH)
-    return job_dir, c, uid
+    resolver_state = exec_client.SGEResolveState([("script1", "script1")],[])
+    return job_dir, c, uid, resolver_state
 
 def test_basic_sge_job_exec(tmpdir):
-    job_dir, c, uid = create_client_for(tmpdir, """
+    job_dir, c, uid, resolver_state = create_client_for(tmpdir, """
         print("run")
         """)
 
-    e = c.exec_script("name", "ID", "1", ["python script1"], [{"name": "banana"}], True, "", "desc")
+    e = c.exec_script("name", "ID", job_dir, ["python script1"], [{"name": "banana"}], True, "", "desc", resolver_state)
     while True:
         failure, output = e.get_completion()
         assert failure is None
@@ -54,7 +59,7 @@ def test_sge_job_reattach(tmpdir):
         print("run")
         """)
 
-    e = c.exec_script("name", "ID", "1", ["python script1"], [{"name": "test_sge_job_reattach"}], True, "", "desc")
+    e = c.exec_script("name", "ID", job_dir, ["python script1"], [{"name": "test_sge_job_reattach"}], True, "", "desc", exec_client.SGEResolveState([],[]))
     extern_id = e.get_external_id()
 
     _, c2, _ = create_client_for(tmpdir, None, uid)
@@ -76,7 +81,7 @@ def test_sge_job_write_file(tmpdir):
         fd.close()
         """)
 
-    e = c.exec_script("name", "ID", "1", ["python script1"], [{"file": {"$filename": "output.txt"}}], True, "", "desc")
+    e = c.exec_script("name", "ID", job_dir, ["python script1"], [{"file": {"$filename": "output.txt"}}], True, "", "desc", exec_client.SGEResolveState([],[]))
     while True:
         failure, output = e.get_completion()
         assert failure is None
@@ -95,3 +100,41 @@ def test_sge_job_write_file(tmpdir):
     pull.pull(file_url, local_copy)
 
     assert open(local_copy, "rt").read() == "hello"
+
+
+ONE_REMOTE_ONE_LOCAL_CONFIG = '''
+let SGE_HOST="datasci-dev"
+let SGE_PROLOGUE=""
+let SGE_REMOTE_WORKDIR="/home/unix/pmontgom/temp_conseq_work"
+let S3_STAGING_URL="s3://broad-datasci/conseq-test"
+let SGE_HELPER_PATH="python /home/unix/pmontgom/helper.py"
+
+rule a:
+    options: sge
+    outputs: {"name":"a", "file":{"$filename": "message"}}
+    run "bash" with """
+    echo hello > message
+    """
+
+
+rule b:
+    inputs: in={"name": "a"}
+    outputs: {"name":"final", "file":{"$filename": "final"}}
+    run "bash" with """
+        cat {{ inputs.in.file }} {{ inputs.in.file }} > final
+    """
+'''
+
+from conseq.functional_test import run_conseq
+
+def test_end_to_end(tmpdir):
+    s3_config = """
+    let AWS_ACCESS_KEY_ID = "{}"
+    let AWS_SECRET_ACCESS_KEY = "{}"
+    """.format(os.getenv("AWS_ACCESS_KEY_ID"), os.getenv("AWS_SECRET_ACCESS_KEY"))
+    j = run_conseq(tmpdir, s3_config + ONE_REMOTE_ONE_LOCAL_CONFIG)
+    assert len(j.find_objs("public", {}))==2
+    objs = (j.find_objs("public", {"name": "final"}))
+    assert len(objs) == 1
+    assert open(objs[0]['file']["$filename"]).read() == "hello\nhello\n"
+

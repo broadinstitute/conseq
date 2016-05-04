@@ -1,0 +1,22 @@
+let SGE_HOST="datasci-dev"
+let SGE_PROLOGUE=""
+let SGE_REMOTE_WORKDIR="/home/unix/pmontgom/temp_conseq_work"
+let S3_STAGING_URL="s3://broad-datasci/conseq-test"
+let SGE_HELPER_PATH="python /home/unix/pmontgom/helper.py"
+
+rule a:
+    options: sge
+    outputs: {"name":"a", "file":{"$filename": "rand"}}
+    run "Rscript" with """
+        x <- runif(100)
+        saveRDS(x, file="rand")
+    """
+
+rule b:
+    inputs: in={"name": "a"}
+    outputs: {"name":"final", "file":{"$filename": "final"}}
+    run "Rscript" with """
+        x <- readRDS({{ inputs.in.file|quoted }})
+        x.mean <- mean(x)
+        save(x.mean, file="final")
+    """
