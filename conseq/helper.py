@@ -102,19 +102,11 @@ class Remote:
             bucket = self.bucket
             remote_path = os.path.normpath(self.remote_path + "/" + remote)
 
-        for i in range(timeout):
-            key = bucket.get_key(remote_path)
-            if key != None:
-                break
-            print("No value for key", remote_path, " sleeping 1 sec")
-            time.sleep(1)
-
+        key = bucket.get_key(remote_path)
         if key == None:
-            print("No value for key", remote_path)
             return None
 
         value = key.get_contents_as_string()
-        print("fetched ", remote_path, " as ", repr(value))
         return value.decode("utf-8")
 
     def upload_str(self, remote, text):
@@ -237,9 +229,9 @@ def exec_cmd(args, config):
 
     pull(remote, pull_map, ignoreMissing=True)
 
-    print("executing {}".format(args.command))
+    #print("executing {}".format(args.command))
     retcode = subprocess.call(args.command, stdout=stdout_fd, stderr=stderr_fd, cwd=args.local_dir)
-    print("Command returned {}".format(retcode))
+    #print("Command returned {}".format(retcode))
 
     if args.retcode is not None:
         fd = open(os.path.join(args.local_dir, args.retcode), "wt")

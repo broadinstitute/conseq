@@ -6,6 +6,10 @@ import sys
 from io import StringIO
 import getpass
 
+import logging
+
+log = logging.getLogger(__name__)
+
 class SimpleSSH:
     def __init__(self):
         sshconfig = paramiko.config.SSHConfig()
@@ -35,7 +39,7 @@ class SimpleSSH:
         sftp.get(remote_path, local_path)
 
     def get_as_string(self, host, remote_path):
-        print("reading", remote_path)
+        log.info("reading %s", remote_path)
         tfile = tempfile.NamedTemporaryFile(mode="rt")
         self.get(host, remote_path, tfile.name)
         with open(tfile.name, "rt") as f:
@@ -43,7 +47,8 @@ class SimpleSSH:
         tfile.close()
         return result
     
-    def exec_cmd(self, host, command):
+    def exec_cmd(self, host, command, echo=False, assert_success=True):
+        log.info("%s: executing %s", host, command)
         captured_stdout = StringIO()
 
         client = self._get_client(host)
@@ -52,17 +57,16 @@ class SimpleSSH:
         chan = tran.open_session()
         chan.get_pty()
         chan.exec_command(command)
-        print("begin Remote output ----------------", command)
         while True:
             buf = chan.recv(10*1024)
             if len(buf) == 0:
                 break
-            sys.stdout.write(buf.decode("utf-8"))
-            sys.stdout.flush()
+            # sys.stdout.write(buf.decode("utf-8"))
+            # sys.stdout.flush()
             captured_stdout.write(buf.decode("utf-8"))
-        print("end remote output --------------------")
         status = chan.recv_exit_status()
-        assert status == 0
+        if assert_success:
+            assert status == 0, "status={}, captured_stdout={}".format(status, captured_stdout)
 
         return captured_stdout.getvalue()
 

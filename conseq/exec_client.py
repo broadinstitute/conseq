@@ -48,7 +48,6 @@ class SuccessfulExecutionStub:
 #             fd.write("0")
 
 
-
 class Execution:
     def __init__(self, transform, id, job_dir, proc, outputs, captured_stdouts, desc_name):
         self.transform = transform
@@ -71,8 +70,16 @@ class Execution:
             props_copy[k] = v
         return props_copy
 
+    def get_state_label(self):
+        return "local-run"
+
     def get_external_id(self):
-        return "PID:{}".format(self.proc.pid)
+        d = dict(transform = self.transform, id = self.id, job_dir = self.job_dir, pid = self.proc.pid, outputs = self.outputs, captured_stdouts=self.captured_stdouts, desc_name = self.desc_name)
+        return json.dumps(d)
+
+    def cancel(self):
+        log.warn("Killing pid %s (%s)", self.proc.pid, self.desc_name)
+        self.proc.terminate()
 
     @property
     def results_path(self):
@@ -160,13 +167,17 @@ def exec_script(name, id, job_dir, run_stmts, outputs, capture_output, prologue,
     if capture_output:
         bash_cmd = "exec bash {wrapper_path} > {stdout_path} 2> {stderr_path}".format(**locals())
         captured_stdouts = (stdout_path, stderr_path)
+        close_fds = True
     else:
         bash_cmd = "exec bash {wrapper_path}".format(**locals())
         captured_stdouts = None
+        close_fds = False
 
     log.info("Starting task in %s", job_dir)
     log.debug("executing: %s", bash_cmd)
-    proc = subprocess.Popen(['bash', '-c', bash_cmd])
+
+    # create child in new process group so ctrl-c doesn't kill child process
+    proc = subprocess.Popen(['bash', '-c', bash_cmd], close_fds=close_fds, preexec_fn=os.setsid)
 
     with open(os.path.join(job_dir, "description.txt"), "w") as fd:
         fd.write(desc_name)
@@ -244,14 +255,29 @@ class NullResolveState:
     def add_script(self, script):
         pass
 
+class PidProcStub:
+    def __init__(self, pid):
+        self.pid = pid
+
+    def poll(self):
+        try:
+            os.kill(self.pid, 0)
+            return None
+        except OSError:
+            return 0
+
+# class ReportSuccessProcStub:
+#     def __init__(self):
+#         self.pid = 10000000
+#
+#     def poll(self):
+#         return 0
+
+
 class LocalExecClient:
     def reattach(self, external_ref):
-        raise Exception("unimp")
-        # stdout_path = os.path.join(e.job_dir, "stdout.txt")
-        # stderr_path = os.path.join(e.job_dir, "stderr.txt")
-        # with open(os.path.join(e.job_dir, "description.txt")) as fd:
-        #     desc_name = fd.read()
-        # ee = Execution(e.transform, e.id, e.job_dir, PidProcStub(e.exec_xref), rule.outputs, (stdout_path, stderr_path), desc_name)
+        d = json.loads(external_ref)
+        return Execution(d['transform'], d['id'], d['job_dir'], PidProcStub(d['pid']), d['outputs'], d['captured_stdouts'], d['desc_name'])
 
     def preprocess_inputs(self, resolver, inputs):
         def resolve(obj_):
@@ -338,8 +364,9 @@ class SgeExecClient:
     def reattach(self, external_ref):
         d = json.loads(external_ref)
         remote = helper.Remote(d['remote_url'], d['local_job_dir'])
-        return SGEExecution(d['name'], d['id'], d['job_dir'], d['sge_job_id'], d['desc_name'], self, remote, d)
-
+        sge_job_id = d['sge_job_id']
+        self._saw_job_id(sge_job_id, SGE_STATUS_SUBMITTED)
+        return SGEExecution(d['name'], d['id'], d['job_dir'], sge_job_id, d['desc_name'], self, remote, d)
 
     def _saw_job_id(self, sge_job_id, status):
         self.last_status[sge_job_id] = SgeState(time.time(), status, self.last_refresh_id)
@@ -350,11 +377,6 @@ class SgeExecClient:
             qstat_command = self.sge_cmd_prologue +" ; " + qstat_command
 
         stdout = self.ssh.exec_cmd(self.ssh_host, qstat_command)
-
-        #print("stdout: %s" % repr(stdout))
-
-        #handle = subprocess.Popen(["qstat", "-xml"], stdout=subprocess.PIPE)
-        #stdout, stderr = handle.communicate()
 
         self.last_refresh_id += 1
 
@@ -488,6 +510,15 @@ class SgeExecClient:
 
         return SGEExecution(name, id, job_dir, sge_job_id, desc_name, self, remote, extern_ref)
 
+    def cancel(self, sge_job_id):
+        qdel_command = "qdel {}".format(sge_job_id)
+        if self.sge_cmd_prologue is not None:
+            qdel_command = self.sge_cmd_prologue +" ; " + qdel_command
+
+        # qdel may fail if job terminates while waiting for input, so just hope for the best
+        # if we got an error
+        self.ssh.exec_cmd(self.ssh_host, qdel_command, assert_success=False)
+
 class SGEResolveState:
     def __init__(self, files_to_upload_and_download, files_to_download):
         self.files_to_upload_and_download = files_to_upload_and_download
@@ -506,6 +537,13 @@ class SGEExecution:
         self.client = client
         self.remote = remote
         self.extern_ref = extern_ref
+
+    def cancel(self):
+        log.warn("Executing qdel to delete job %s (%s)", self.sge_job_id, self.desc_name)
+        self.client.cancel(self.sge_job_id)
+
+    def get_state_label(self):
+        return "SGE-"+self.client.get_status(self.sge_job_id)
 
     def get_external_id(self):
         return json.dumps(self.extern_ref)
@@ -547,11 +585,11 @@ class SGEExecution:
 
         retcode = self.remote.download_as_str("retcode.txt")
 
-        print("retcode=", repr(retcode))
+        # print("retcode=", repr(retcode))
         if retcode != "0":
             print("WTF", repr(retcode))
             return("shell command failed with {}".format(repr(retcode)), None)
-        print("okay, everything is fine")
+        # print("okay, everything is fine")
 
         results_str = self.remote.download_as_str("results.json")
         if results_str is None:

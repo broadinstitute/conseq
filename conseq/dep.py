@@ -453,6 +453,11 @@ class ExecutionLog:
                 c.execute("insert into execution_input (execution_id, name, obj_id, is_list) values (?, ?, ?, ?)", [exec_id, name, obj_id, is_list])
         return exec_id
 
+    def get_started_executions(self):
+        c = get_cursor()
+        c.execute("select id, transform, status, execution_xref, job_dir from execution e where status = ?", [STATUS_STARTED])
+        return self._as_RuleList(c)
+
     def _as_RuleList(self, c):
         pending = []
         for exec_id, transform, status, exec_xref, job_dir in c.fetchall():
@@ -817,6 +822,10 @@ class Jobs:
     def get_pending(self):
         with transaction(self.db):
             return self.rule_set.get_pending()
+
+    def get_started_executions(self):
+        with transaction(self.db):
+            return self.log.get_started_executions()
 
     def get_all_executions(self):
         with transaction(self.db):

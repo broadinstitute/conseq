@@ -92,27 +92,9 @@ def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, captu
 
     return execution
 
-class PidProcStub:
-    def __init__(self, xref):
-        assert xref.startswith("PID:")
-        self.pid = int(xref[4:])
-
-    def poll(self):
-        try:
-            os.kill(self.pid, 0)
-            return None
-        except OSError:
-            return 0
-
-class ReportSuccessProcStub:
-    def __init__(self):
-        self.pid = 10000000
-
-    def poll(self):
-        return 0
-
 def reattach(j, rules):
-    pending_jobs = j.get_pending()
+    pending_jobs = j.get_started_executions()
+    print("reattaching,", pending_jobs)
     executing = []
     for e in pending_jobs:
         if e.exec_xref != None:
@@ -137,6 +119,45 @@ def confirm_execution(transform, inputs):
             print("Invalid input")
         return answer
 
+def get_execution_summary(executing):
+    counts = collections.defaultdict(lambda: 0)
+    for e in executing:
+        counts[e.get_state_label()] += 1
+    keys = list(counts.keys())
+    keys.sort()
+    return ", ".join(["%s:%d"%(k, counts[k]) for k in keys])
+
+import contextlib
+import signal
+@contextlib.contextmanager
+def capture_sigint():
+    interrupted = [False]
+
+    original_sigint = signal.getsignal(signal.SIGINT)
+
+    def set_interrupted(signum, frame):
+        signal.signal(signal.SIGINT, original_sigint)
+        interrupted[0] = True
+        log.warn("Interrupted!")
+
+    signal.signal(signal.SIGINT, set_interrupted)
+
+    yield lambda: interrupted[0]
+
+    signal.signal(signal.SIGINT, original_sigint)
+
+def ask_user_to_cancel(j, executing):
+    while True:
+        answer = input("Terminate {} running before exiting (y/n)? ".format(len(executing)))
+        if (answer in ["y", "n"]):
+            break
+        print("Invalid input")
+
+    if answer == 'y':
+        for e in executing:
+            e.cancel()
+        j.cleanup_incomplete()
+
 from conseq import xref
 def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, max_concurrent_executions, capture_output, req_confirm):
     active_job_ids = set([e.id for e in executing])
@@ -145,85 +166,97 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, m
 
     prev_msg = None
     abort = False
-    while not abort:
-        pending_jobs = j.get_pending()
-        msg = "%d processes running, %d executions pending" % ( len(executing), len(pending_jobs) )
-        if prev_msg != msg:
-            log.info(msg)
-        prev_msg = msg
-        if len(executing) == 0 and len(pending_jobs) == 0:
-            # now that we've completed everything, check for deferred jobs by marking them as ready.  If we have any, loop again
-            j.enable_deferred()
-            deferred_jobs = len(j.get_pending())
-            if deferred_jobs > 0:
-                log.info("Marked deferred %d executions as ready", deferred_jobs)
-                continue
-            break
-
-        did_useful_work = False
-        for job in pending_jobs:
-            assert isinstance(job, dep.RuleExecution)
-
-            # if we've hit our cap on concurrent executions, just bail before spawning anything new
-            if len(executing) >= max_concurrent_executions:
+    interrupted = False
+    with capture_sigint() as was_interrupted_fn:
+        while not abort:
+            interrupted = was_interrupted_fn()
+            if interrupted:
                 break
 
-            # if this job is one we're currently running, just move along
-            if job.id in active_job_ids:
-                continue
+            pending_jobs = j.get_pending()
+            summary = get_execution_summary(executing)
+            msg = "%d processes running (%s), %d executions pending" % ( len(executing), summary, len(pending_jobs) )
+            if prev_msg != msg:
+                log.info(msg)
+            prev_msg = msg
+            if len(executing) == 0 and len(pending_jobs) == 0:
+                # now that we've completed everything, check for deferred jobs by marking them as ready.  If we have any, loop again
+                j.enable_deferred()
+                deferred_jobs = len(j.get_pending())
+                if deferred_jobs > 0:
+                    log.info("Marked deferred %d executions as ready", deferred_jobs)
+                    continue
+                break
 
-            active_job_ids.add(job.id)
-            did_useful_work = True
+            did_useful_work = False
+            for job in pending_jobs:
+                assert isinstance(job, dep.RuleExecution)
 
-            rule = rules.get_rule(job.transform)
-
-            # process xrefs which might require rewriting an artifact
-            xrefs_resolved = exec_client.preprocess_xref_inputs(j, resolver, job.inputs)
-            if xrefs_resolved:
-                log.info("Resolved xrefs on rule, new version will be executed next pass")
-                continue
-
-            # localize paths that will be used in scripts
-            inputs, resolver_state = rule.client.preprocess_inputs(resolver, job.inputs)
-
-            # if we're required confirmation from the user, do this before we continue
-            if req_confirm:
-                answer = confirm_execution(job.transform, inputs)
-                if answer == "a":
-                    req_confirm = False
-                elif answer == "q":
-                    abort = True
+                # if we've hit our cap on concurrent executions, just bail before spawning anything new
+                if len(executing) >= max_concurrent_executions:
                     break
 
-            exec_id = j.record_started(job.id)
+                # if this job is one we're currently running, just move along
+                if job.id in active_job_ids:
+                    continue
 
-            job_dir = get_job_dir(state_dir, exec_id)
-            if not os.path.exists(job_dir):
-                os.makedirs(job_dir)
+                active_job_ids.add(job.id)
+                did_useful_work = True
 
-            e = execute(job.transform, resolver, jinja2_env, exec_id, job_dir, inputs, rule, rules.get_vars(), capture_output, resolver_state)
-            executing.append(e)
-            j.update_exec_xref(e.id, e.get_external_id(), job_dir)
+                rule = rules.get_rule(job.transform)
 
-        for i, e in reversed(list(enumerate(executing))):
-            failure, completion = e.get_completion()
+                # process xrefs which might require rewriting an artifact
+                xrefs_resolved = exec_client.preprocess_xref_inputs(j, resolver, job.inputs)
+                if xrefs_resolved:
+                    log.info("Resolved xrefs on rule, new version will be executed next pass")
+                    continue
 
-            if failure == None and completion == None:
-                continue
+                # localize paths that will be used in scripts
+                inputs, resolver_state = rule.client.preprocess_inputs(resolver, job.inputs)
 
-            del executing[i]
-            timestamp = datetime.datetime.now().isoformat()
+                # if we're required confirmation from the user, do this before we continue
+                if req_confirm:
+                    answer = confirm_execution(job.transform, inputs)
+                    if answer == "a":
+                        req_confirm = False
+                    elif answer == "q":
+                        abort = True
+                        break
 
-            if failure != None:
-                j.record_completed(timestamp, e.id, dep.STATUS_FAILED, {})
-            elif completion != None:
-                j.record_completed(timestamp, e.id, dep.STATUS_COMPLETED, completion)
+                # maybe record_started and update_exec_xref should be merged so anything started
+                # always has an xref
+                exec_id = j.record_started(job.id)
 
-            did_useful_work = True
-        
-        if not did_useful_work:
-            time.sleep(0.5)
+                job_dir = get_job_dir(state_dir, exec_id)
+                if not os.path.exists(job_dir):
+                    os.makedirs(job_dir)
 
+                e = execute(job.transform, resolver, jinja2_env, exec_id, job_dir, inputs, rule, rules.get_vars(), capture_output, resolver_state)
+                executing.append(e)
+                print("updating exec {} with {}".format(e.id, e.get_external_id()))
+                j.update_exec_xref(e.id, e.get_external_id(), job_dir)
+
+            for i, e in reversed(list(enumerate(executing))):
+                failure, completion = e.get_completion()
+
+                if failure == None and completion == None:
+                    continue
+
+                del executing[i]
+                timestamp = datetime.datetime.now().isoformat()
+
+                if failure != None:
+                    j.record_completed(timestamp, e.id, dep.STATUS_FAILED, {})
+                elif completion != None:
+                    j.record_completed(timestamp, e.id, dep.STATUS_COMPLETED, completion)
+
+                did_useful_work = True
+
+            if not did_useful_work:
+                time.sleep(0.5)
+
+    if interrupted and len(executing) > 0:
+        ask_user_to_cancel(j, executing)
 
 
 def add_xref(j, xref):
@@ -518,7 +551,9 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
         os.makedirs(dlcache)
     db_path = os.path.join(state_dir, "db.sqlite3")
     j = dep.open_job_db(db_path)
-    j.cleanup_incomplete()
+
+    # need to skip this if we want to re-attach.
+    #j.cleanup_incomplete()
 
     # handle case where we explicitly state some templates to execute.  Make sure nothing else executes
     if len(forced_targets) > 0:
