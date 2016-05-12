@@ -168,6 +168,9 @@ class ObjSet:
             if match.timestamp == timestamp:
                 return match.id
 
+            if "$hash" in props and "$hash" in match.props and props["$hash"] == match.props["$hash"]:
+                return match.id
+
             self.remove(match.id)
 
         c = get_cursor()
@@ -404,8 +407,8 @@ class RuleSet:
             return None
         return rules[0]
 
-    def remove_incomplete(self):
-        incomplete = self._find_rule_execs("state != ?", (RE_STATUS_COMPLETE,))
+    def remove_failed(self):
+        incomplete = self._find_rule_execs("state = ?", (RE_STATUS_FAILED,))
         for rule in incomplete:
             self.remove_rule(rule.id)
 
@@ -842,6 +845,11 @@ class Jobs:
             self.rule_set.started(rule_id, execution_id)
             return execution_id
 
+    def cancel_execution(self, exec_id):
+        with transaction(self.db):
+            self.rule_set.completed_execution(exec_id, RE_STATUS_FAILED)
+            self.log.record_completed(exec_id, STATUS_FAILED, [])
+
     def record_completed(self, timestamp, execution_id, new_status, outputs):
         with transaction(self.db):
             default_space = self.rule_set.get_space_by_execution_id(execution_id)
@@ -870,10 +878,10 @@ class Jobs:
         with transaction(self.db):
             self.log.update_exec_xref(exec_id, xref, job_dir)
 
-    def cleanup_incomplete(self):
+    def cleanup_failed(self):
         with transaction(self.db):
-            self.rule_set.remove_incomplete()
-            self.log.mark_incomplete()
+            self.rule_set.remove_failed()
+            #self.log.mark_incomplete()
 
     def invalidate_rule_execution(self, transform):
         with transaction(self.db):

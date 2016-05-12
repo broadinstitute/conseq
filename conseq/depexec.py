@@ -552,9 +552,6 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
     db_path = os.path.join(state_dir, "db.sqlite3")
     j = dep.open_job_db(db_path)
 
-    # need to skip this if we want to re-attach.
-    #j.cleanup_incomplete()
-
     # handle case where we explicitly state some templates to execute.  Make sure nothing else executes
     if len(forced_targets) > 0:
         j.limitStartToTemplates(forced_targets)
@@ -580,6 +577,9 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
         add_xref(j, expand_xref(jinja2_env, xref, rules.vars))
 
     executing = reattach(j, rules)
+
+    # any jobs killed or other failures need to be removed so we'll attempt to re-run them
+    j.cleanup_failed()
 
     for dec in rules:
         assert (isinstance(dec, parser.Rule))
