@@ -206,3 +206,26 @@ def test_regexp_queries(tmpdir):
         outputs: {"type": "otherthing"}
     """)
     assert len(j.get_all_executions()) == 2
+
+
+def test_rerun_same_result(tmpdir):
+    j = run_conseq(tmpdir, """
+    rule a:
+        outputs: {"type": "thing", "$hash": "1"}
+    rule b:
+        inputs: in={"type": "thing"}
+        outputs: {"type": "otherthing"}
+    """)
+    assert len(j.get_all_executions()) == 2
+
+    j2 = run_conseq(tmpdir, """
+    rule c:
+        outputs: {"type": "thing", "$hash": "1"}
+    rule b:
+        inputs: in={"type": "thing"}
+        outputs: {"type": "otherthing"}
+    """, assert_clean=False)
+
+    # only "c" should run this time.
+    assert len(j2.get_all_executions()) == 3
+
