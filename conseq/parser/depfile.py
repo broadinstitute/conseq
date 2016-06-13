@@ -14,16 +14,18 @@
 from __future__ import print_function, division, absolute_import, unicode_literals
 
 from grako.parsing import graken, Parser
-from grako.util import re, RE_FLAGS  # noqa
+from grako.util import re, RE_FLAGS, generic_main  # noqa
 
 
-__version__ = (2016, 3, 16, 19, 33, 12, 2)
+__version__ = (2016, 6, 9, 18, 32, 29, 3)
 
 __all__ = [
     'depfileParser',
     'depfileSemantics',
     'main'
 ]
+
+KEYWORDS = set([])
 
 
 class depfileParser(Parser):
@@ -34,6 +36,7 @@ class depfileParser(Parser):
                  eol_comments_re='#.*?$',
                  ignorecase=None,
                  left_recursion=True,
+                 keywords=KEYWORDS,
                  **kwargs):
         super(depfileParser, self).__init__(
             whitespace=whitespace,
@@ -42,29 +45,42 @@ class depfileParser(Parser):
             eol_comments_re=eol_comments_re,
             ignorecase=ignorecase,
             left_recursion=left_recursion,
+            keywords=keywords,
             **kwargs
         )
 
     @graken()
-    def _triple_quoted_string_(self):
+    def _triple_dbl_quoted_string_(self):
         self._pattern(r'"""(?:[^"]|"{1,2}(?!"))+"""')
 
     @graken()
-    def _single_quoted_string_(self):
+    def _dbl_quoted_string_(self):
         self._pattern(r'"[^"]*"')
+
+    @graken()
+    def _triple_squoted_string_(self):
+        self._pattern(r"'''(?:[^']|'{1,2}(?!'))+'''")
+
+    @graken()
+    def _squoted_string_(self):
+        self._pattern(r"'[^']*'")
 
     @graken()
     def _quoted_string_(self):
         with self._choice():
             with self._option():
-                self._triple_quoted_string_()
+                self._triple_dbl_quoted_string_()
             with self._option():
-                self._single_quoted_string_()
+                self._dbl_quoted_string_()
+            with self._option():
+                self._squoted_string_()
+            with self._option():
+                self._triple_squoted_string_()
             self._error('no available options')
 
     @graken()
     def _identifier_(self):
-        self._pattern(r'[A-Za-z_]+[A-Za-z0-9_-]*')
+        self._pattern(r'[A-Za-z]+[A-Za-z0-9_+-]*')
 
     @graken()
     def _url_(self):
@@ -171,6 +187,49 @@ class depfileParser(Parser):
         self._closure(block0)
 
     @graken()
+    def _r_flock_file_(self):
+        with self._choice():
+            with self._option():
+                self._token('include')
+                self._quoted_string_()
+            with self._option():
+                self._quoted_string_()
+            self._error('no available options')
+
+    @graken()
+    def _r_flock_files_(self):
+        self._r_flock_file_()
+
+        def block0():
+            self._token(',')
+            self._r_flock_file_()
+        self._closure(block0)
+
+    @graken()
+    def _output_type_(self):
+        self._identifier_()
+
+        def block0():
+            with self._choice():
+                with self._option():
+                    self._token('?')
+                with self._option():
+                    self._token('+')
+                with self._option():
+                    self._empty_closure()
+                self._error('expecting one of: + ?')
+        self._closure(block0)
+
+    @graken()
+    def _output_types_(self):
+        self._output_type_()
+
+        def block0():
+            self._token(',')
+            self._output_type_()
+        self._positive_closure(block0)
+
+    @graken()
     def _statement_(self):
         with self._group():
             with self._choice():
@@ -188,6 +247,14 @@ class depfileParser(Parser):
                     with self._optional():
                         self._token('with')
                         self._quoted_string_()
+                with self._option():
+                    self._token('submit-r-flock')
+                    self._quoted_string_()
+                    self._r_flock_files_()
+                with self._option():
+                    self._token('expect-outputs')
+                    self._token(':')
+                    self._output_types_()
                 with self._option():
                     self._token('options')
                     self._token(':')
@@ -220,6 +287,25 @@ class depfileParser(Parser):
         self._json_obj_()
 
     @graken()
+    def _add_if_missing_(self):
+        self._token('add-if-missing')
+        self._json_obj_()
+
+    @graken()
+    def _type_def_(self):
+        self._token('type')
+        self._identifier_()
+        self._token('has')
+        self._token('(')
+        self._identifier_()
+
+        def block0():
+            self._token(',')
+            self._identifier_()
+        self._closure(block0)
+        self._token(')')
+
+    @graken()
     def _var_stmt_(self):
         self._token('let')
         self._identifier_()
@@ -244,17 +330,26 @@ class depfileParser(Parser):
                     self._include_stmt_()
                 with self._option():
                     self._var_stmt_()
+                with self._option():
+                    self._add_if_missing_()
+                with self._option():
+                    self._type_def_()
                 self._error('no available options')
         self._positive_closure(block0)
-
         self._check_eof()
 
 
 class depfileSemantics(object):
-    def triple_quoted_string(self, ast):
+    def triple_dbl_quoted_string(self, ast):
         return ast
 
-    def single_quoted_string(self, ast):
+    def dbl_quoted_string(self, ast):
+        return ast
+
+    def triple_squoted_string(self, ast):
+        return ast
+
+    def squoted_string(self, ast):
         return ast
 
     def quoted_string(self, ast):
@@ -299,6 +394,18 @@ class depfileSemantics(object):
     def output_specs(self, ast):
         return ast
 
+    def r_flock_file(self, ast):
+        return ast
+
+    def r_flock_files(self, ast):
+        return ast
+
+    def output_type(self, ast):
+        return ast
+
+    def output_types(self, ast):
+        return ast
+
     def statement(self, ast):
         return ast
 
@@ -311,6 +418,12 @@ class depfileSemantics(object):
     def xref(self, ast):
         return ast
 
+    def add_if_missing(self, ast):
+        return ast
+
+    def type_def(self, ast):
+        return ast
+
     def var_stmt(self, ast):
         return ast
 
@@ -321,8 +434,18 @@ class depfileSemantics(object):
         return ast
 
 
-def main(filename, startrule, trace=False, whitespace=None, nameguard=None):
-    import json
+def main(
+        filename,
+        startrule,
+        trace=False,
+        whitespace=None,
+        nameguard=None,
+        comments_re=None,
+        eol_comments_re='#.*?$',
+        ignorecase=None,
+        left_recursion=True,
+        **kwargs):
+
     with open(filename) as f:
         text = f.read()
     parser = depfileParser(parseinfo=False)
@@ -332,46 +455,17 @@ def main(filename, startrule, trace=False, whitespace=None, nameguard=None):
         filename=filename,
         trace=trace,
         whitespace=whitespace,
-        nameguard=nameguard)
+        nameguard=nameguard,
+        ignorecase=ignorecase,
+        **kwargs)
+    return ast
+
+if __name__ == '__main__':
+    import json
+    ast = generic_main(main, depfileParser, name='depfile')
     print('AST:')
     print(ast)
     print()
     print('JSON:')
     print(json.dumps(ast, indent=2))
     print()
-
-if __name__ == '__main__':
-    import argparse
-    import string
-    import sys
-
-    class ListRules(argparse.Action):
-        def __call__(self, parser, namespace, values, option_string):
-            print('Rules:')
-            for r in depfileParser.rule_list():
-                print(r)
-            print()
-            sys.exit(0)
-
-    parser = argparse.ArgumentParser(description="Simple parser for depfile.")
-    parser.add_argument('-l', '--list', action=ListRules, nargs=0,
-                        help="list all rules and exit")
-    parser.add_argument('-n', '--no-nameguard', action='store_true',
-                        dest='no_nameguard',
-                        help="disable the 'nameguard' feature")
-    parser.add_argument('-t', '--trace', action='store_true',
-                        help="output trace information")
-    parser.add_argument('-w', '--whitespace', type=str, default=string.whitespace,
-                        help="whitespace specification")
-    parser.add_argument('file', metavar="FILE", help="the input file to parse")
-    parser.add_argument('startrule', metavar="STARTRULE",
-                        help="the start rule for parsing")
-    args = parser.parse_args()
-
-    main(
-        args.file,
-        args.startrule,
-        trace=args.trace,
-        whitespace=args.whitespace,
-        nameguard=not args.no_nameguard
-    )

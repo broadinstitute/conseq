@@ -76,3 +76,20 @@ def test_forall_query():
     assert rule.inputs[0].for_all
     assert rule.inputs[1].variable == "b"
     assert not rule.inputs[1].for_all
+
+
+rule_with_r_flock = """
+rule a:
+    submit-r-flock include "foo.R", "b"
+    """
+def test_r_flock():
+    decs = parser.parse_str(rule_with_r_flock)
+    assert len(decs) == 1
+    rule = decs[0]
+    assert len(rule.run_stmts) == 1
+    run_stmt = rule.run_stmts[0]
+    assert type(run_stmt) == parser.FlockStmt
+    assert len(run_stmt.scripts) == 2
+    assert run_stmt.scripts[0] == parser.FlockInclude("foo.R")
+    assert run_stmt.scripts[1] == "b"
+

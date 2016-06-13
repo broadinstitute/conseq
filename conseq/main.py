@@ -40,14 +40,21 @@ def add_rm(sub):
     parser.set_defaults(func=rm)
 
 def rm(args):
-    depexec.rm_cmd(args.dir, args.dry_run, args.json_query, args.with_invalidate)
+    import re
+    query = {}
+    for pair in args.predicates:
+        m = re.match("^([^=]+)=(.*)$", pair)
+        query[m.group(1)] = m.group(2)
+    depexec.rm_cmd(args.dir, args.dry_run, dep.PUBLIC_SPACE, query, False)
 
 def add_run(sub):
     parser = sub.add_parser("run", help="Run rules in the specified file")
     parser.add_argument('file', metavar="FILE", help="the input file to parse")
-    parser.add_argument("--concurrent", type=int, default=5)
+    parser.add_argument("--concurrent", type=int, default=1)
     parser.add_argument("--nocapture", action="store_true")
     parser.add_argument("--confirm", action="store_true")
+    parser.add_argument("--maxfail", type=int, default=1)
+    parser.add_argument('--refresh_xrefs', help='refresh xrefs', action="store_true")
     parser.add_argument('targets', nargs='*')
     parser.set_defaults(func=run)
 
@@ -55,7 +62,8 @@ def run(args):
     concurrent = args.concurrent
     if args.nocapture:
         concurrent = 1
-    depexec.main(args.file, args.dir, args.targets, {}, concurrent, not args.nocapture, args.confirm, args.config)
+    depexec.main(args.file, args.dir, args.targets, {}, concurrent, not args.nocapture, args.confirm, args.config,
+                 refresh_xrefs=args.refresh_xrefs, maxfail=args.maxfail)
 
 def add_rules(sub):
     parser = sub.add_parser("rules", help="Print the names all rules in the file")

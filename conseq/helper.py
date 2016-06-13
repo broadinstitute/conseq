@@ -23,6 +23,17 @@ def parse_remote(path, accesskey=None, secretaccesskey=None):
 
     return bucket, path
 
+def download_s3_as_string(remote):
+        assert remote.startswith("s3:")
+        bucket, remote_path = parse_remote(remote)
+
+        key = bucket.get_key(remote_path)
+        if key == None:
+            return None
+
+        value = key.get_contents_as_string()
+        return value.decode("utf-8")
+
 class Remote:
     def __init__(self, remote_url, local_dir, accesskey=None, secretaccesskey=None):
         self.remote_url = remote_url
@@ -50,8 +61,12 @@ class Remote:
         key = bucket.get_key(remote_path)
         if key != None:
             # if it's a file, download it
-            log.info("Downloading file %s to %s", remote_path, local)
-            key.get_contents_to_filename(local)
+            abs_local = os.path.abspath(local)
+            log.info("Downloading file %s to %s", remote_path, abs_local)
+            if not os.path.exists(os.path.dirname(abs_local)):
+                os.makedirs(os.path.dirname(abs_local))
+            key.get_contents_to_filename(abs_local)
+            assert os.path.exists(local)
         else:
             # download everything with the prefix
             transferred = 0
@@ -67,7 +82,7 @@ class Remote:
             if transferred == 0 and not ignoreMissing:
                 raise Exception("Could not find {}".format(local))
 
-    def upload(self, local, remote, ignoreMissing=False):
+    def upload(self, local, remote, ignoreMissing=False, force=False):
         # maybe upload and download should use trailing slash to indicate directory should be uploaded instead of just a file
         remote_path = os.path.normpath(self.remote_path + "/" + remote)
         local_path = os.path.normpath(os.path.join(self.local_dir, local))
@@ -76,7 +91,7 @@ class Remote:
         if os.path.exists(local_path):
             if os.path.isfile(local_path):
                 # if it's a file, upload it
-                if self.bucket.get_key(remote_path) is None:
+                if self.bucket.get_key(remote_path) is None or force:
                     key = Key(self.bucket)
                     key.name = remote_path
                     log.info("Uploading file %s to %s", local, remote)
@@ -87,7 +102,7 @@ class Remote:
                     full_fn = os.path.join(local_path, fn)
                     if os.path.isfile(full_fn):
                         r = os.path.join(remote_path, fn)
-                        if self.bucket.get_key(r) is None:
+                        if self.bucket.get_key(r) is None or force:
                             k = Key(self.bucket)
                             k.key = r
                             log.info("Uploading dir %s (%s to %s)", local_path, fn, fn)
@@ -126,6 +141,17 @@ def calc_hash(filename):
         for chunk in iter(lambda: fd.read(10000), b''):
             h.update(chunk)
     return h.hexdigest()
+
+def push_str_to_cas(remote, content, filename="<unknown>"):
+    h = hashlib.sha256(content.encode("utf-8"))
+    hash = h.hexdigest()
+
+    remote_name = "CAS/{}".format(hash)
+    if remote.exists(remote_name):
+        log.info("Skipping upload of %s because %s already exists", filename, remote_name)
+    else:
+        remote.upload_str(remote_name, content)
+    return remote_name
 
 def push_to_cas(remote, filenames):
     name_mapping = {}
@@ -207,6 +233,32 @@ def parse_mapping_str(file_mapping):
         remote_path = local_path = file_mapping
     return (remote_path, local_path)
 
+def exec_config(args, config):
+    config_content = download_s3_as_string(args.url)
+    if config_content is None:
+        raise Exception("Could not open {}".format(args.url))
+    config = json.loads(config_content)
+
+    remote = Remote(config['remote_url'], args.local_dir)
+    for r in config['pull']:
+        remote.download(r['src'], r['dest'])
+
+    for dirname in config['mkdir']:
+        if not os.path.exists(dirname):
+            os.makedirs(dirname)
+
+    # execute command
+    command = config['command']
+    stdout_path = config['stdout']
+    stderr_path = config['stderr']
+    exec_summary_path = config['exec_summary']
+
+    exec_command_with_capture(command, stderr_path, stdout_path, exec_summary_path, args.local_dir)
+
+    # push results
+    for r in config['push']:
+        remote.upload(r['src'], r['dest'], force=True)
+
 def exec_cmd(args, config):
     remote = Remote(args.remote_url, args.local_dir, config["AWS_ACCESS_KEY_ID"], config["AWS_SECRET_ACCESS_KEY"])
 
@@ -219,26 +271,31 @@ def exec_cmd(args, config):
     for mapping_str in args.download:
         pull_map.append(parse_mapping_str(mapping_str))
 
-    stderr_fd = None
-    if args.stderr is not None:
-        stderr_fd = os.open(os.path.join(args.local_dir, args.stderr), os.O_WRONLY|os.O_APPEND|os.O_CREAT)
-
-    stdout_fd = None
-    if args.stdout is not None:
-        stdout_fd = os.open(os.path.join(args.local_dir, args.stdout), os.O_WRONLY|os.O_APPEND|os.O_CREAT)
 
     pull(remote, pull_map, ignoreMissing=True)
 
-    #print("executing {}".format(args.command))
-    retcode = subprocess.call(args.command, stdout=stdout_fd, stderr=stderr_fd, cwd=args.local_dir)
-    #print("Command returned {}".format(retcode))
-
-    if args.retcode is not None:
-        fd = open(os.path.join(args.local_dir, args.retcode), "wt")
-        fd.write(str(retcode))
-        fd.close()
+    exec_command_with_capture(args.command, args.stderr, args.stdout, args.retcode, args.local_dir)
 
     push(remote, args.upload)
+
+def exec_command_with_capture(command, stderr_path, stdout_path, retcode_path, local_dir):
+    stderr_fd = None
+    if stderr_path is not None:
+        stderr_fd = os.open(os.path.join(local_dir, stderr_path), os.O_WRONLY|os.O_APPEND|os.O_CREAT)
+
+    stdout_fd = None
+    if stdout_path is not None:
+        stdout_fd = os.open(os.path.join(local_dir, stdout_path), os.O_WRONLY|os.O_APPEND|os.O_CREAT)
+
+    log.info("executing {}".format(command))
+    retcode = subprocess.call(command, stdout=stdout_fd, stderr=stderr_fd, cwd=local_dir)
+    log.info("Command returned {}".format(retcode))
+
+    if retcode_path is not None:
+        fd = open(os.path.join(local_dir, retcode_path), "wt")
+        state = "success" if retcode == 0 else "failed"
+        fd.write(json.dumps({"retcode": retcode, "state": state}))
+        fd.close()
 
 
 def main(varg = None):
@@ -271,6 +328,11 @@ def main(varg = None):
     exec_parser.add_argument("--retcode", "-r")
     exec_parser.add_argument("command", nargs=argparse.REMAINDER)
     exec_parser.set_defaults(func=exec_cmd)
+
+    exec_config_parser = subparsers.add_parser("exec-config")
+    exec_config_parser.add_argument("url")
+    exec_config_parser.add_argument("--local_dir", default=".")
+    exec_config_parser.set_defaults(func=exec_config)
 
     pull_parser = subparsers.add_parser("pull")
     pull_parser.add_argument("remote_url", help="base remote url to pull from")

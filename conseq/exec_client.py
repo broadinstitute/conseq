@@ -8,6 +8,12 @@ import xml.etree.ElementTree as ETree
 import re
 
 from conseq import helper
+import six
+
+if six.PY2:
+    _basestring = (str, unicode)
+else:
+    _basestring = str
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +37,18 @@ def log_job_output(stdout_path, stderr_path, line_count=20):
     log.error("Dumping last {} lines of stderr ({})".format(line_count, stderr_path))
     _tail_file(stderr_path)
 
+class FailedExecutionStub:
+    def __init__(self, id, message):
+        self.id = id
+        self.message = message
+
+    def get_external_id(self):
+        return "FailedExecutionStub:{}".format(self.id)
+
+    def get_completion(self):
+        log.error(self.message)
+        return self.message, None
+
 class SuccessfulExecutionStub:
     def __init__(self, id, outputs):
         self.id = id
@@ -47,6 +65,46 @@ class SuccessfulExecutionStub:
 #         with open(retcode_file, "wt") as fd:
 #             fd.write("0")
 
+
+# returns None if no errors were found.  Else returns a string with the error to report to the user
+def validate_result_json_obj(obj, types):
+    if not ("outputs" in obj):
+        return "Missing 'outputs' in object"
+
+    outputs = obj['outputs']
+    if not isinstance(outputs, list):
+        return "Expected outputs to be a list"
+
+    for o in outputs:
+        if not isinstance(o, dict):
+            return "Expected members of outputs to by dictionaries"
+
+        for k, v in o.items():
+            if isinstance(v, dict):
+                if not (len(v) == 1 and "$filename" in v):
+                    return "Expected a dict value to only have a $filename key"
+                if not isinstance(v["$filename"], _basestring):
+                    return "Expected filename to be a string"
+            elif isinstance(v, _basestring):
+                return "Expected value for property {} to be a string".format(k)
+
+        # now validate against defined types
+        if not ("type" in o):
+            continue
+
+        type_name = o["type"]
+        if not (type_name in o):
+            continue
+
+        type = types[type_name]
+        missing = []
+        for prop in type.properties:
+            if not (prop in o):
+                missing.append(prop)
+        if len(missing):
+            return "Artifact had type {} but was missing: {}".format(type_name, ", ".join(missing))
+
+    return None
 
 class Execution:
     def __init__(self, transform, id, job_dir, proc, outputs, captured_stdouts, desc_name):
@@ -339,6 +397,7 @@ def push_to_cas_with_pullmap(remote, filenames):
     return "{}/{}".format(remote.remote_url, map_name)
 
 
+
 class SgeExecClient:
     def __init__(self, host, sge_prologue, local_workdir, remote_workdir, remote_url, helper_path):
         self.ssh_host = host
@@ -354,6 +413,7 @@ class SgeExecClient:
         self.job_completion_delay = 6
         self.last_status_refresh = None
         self.last_refresh_id = 1
+        # TODO: Take these from config
         self.sge_remote_proc_prologue = "source /broad/software/scripts/useuse\n" \
                         "use -q Python-2.7 R-3.2\n"
         self.sge_cmd_prologue = "use -q UGER"
@@ -447,6 +507,27 @@ class SgeExecClient:
     def add_script(self, resolver_state, filename):
         resolver_state.files_to_upload_and_download.append((filename, filename))
 
+    def _exec_qsub(self, stdout, stderr, script_path):
+        qsub_command = "qsub -terse -o {stdout} -e {stderr} {docker_launch_script}".format(stdout=stdout, stderr=stderr, script_path=script_path)
+
+        if self.sge_cmd_prologue is not None:
+            qsub_command = self.sge_cmd_prologue +" ; " + qsub_command
+
+        sge_job_id = self.ssh.exec_cmd(self.ssh_host, qsub_command).strip()
+        assert re.match("\\d+", sge_job_id) is not None
+        self._saw_job_id(sge_job_id, SGE_STATUS_SUBMITTED)
+
+        return sge_job_id
+
+    def exec_generic_command(self, rel_job_dir, command):
+        remote_job_dir = "{}/{}".format(self.remote_workdir, rel_job_dir)
+
+        docker_launch_script = "{}/run.sh".format(remote_job_dir)
+        script = "#!/bin/bash\n{}\n".format(" ".join(command))
+        self.ssh.put_string(self.ssh_host, script, docker_launch_script)
+
+        self._exec_qsub(remote_job_dir+"/stdout.txt", remote_job_dir+"/stderr.txt", docker_launch_script)
+
     def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name, resolver_state):
         assert job_dir[:len(self.local_workdir)] == self.local_workdir
         rel_job_dir = job_dir[len(self.local_workdir)+1:]
@@ -493,15 +574,7 @@ class SgeExecClient:
         print("put", local_wrapper_path, remote_wrapper_path)
         self.ssh.put(self.ssh_host, local_wrapper_path, remote_wrapper_path)
 
-        qsub_command = "qsub -terse -o {remote_job_dir}/helper_stdout.txt -e {remote_job_dir}/helper_stderr.txt {pull_and_run_script}".format(
-            remote_job_dir=remote_job_dir, pull_and_run_script=pull_and_run_script)
-
-        if self.sge_cmd_prologue is not None:
-            qsub_command = self.sge_cmd_prologue +" ; " + qsub_command
-
-        sge_job_id = self.ssh.exec_cmd(self.ssh_host, qsub_command).strip()
-        assert re.match("\\d+", sge_job_id) is not None
-        self._saw_job_id(sge_job_id, SGE_STATUS_SUBMITTED)
+        sge_job_id = self._exec_qsub(remote_job_dir+"/helper_stdout.txt", remote_job_dir+"/helper_stderr.txt", pull_and_run_script)
 
         extern_ref = dict(remote_url=remote_url, local_job_dir=local_job_dir, name=name,
                           id=id, job_dir=rel_job_dir,

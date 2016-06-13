@@ -127,14 +127,46 @@ rule b:
 
 from conseq.functional_test import run_conseq
 
-def test_end_to_end(tmpdir):
-    s3_config = """
+def get_aws_vars() :
+    return """
     let AWS_ACCESS_KEY_ID = "{}"
     let AWS_SECRET_ACCESS_KEY = "{}"
     """.format(os.getenv("AWS_ACCESS_KEY_ID"), os.getenv("AWS_SECRET_ACCESS_KEY"))
+
+def test_end_to_end(tmpdir):
+    s3_config = get_aws_vars()
     j = run_conseq(tmpdir, s3_config + ONE_REMOTE_ONE_LOCAL_CONFIG)
     assert len(j.find_objs("public", {}))==2
     objs = (j.find_objs("public", {"name": "final"}))
     assert len(objs) == 1
     assert open(objs[0]['file']["$filename"]).read() == "hello\nhello\n"
 
+
+SIMPLE_FLOCK_JOB = '''
+let SGE_HOST="datasci-dev"
+let SGE_PROLOGUE=""
+let SGE_REMOTE_WORKDIR="/home/unix/pmontgom/temp_conseq_work"
+let S3_STAGING_URL="s3://broad-datasci/conseq-test"
+let SGE_HELPER_PATH="python /home/unix/pmontgom/helper.py"
+
+rule a:
+    submit-r-flock "a" """
+        a.scatter <- function() {
+          list(inputs=seq(3), shared=NULL)
+        }
+        a.map <- function(input, shared) {
+          return(input*2)
+        }
+        a.gather <- function(files, shared) {
+          values <- sapply(files, function(fn) { readRDS(fn) } )
+          writeLines(as.character(values), "results/final.txt")
+          writeLines("{"outputs": [{"name": "final", "file": {"$filename": "results/final.txt"}}]}", "results/results.json")
+        }
+    """
+'''
+
+def test_flockish(tmpdir):
+    j = run_conseq(tmpdir, get_aws_vars() + SIMPLE_FLOCK_JOB)
+    objs = j.find_objs("public", {})
+    assert len(objs)==1
+    assert open(objs[0]['file']["$filename"]).read() == "2\n4\n6"

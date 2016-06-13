@@ -638,6 +638,8 @@ class PropsMatch:
             first = False
         return True
 
+from conseq.timeit import timeblock
+
 class Template:
     def __init__(self, queries, predicates, transform, expected=None):
         self.foreach_queries = []
@@ -658,6 +660,20 @@ class Template:
                 return False
         return True
 
+    def _rewrite_queries(self, props_to_fix, obj, queries):
+        # props_to_fix is a list of (prop name, list of (name, propr))
+        q_map = dict( [(q.variable, q) for q in queries] )
+        for prop, targets in props_to_fix:
+            value = obj[prop]
+            for target_name, target_prop in targets:
+                if target_name in q_map:
+                    q = q_map[target_name]
+                    const_constraints = dict(q.const_constraints)
+                    const_constraints[target_prop] = value
+                    new_q = ForEach(q.variable, const_constraints)
+                    q_map[target_name] = new_q
+        return list(q_map.values())
+
     def _create_rules(self, obj_set, space, bindings, queries):
         # queries is a list of ForEach
         if len(queries) == 0:
@@ -669,12 +685,28 @@ class Template:
         q_rest = queries[:-1]
         q = queries[-1]
 
+        # find constraints that depend on this query
+        props_to_fix = []
+        for p in self.predicates:
+            if isinstance(p, PropsMatch):
+                uses_this_prop = None
+                other_targets = []
+                for name, prop in p.pairs:
+                    if q.variable == name:
+                        uses_this_prop = prop
+                    else:
+                        other_targets.append( (name, prop ) )
+                if uses_this_prop is not None:
+                    props_to_fix.append( (uses_this_prop, other_targets ) )
+
         results = []
         for obj in obj_set.find(space, q.const_constraints):
             new_binding = dict(bindings)
             new_binding[q.variable] = obj
 
-            results.extend(self._create_rules(obj_set, space, new_binding, q_rest))
+            # refine future queries based on the obj we just found
+
+            results.extend(self._create_rules(obj_set, space, new_binding, self._rewrite_queries(props_to_fix, obj, q_rest)))
         return results
 
     def _execute_forall_queries(self, bindings, obj_set, space):
@@ -688,23 +720,24 @@ class Template:
 
     def create_rules(self, obj_set):
         #print ("create_rules, transform:",self.transform,", queries: ", self.foreach_queries)
-        results = []
-        for space in obj_set.get_spaces():
-            if len(self.foreach_queries) == 0 and space == "public":
-                bindings = [{}]
-            else:
-                bindings = self._create_rules(obj_set, space, {}, self.foreach_queries)
+        with timeblock("create_rules({})".format(self.transform)):
+            results = []
+            for space in obj_set.get_spaces():
+                if len(self.foreach_queries) == 0 and space == "public":
+                    bindings = [{}]
+                else:
+                    bindings = self._create_rules(obj_set, space, {}, self.foreach_queries)
 
-            # after all for-eaches are resolved, try the for-alls
-            for b in bindings:
-                b = self._execute_forall_queries(b, obj_set, space)
-                if b == None:
-                    continue
-                inputs = tuple(b.items())
-                results.append( (space, inputs, self.transform) )
+                # after all for-eaches are resolved, try the for-alls
+                for b in bindings:
+                    b = self._execute_forall_queries(b, obj_set, space)
+                    if b == None:
+                        continue
+                    inputs = tuple(b.items())
+                    results.append( (space, inputs, self.transform) )
 
-        log.debug("Created rules for %s: %s", self.transform, results)
-        return results
+            log.debug("Created rules for %s: %s", self.transform, results)
+            return results
 
 class RuleAndDerivativesFilter:
     def __init__(self, templateNames):

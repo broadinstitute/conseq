@@ -32,6 +32,26 @@ class LazyConfig:
         v = self._config_dict[name]
         return self._render_template(v)
 
+class MissingTemplateVar(Exception):
+    def __init__(self, message, variables, template):
+        super(MissingTemplateVar, self).__init__()
+        self.variables = variables
+        self.template = template
+        self.message = message
+
+    def get_error(self):
+        var_defs = []
+        for k, v in self.variables.items():
+            if isinstance(v, dict):
+                var_defs.append("  {}:".format(repr(k)))
+                for k2, v2 in v.items():
+                    var_defs.append("    {}: {}".format(repr(k2), repr(v2)))
+            else:
+                var_defs.append("  {}: {}".format(repr(k), repr(v)))
+
+        var_block = "".join(x+"\n" for x in var_defs)
+        return ("Template error: {}, applying vars:\n{}\n to template:\n{}".format(self.message, var_block, self.template))
+
 def render_template(jinja2_env, template_text, config, **kwargs):
     assert isinstance(template_text, six.string_types), "Expected string for template but got {}".format(repr(template_text))
     kwargs = dict(kwargs)
@@ -40,9 +60,8 @@ def render_template(jinja2_env, template_text, config, **kwargs):
         try:
             rendered = jinja2_env.from_string(text).render(**kwargs)
             return rendered
-        except jinja2.exceptions.UndefinedError:
-            log.exception("Undefined value, applying {} to {}".format(kwargs, repr(text)))
-            raise
+        except jinja2.exceptions.UndefinedError as ex:
+            raise MissingTemplateVar(ex.message, kwargs, text)
 
     kwargs["config"] = LazyConfig(render_template_callback, config)
 
@@ -66,31 +85,39 @@ def generate_run_stmts(job_dir, command_and_bodies, jinja2_env, config, inputs, 
 
 def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, capture_output, resolver_state):
     client = rule.client
-    prologue = render_template(jinja2_env, config["PROLOGUE"], config)
+    try:
+        prologue = render_template(jinja2_env, config["PROLOGUE"], config)
 
-    if rule.outputs == None:
-        outputs = None
-    else:
-        outputs = [expand_outputs(jinja2_env, output, config, inputs=inputs) for output in rule.outputs]
-    assert isinstance(inputs, dict)
+        if rule.outputs == None:
+            outputs = None
+        else:
+            outputs = [expand_outputs(jinja2_env, output, config, inputs=inputs) for output in rule.outputs]
+        assert isinstance(inputs, dict)
 
-    log.info("Executing %s in %s with inputs %s", name, job_dir, inputs)
-    desc_name = "{} with inputs {} ({})".format(name, inputs, job_dir)
+        log.info("Executing %s in %s with inputs %s", name, job_dir, inputs)
+        desc_name = "{} with inputs {} ({})".format(name, inputs, job_dir)
 
-    if len(rule.run_stmts) > 0:
-        run_stmts = generate_run_stmts(job_dir, rule.run_stmts, jinja2_env, config, inputs, resolver_state)
+        if len(rule.run_stmts) > 0:
+            flock_stmt = get_flock_statement(rule)
+            if flock_stmt is not None:
+                execution = client.execute(id, None, flock_stmt.fn_prefix, flock_stmt.scripts, job_dir)
+            else:
+                run_stmts = generate_run_stmts(job_dir, rule.run_stmts, jinja2_env, config, inputs, resolver_state)
 
-        execution = client.exec_script(name,
-                           id,
-                           job_dir,
-                           run_stmts,
-                           outputs, capture_output, prologue, desc_name, resolver_state)
-    else:
-        # fast path when there's no need to spawn an external process.  (mostly used by tests)
-        assert outputs != None, "No body, nor outputs specified.  This rule does nothing"
-        execution = exec_client.SuccessfulExecutionStub(id, outputs)
+                execution = client.exec_script(name,
+                                   id,
+                                   job_dir,
+                                   run_stmts,
+                                   outputs, capture_output, prologue, desc_name, resolver_state)
+        else:
+            # fast path when there's no need to spawn an external process.  (mostly used by tests)
+            assert outputs != None, "No body, nor outputs specified.  This rule does nothing"
+            execution = exec_client.SuccessfulExecutionStub(id, outputs)
 
-    return execution
+        return execution
+
+    except MissingTemplateVar as ex:
+        return exec_client.FailedExecutionStub(id, ex.get_error())
 
 def reattach(j, rules):
     pending_jobs = j.get_started_executions()
@@ -156,10 +183,12 @@ def ask_user_to_cancel(j, executing):
     if answer == 'y':
         for e in executing:
             e.cancel()
-        j.cleanup_incomplete()
+        #TODO: I think this might be here as an unfinished change.  We need to mark the jobs that were running
+        # as no longer running so that we don't attempt to re-attach them
+        #j.cleanup_incomplete()
 
 from conseq import xref
-def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, max_concurrent_executions, capture_output, req_confirm):
+def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, max_concurrent_executions, capture_output, req_confirm, maxfail):
     active_job_ids = set([e.id for e in executing])
 
     resolver = xref.Resolver(rules.vars)
@@ -167,10 +196,14 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, m
     prev_msg = None
     abort = False
     interrupted = False
+    failure_count = 0
     with capture_sigint() as was_interrupted_fn:
         while not abort:
             interrupted = was_interrupted_fn()
             if interrupted:
+                break
+
+            if failure_count >= maxfail:
                 break
 
             pending_jobs = j.get_pending()
@@ -247,6 +280,7 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, m
 
                 if failure != None:
                     j.record_completed(timestamp, e.id, dep.STATUS_FAILED, {})
+                    failure_count += 1
                 elif completion != None:
                     j.record_completed(timestamp, e.id, dep.STATUS_COMPLETED, completion)
 
@@ -255,24 +289,51 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, m
             if not did_useful_work:
                 time.sleep(0.5)
 
-    if interrupted and len(executing) > 0:
+    # interrupted and
+    if len(executing) > 0:
         ask_user_to_cancel(j, executing)
 
+def _datetimefromiso(isostr):
+    return datetime.datetime.strptime(isostr,"%Y-%m-%dT%H:%M:%S.%f")
 
-def add_xref(j, xref):
-    timestamp = datetime.datetime.now().isoformat()
+def add_artifact_if_missing(j, obj):
+    timestamp = datetime.datetime.now()
+    d = dict(obj)
+    return j.add_obj("public", timestamp.isoformat(), d, overwrite=False)
+
+def add_xref(j, xref, refresh):
+    timestamp = datetime.datetime.now()
     d = dict(xref.obj)
     d["$xref_url"] = xref.url
-    return j.add_obj("public", timestamp, d, overwrite=False)
+    overwrite = False
+    if refresh:
+        existing = j.find_objs("public", d)
+        if len(existing) > 0:
+            if len(existing) > 1:
+                raise Exception("Looking for xref {} resulted in multiple matches: {}".format(d, existing))
+            existing = existing[0]
+            # TODO: fix this to work with all xref types
+            if os.path.exists(xref.url):
+                file_mtime = datetime.datetime.fromtimestamp(os.path.getmtime(xref.url))
+                if file_mtime > _datetimefromiso(existing.timestamp):
+                    log.info("Xref %s has been updated", xref.url)
+                    overwrite = True
+
+    return j.add_obj("public", timestamp.isoformat(), d, overwrite=overwrite)
 
 class Rules:
     def __init__(self):
         self.rule_by_name = {}
         self.vars = {}
         self.xrefs = []
+        self.objs = []
+        self.types = {}
 
     def add_xref(self, xref):
         self.xrefs.append(xref)
+
+    def add_if_missing(self, obj):
+        self.objs.append(obj)
 
     def set_var(self, name, value):
         self.vars[name] = value
@@ -291,14 +352,34 @@ class Rules:
             raise Exception("Duplicate rules for {}".format(name))
         self.rule_by_name[name] = rule
 
+    def add_type(self, typedef):
+        name = typedef.name
+        if name in self.types:
+            raise Exception("Duplicate type for {}".format(name))
+        self.types[name] = typedef
+
     def merge(self, other):
         for name, rule in other.rule_by_name.items():
             self.set_rule(name, rule)
         self.vars.update(other.vars)
         self.xrefs.extend(other.xrefs)
+        self.objs.extend(other.objs)
+
+        for t in other.types.values():
+            self.types.add_type(t)
 
     def __repr__(self):
         return "<Rules vars:{}, rules:{}>".format(self.vars, list(self))
+
+def get_flock_statement(rule):
+    "Returns None if this rule has no flock statements.  Otherwise returns reference to it"
+    flock_stmts = [x for x in rule.run_stmts if type(x) == parser.FlockStmt]
+    if len(flock_stmts) > 0:
+        assert len(flock_stmts) == 1, "If a flock job is specified, no other run statments can be given"
+        return flock_stmts[0]
+    return None
+
+from conseq import flockish
 
 def read_deps(filename, initial_vars={}):
     rules = Rules()
@@ -307,28 +388,54 @@ def read_deps(filename, initial_vars={}):
 
     local_client = exec_client.LocalExecClient()
     sge_client = None
+    flock_client = None
 
     p = parser.parse(filename)
+
+    needs_sge_client = False
+    needs_flock_client = False
+    for dec in p:
+        if isinstance(dec, parser.Rule):
+            if "sge" in dec.options:
+                needs_sge_client = True
+            if get_flock_statement(dec) is not None:
+                needs_flock_client = True
+                needs_sge_client = True
+        elif isinstance(dec, parser.LetStatement):
+            rules.set_var(dec.name, dec.value)
+
+    if needs_sge_client:
+        config = rules.get_vars()
+        sge_client = exec_client.SgeExecClient(config["SGE_HOST"],
+                                               config["SGE_PROLOGUE"],
+                                               config["WORKING_DIR"],
+                                               config["SGE_REMOTE_WORKDIR"],
+                                               config["S3_STAGING_URL"],
+                                               config["SGE_HELPER_PATH"])
+
+    if needs_flock_client:
+        db_filename=config["WORKING_DIR"]+"/flock.db"
+        flock_client = flockish.FlockClient(sge_client, db_filename)
+
     for dec in p:
         if isinstance(dec, parser.XRef):
             rules.add_xref(dec)
+        elif isinstance(dec, parser.AddIfMissingStatement):
+            rules.add_if_missing(dec.json_obj)
         elif isinstance(dec, parser.LetStatement):
-            rules.set_var(dec.name, dec.value)
+            # these were handled above
+            pass
         elif isinstance(dec, parser.IncludeStatement):
             child_rules = read_deps(os.path.expanduser(dec.filename))
             rules.merge(child_rules)
+        elif isinstance(dec, parser.TypeDefStmt):
+            rules.add_type(dec)
         else:
             assert isinstance(dec, parser.Rule)
             if "sge" in dec.options:
-                if sge_client is None:
-                    config = rules.get_vars()
-                    sge_client = exec_client.SgeExecClient(config["SGE_HOST"],
-                                                           config["SGE_PROLOGUE"],
-                                                           config["WORKING_DIR"],
-                                                           config["SGE_REMOTE_WORKDIR"],
-                                                           config["S3_STAGING_URL"],
-                                                           config["SGE_HELPER_PATH"])
                 dec.client = sge_client
+            elif get_flock_statement(dec) is not None:
+                dec.client = flock_client
             else:
                 dec.client = local_client
             rules.set_rule(dec.name, dec)
@@ -378,10 +485,9 @@ def ls_cmd(state_dir, space, predicates, groupby, columns):
             print_table(rows, 2)
             print()
 
-def rm_cmd(state_dir, dry_run, json_query, with_invalidate):
-    query = json.loads(json_query)
+def rm_cmd(state_dir, dry_run, space, query, with_invalidate):
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
-    for o in j.find_objs(query):
+    for o in j.find_objs(space, query):
         print("rm", o)
         if not dry_run:
             j.remove_obj(o.id, with_invalidate)
@@ -537,7 +643,8 @@ def load_config(config_file):
 
     return config
 
-def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_executions, capture_output, req_confirm, config_file):
+def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_executions, capture_output, req_confirm, config_file,
+         refresh_xrefs=False, maxfail=1):
     jinja2_env = create_jinja2_env()
 
     if not os.path.exists(state_dir):
@@ -574,7 +681,10 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
         rules.set_var(var, value)
 
     for xref in rules.xrefs:
-        add_xref(j, expand_xref(jinja2_env, xref, rules.vars))
+        add_xref(j, expand_xref(jinja2_env, xref, rules.vars), refresh_xrefs)
+
+    for obj in rules.objs:
+        add_artifact_if_missing(j, obj)
 
     executing = reattach(j, rules)
 
@@ -583,15 +693,22 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
 
     for dec in rules:
         assert (isinstance(dec, parser.Rule))
-        j.add_template(to_template(jinja2_env, dec, rules.vars))
+        try:
+            j.add_template(to_template(jinja2_env, dec, rules.vars))
+        except MissingTemplateVar as ex:
+            log.error("Could not load rule {}: {}".format(dec.name, ex.get_error()))
+            return -1
 
     def new_object_listener(obj):
         timestamp = datetime.datetime.now().isoformat()
         j.add_obj(timestamp, obj)
     try:
-        main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, max_concurrent_executions, capture_output, req_confirm)
+        main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, max_concurrent_executions, capture_output, req_confirm, maxfail)
     except FatalUserError as e:
         print("Error: {}".format(e))
+        return -1
+
+    return 0
 
 
 

@@ -6,7 +6,7 @@ triple_squoted_string = /'''(?:[^']|'{1,2}(?!'))+'''/ ;
 squoted_string = /'[^']*'/ ;
 quoted_string = triple_dbl_quoted_string | dbl_quoted_string | squoted_string | triple_squoted_string ;
 
-identifier = /[A-Za-z_]+[A-Za-z0-9_-]*/ ;
+identifier = /[A-Za-z]+[A-Za-z0-9_+-]*/ ;
 url = /\S+/ ;
 
 json_value = quoted_string | json_obj ;
@@ -25,9 +25,18 @@ input_specs = input_spec { "," input_spec }* ;
 
 output_specs = json_obj { "," json_obj } ;
 
+r_flock_file = "include" quoted_string |
+    quoted_string ;
+r_flock_files = r_flock_file {"," r_flock_file}* ;
+
+output_type = identifier { "?" | "+" | {} } ;
+output_types = output_type { "," output_type }+ ;
+
 statement = ( "inputs" ":" input_specs |
   "outputs" ":" output_specs |
   "run" quoted_string [ "with" quoted_string ] |
+  "submit-r-flock" quoted_string r_flock_files |
+  "expect-outputs" ":" output_types |
   "options" ":" identifier { "," identifier }* )  ;
 statements = { statement }+ ;
 
@@ -35,8 +44,12 @@ rule = "rule" identifier ":" statements ;
 
 xref = "xref" url json_obj ;
 
+add_if_missing = "add-if-missing" json_obj ;
+
+type_def = "type" identifier "has" "(" identifier { "," identifier }* ")" ;
+
 var_stmt = "let" identifier "=" quoted_string ;
 
 include_stmt = "include" quoted_string ;
 
-declarations =  { rule | xref | include_stmt | var_stmt }+  $ ;
+declarations =  { rule | xref | include_stmt | var_stmt | add_if_missing | type_def }+  $ ;

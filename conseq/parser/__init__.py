@@ -5,6 +5,10 @@ import six
 
 QueryVariable = namedtuple("QueryVariable", ["name"])
 RunStmt = namedtuple("RunStmt", ["command", "script"])
+FlockInclude = namedtuple("FlockInclude", ["path"])
+FlockStmt = namedtuple("FlockStmt", ["language", "fn_prefix", "scripts"])
+TypeDefStmt = namedtuple("TypeDefStmt", "name properties")
+
 
 class XRef:
     def __init__(self, url, obj):
@@ -35,6 +39,7 @@ class Rule:
 InputSpec = namedtuple("InputSpec", ["variable", "json_obj", "for_all"])
 IncludeStatement = namedtuple("IncludeStatement", ["filename"])
 LetStatement = namedtuple("LetStatement", ["name", "value"])
+AddIfMissingStatement = namedtuple("AddIfMissingStatement", "json_obj")
 
 def unquote(s):
     # TODO: Handle escaped quotes
@@ -122,10 +127,25 @@ class Semantics(object):
                 for i in range(0,len(rest),2):
                     options.append(rest[1])
                 rule.options = options
+            elif statement[0] == "submit-r-flock":
+                rule.run_stmts.append( FlockStmt("R", statement[1], statement[2]) )
             else:
                 raise Exception("unknown {}".format(statement[0]))
         #print("rule:", repr(rule))
         return rule
+
+    def r_flock_file(self, ast):
+        if type(ast) == list:
+            assert ast[0] == 'include'
+            return IncludeStatement(ast[1])
+        else:
+            return ast
+
+    def r_flock_files(self, ast):
+        scripts = [ast[0]]
+        for x in ast[1]:
+            scripts.append(x[1])
+        return scripts
 
     def quoted_string(self, ast):
         return unquote(ast)
@@ -150,6 +170,12 @@ class Semantics(object):
     def include_stmt(self, ast):
         return IncludeStatement(ast[1])
 
+    def add_if_missing(self, ast):
+        return AddIfMissingStatement(ast[1])
+
+    def type_def(self, ast):
+        properties = [ast[4]] + ast[5]
+        return TypeDefStmt(ast[1], properties)
 
 def parse_str(text, filename=None):
     parser = depfile.depfileParser(parseinfo=False)
