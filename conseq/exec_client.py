@@ -202,6 +202,14 @@ def write_wrapper_script(wrapper_path, job_dir, prologue, run_stmts, retcode_pat
 
         fd.write(prologue+"\n")
 
+        # add code from http://veithen.github.io/2014/11/16/sigterm-propagation.html to propagate killing of child proc if this proc is killed.
+        # trap 'kill -TERM $PID' TERM INT
+        # $JAVA_EXECUTABLE $JAVA_ARGS &
+        # PID=$!
+        # wait $PID
+        # trap - TERM INT
+        # wait $PID
+        # EXIT_STATUS=$?
         for command in run_stmts:
             fd.write(command)
             fd.write(" &&\\\n")
@@ -231,7 +239,7 @@ def exec_script(name, id, job_dir, run_stmts, outputs, capture_output, prologue,
         captured_stdouts = None
         close_fds = False
 
-    log.info("Starting task in %s", job_dir)
+    #log.info("Starting task in %s", job_dir)
     log.debug("executing: %s", bash_cmd)
 
     # create child in new process group so ctrl-c doesn't kill child process

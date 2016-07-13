@@ -83,6 +83,15 @@ def generate_run_stmts(job_dir, command_and_bodies, jinja2_env, config, inputs, 
         run_stmts.append(command)
     return run_stmts
 
+def format_inputs(inputs):
+    lines = []
+    for k, v in inputs.items():
+        lines.append("  {}:\n".format(k))
+        for prop, prop_value in v.items():
+            lines.append("     {}: {}\n".format(prop, repr(prop_value)))
+
+    return "".join(lines)
+
 def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, capture_output, resolver_state):
     client = rule.client
     try:
@@ -94,7 +103,7 @@ def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, captu
             outputs = [expand_outputs(jinja2_env, output, config, inputs=inputs) for output in rule.outputs]
         assert isinstance(inputs, dict)
 
-        log.info("Executing %s in %s with inputs %s", name, job_dir, inputs)
+        log.info("Executing %s in %s with inputs:\n%s", name, job_dir, format_inputs(inputs))
         desc_name = "{} with inputs {} ({})".format(name, inputs, job_dir)
 
         if len(rule.run_stmts) > 0:
@@ -266,7 +275,7 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, m
 
                 e = execute(job.transform, resolver, jinja2_env, exec_id, job_dir, inputs, rule, rules.get_vars(), capture_output, resolver_state)
                 executing.append(e)
-                print("updating exec {} with {}".format(e.id, e.get_external_id()))
+                #print("updating exec {} with {}".format(e.id, e.get_external_id()))
                 j.update_exec_xref(e.id, e.get_external_id(), job_dir)
 
             for i, e in reversed(list(enumerate(executing))):
