@@ -1,0 +1,18 @@
+# Example showing how to use local files
+
+xref ../data/dataset1.csv {'type': 'simple-csv-file', 'name':'ds1'}
+xref ../data/dataset2.csv {'type': 'simple-csv-file', 'name':'ds2'}
+
+# create a png plotting the distribution of each column
+rule generate_plot:
+    inputs: in={'type': 'simple-csv-file'}
+    outputs: {'type': 'histogram-plot', 'name': '{{inputs.in.name}}', 'filename': {'$filename': "plots.pdf"}}
+    run "Rscript" with """
+        a <- read.csv("{{inputs.in.filename}}")
+        pdf("plots.pdf")
+        for(c in colnames(a)) {
+            hist(a[,c], main=c)
+        }
+        dev.off()
+    """
+
