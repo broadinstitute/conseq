@@ -85,10 +85,19 @@ def generate_run_stmts(job_dir, command_and_bodies, jinja2_env, config, inputs, 
 
 def format_inputs(inputs):
     lines = []
-    for k, v in inputs.items():
-        lines.append("  {}:\n".format(k))
+
+    def append_kv(v):
         for prop, prop_value in v.items():
             lines.append("     {}: {}\n".format(prop, repr(prop_value)))
+
+    for k, v in inputs.items():
+        if isinstance(v, list):
+            for vi, ve in enumerate(v):
+                lines.append("  {}[{}]:\n".format(k, vi))
+                append_kv(ve)
+        else:
+            lines.append("  {}:\n".format(k))
+            append_kv(v)
 
     return "".join(lines)
 
