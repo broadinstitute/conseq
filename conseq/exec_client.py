@@ -202,21 +202,22 @@ def write_wrapper_script(wrapper_path, job_dir, prologue, run_stmts, retcode_pat
 
         fd.write(prologue+"\n")
 
-        # add code from http://veithen.github.io/2014/11/16/sigterm-propagation.html to propagate killing of child proc if this proc is killed.
-        # trap 'kill -TERM $PID' TERM INT
-        # $JAVA_EXECUTABLE $JAVA_ARGS &
-        # PID=$!
-        # wait $PID
-        # trap - TERM INT
-        # wait $PID
-        # EXIT_STATUS=$?
-        for command in run_stmts:
-            fd.write(command)
-            fd.write(" &&\\\n")
+        fd.write("EXIT_STATUS=0\n")
+        for run_stmt in run_stmts:
+            fd.write("if [ $EXIT_STATUS == 0 ]; then\n")
+            # based on http://veithen.github.io/2014/11/16/sigterm-propagation.html to propagate killing of child proc if this proc is killed.
+            fd.write("  # Propagate kill if shell receives SIGTERM or SIGINT\n")
+            fd.write("  trap 'kill -TERM $PID' TERM INT\n")
+            fd.write("  "+run_stmt+" &\n")
+            fd.write("  PID=$!\n")
+            fd.write("  wait $PID\n")
+            fd.write("  trap - TERM INT\n")
+            fd.write("  wait $PID\n")
+            fd.write("  EXIT_STATUS=$?\n")
+            fd.write("fi\n\n")
 
-        fd.write("true\n")
         if retcode_path is not None:
-            fd.write("echo $? > {retcode_path}\n".format(**locals()))
+            fd.write("echo $EXIT_STATUS > {retcode_path}\n".format(**locals()))
 
 def exec_script(name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name):
     stdout_path = os.path.join(job_dir, "stdout.txt")
