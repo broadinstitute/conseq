@@ -2,7 +2,7 @@ from time import time
 from functools import wraps
 from contextlib import contextmanager
 
-def timefn(label, parameter=None):
+def timefn(log, label, parameter=None):
     def decorator(func):
         @wraps(func)
         def func_wrapper(*args, **kwargs):
@@ -13,16 +13,16 @@ def timefn(label, parameter=None):
                 elapsed = time() - start
                 if parameter is not None:
                     label = "{}({})".format(label, args[parameter])
-                print("timed {}: {} seconds".format(label, elapsed))
+                log.debug("timed {}: {} seconds".format(label, elapsed))
             return x
         return func_wrapper
     return decorator
 
 @contextmanager
-def timeblock(label):
+def timeblock(log, label):
     start = time()
     try:
         yield
     finally:
         elapsed = time() - start
-        print("timed {}: {} seconds".format(label, elapsed))
+        log.debug("timed {}: {} seconds".format(label, elapsed))

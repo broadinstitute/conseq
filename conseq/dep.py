@@ -720,7 +720,7 @@ class Template:
 
     def create_rules(self, obj_set):
         #print ("create_rules, transform:",self.transform,", queries: ", self.foreach_queries)
-        with timeblock("create_rules({})".format(self.transform)):
+        with timeblock(log, "create_rules({})".format(self.transform)):
             results = []
             for space in obj_set.get_spaces():
                 if len(self.foreach_queries) == 0 and space == "public":

@@ -139,7 +139,8 @@ def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, captu
 
 def reattach(j, rules):
     pending_jobs = j.get_started_executions()
-    print("reattaching,", pending_jobs)
+    if len(pending_jobs) > 0:
+        log.warn("Reattaching jobs that were started in a previous invocation of conseq, but had not terminated before conseq exited: %s", pending_jobs)
     executing = []
     for e in pending_jobs:
         if e.exec_xref != None:
