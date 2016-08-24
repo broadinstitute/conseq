@@ -160,6 +160,16 @@ class ObjSet:
         c.execute("select distinct space from cur_obj")
         return set([x[0] for x in c.fetchall()] + ["public"])
 
+    def get_last_id(self):
+        c = get_cursor()
+        c.execute("select max(id) from cur_obj")
+        id = c.fetchone()
+        if id is None:
+            id = 0
+        else:
+            id = id[0]
+        return id
+
     def add(self, space, timestamp, props):
         # first check to see if this already exists
         match = self.find_by_key(space, props)
@@ -740,17 +750,15 @@ class Template:
             return results
 
 class RuleAndDerivativesFilter:
-    def __init__(self, templateNames):
+    def __init__(self, templateNames, last_existing_id):
         self.templateNames = templateNames
-        self.new_object_ids = set()
-
-    def add_object(self, obj):
-        self.new_object_ids.add(obj.id)
+        self.last_existing_id = last_existing_id
 
     def rule_allowed(self, inputs, transform):
         # if we are executing a rule we've explictly whitelisted
         if transform in self.templateNames:
             return True
+
         # or we are executing a rule which uses an object that was created since this
         # process started (implying it must have come from a whitelisted rule) then
         # let this rule get created
@@ -760,7 +768,7 @@ class RuleAndDerivativesFilter:
             else:
                 objs = _obj
             for obj in objs:
-                if obj.id in self.new_object_ids:
+                if obj.id > self.last_existing_id:
                     return True
         # All others should be dropped
         return False
@@ -781,9 +789,10 @@ class Jobs:
         self.rule_allowed = lambda inputs, transform: True
 
     def limitStartToTemplates(self, templateNames):
-        filter = RuleAndDerivativesFilter(templateNames)
+        with transaction(self.db):
+            last_existing_id = self.objects.get_last_id()
+        filter = RuleAndDerivativesFilter(templateNames, last_existing_id)
         self.rule_allowed = filter.rule_allowed
-        self.add_new_obj_listener(filter.add_object)
 
     def _object_removed(self, obj):
         for rule_id in self.rule_set.find_by_input(obj):
