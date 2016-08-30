@@ -791,6 +791,8 @@ class Jobs:
     def limitStartToTemplates(self, templateNames):
         with transaction(self.db):
             last_existing_id = self.objects.get_last_id()
+            if last_existing_id is None:
+                last_existing_id = -1
         filter = RuleAndDerivativesFilter(templateNames, last_existing_id)
         self.rule_allowed = filter.rule_allowed
 
