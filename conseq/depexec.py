@@ -155,8 +155,7 @@ def reattach(j, rules):
     return executing
 
 def get_job_dir(state_dir, job_id):
-    working_dir = os.path.join(state_dir, "working")
-    return working_dir + "/r" + str(job_id)
+    return os.path.join(state_dir, "r" + str(job_id))
 
 def confirm_execution(transform, inputs):
     while True:
@@ -318,7 +317,7 @@ def _datetimefromiso(isostr):
 def add_artifact_if_missing(j, obj):
     timestamp = datetime.datetime.now()
     d = dict(obj)
-    return j.add_obj("public", timestamp.isoformat(), d, overwrite=False)
+    return j.add_obj(dep.DEFAULT_SPACE, timestamp.isoformat(), d, overwrite=False)
 
 def add_xref(j, xref, refresh):
     timestamp = datetime.datetime.now()
@@ -326,7 +325,7 @@ def add_xref(j, xref, refresh):
     d["$xref_url"] = xref.url
     overwrite = False
     if refresh:
-        existing = j.find_objs("public", d)
+        existing = j.find_objs(dep.DEFAULT_SPACE, d)
         if len(existing) > 0:
             if len(existing) > 1:
                 raise Exception("Looking for xref {} resulted in multiple matches: {}".format(d, existing))
@@ -338,7 +337,7 @@ def add_xref(j, xref, refresh):
                     log.info("Xref %s has been updated", xref.url)
                     overwrite = True
 
-    return j.add_obj("public", timestamp.isoformat(), d, overwrite=overwrite)
+    return j.add_obj(dep.DEFAULT_SPACE, timestamp.isoformat(), d, overwrite=overwrite)
 
 class Rules:
     def __init__(self):
@@ -662,6 +661,16 @@ def load_config(config_file):
 
     return config
 
+def select_space(state_dir, name, create_if_missing):
+    db_path = os.path.join(state_dir, "db.sqlite3")
+    j = dep.open_job_db(db_path)
+    j.select_space(name, create_if_missing)
+
+def get_spaces(state_dir):
+    db_path = os.path.join(state_dir, "db.sqlite3")
+    j = dep.open_job_db(db_path)
+    return j.get_spaces()
+
 def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_executions, capture_output, req_confirm, config_file,
          refresh_xrefs=False, maxfail=1):
     jinja2_env = create_jinja2_env()
@@ -669,9 +678,6 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
     if not os.path.exists(state_dir):
         os.makedirs(state_dir)
 
-    working_dir = os.path.join(state_dir, "working")
-    if not os.path.exists(working_dir):
-        os.makedirs(working_dir)
     dlcache = os.path.join(state_dir, 'dlcache')
     if not os.path.exists(dlcache):
         os.makedirs(dlcache)
@@ -690,7 +696,7 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
     initial_config = dict(DL_CACHE_DIR=dlcache,
                           SCRIPT_DIR=script_dir,
                           PROLOGUE="",
-                          WORKING_DIR=working_dir)
+                          WORKING_DIR=state_dir)
     if config_file is not None:
         initial_config.update(load_config(config_file))
 

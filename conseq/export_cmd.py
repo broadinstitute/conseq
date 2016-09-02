@@ -66,7 +66,7 @@ def export_artifacts(state_dir, url, config_file):
     j = dep.open_state_dir(state_dir)
 
     # I wonder if a repo will every get large enough that we won't want to do this in memory.  My guess is, no.
-    objs = j.find_objs(dep.PUBLIC_SPACE, dict())
+    objs = j.find_objs(dep.DEFAULT_SPACE, dict())
     new_objs = []
     all_translations = []
     for o in objs:
@@ -102,4 +102,4 @@ def import_artifacts(state_dir, url, config_file):
 
     timestamp = datetime.datetime.now().isoformat()
     for artifact in artifacts:
-        j.add_obj(dep.PUBLIC_SPACE, timestamp, artifact)
+        j.add_obj(dep.DEFAULT_SPACE, timestamp, artifact)

@@ -23,7 +23,11 @@ RE_STATUS_COMPLETE = "complete"
 RE_STATUS_FAILED = "failed"
 RE_STATUS_DEFERRED = "deferred"
 
+class DefaultSpace:
+    pass
+
 PUBLIC_SPACE = "public"
+DEFAULT_SPACE = DefaultSpace()
 
 from contextlib import contextmanager
 import threading
@@ -134,6 +138,12 @@ class ObjSet:
     def __init__(self):
         self.add_listeners = []
         self.remove_listeners = []
+        self.default_space = PUBLIC_SPACE
+
+    def initialize(self):
+        c = get_cursor()
+        c.execute("select default_space from settings")
+        self.default_space = c.fetchone()[0]
 
     def __iter__(self):
         c = get_cursor()
@@ -155,10 +165,27 @@ class ObjSet:
         for remove_listener in self.remove_listeners:
             remove_listener(id)
 
-    def get_spaces(self):
+    def get_spaces(self, return_is_public=False):
         c = get_cursor()
-        c.execute("select distinct space from cur_obj")
-        return set([x[0] for x in c.fetchall()] + ["public"])
+        c.execute("select name, parent from space")
+        if return_is_public:
+            return [(x[0], x[1] is None) for x in c.fetchall()]
+        else:
+            return [x[0] for x in c.fetchall()]
+
+    def select_space(self, name, create_if_missing):
+        c = get_cursor()
+        self.assert_space_exists(name, create_if_missing, None)
+        c.execute("update settings set default_space = ?", [name])
+
+    def assert_space_exists(self, name, create_if_missing, parent):
+        c = get_cursor()
+        c.execute("select name from space where name = ?", [name])
+        if c.fetchone() is None:
+            if create_if_missing:
+                c.execute("insert into space (name, parent) values (?, ?)", [name, parent])
+            else:
+                raise Exception("No space named: {}".format(name))
 
     def get_last_id(self):
         c = get_cursor()
@@ -171,6 +198,9 @@ class ObjSet:
         return id
 
     def add(self, space, timestamp, props):
+        if space == DEFAULT_SPACE:
+            space = self.default_space
+
         # first check to see if this already exists
         match = self.find_by_key(space, props)
 
@@ -182,6 +212,8 @@ class ObjSet:
                 return match.id
 
             self.remove(match.id)
+
+        self.assert_space_exists(space, True, self.default_space)
 
         c = get_cursor()
         c.execute("insert into cur_obj (space, timestamp, json) values (?, ?, ?)", [space, timestamp, json.dumps(props)])
@@ -205,6 +237,9 @@ class ObjSet:
             return None
 
     def find(self, space, properties):
+        if space == DEFAULT_SPACE:
+            space = self.default_space
+
         result = []
         for o in self:
             if o.space != space:
@@ -732,8 +767,8 @@ class Template:
         #print ("create_rules, transform:",self.transform,", queries: ", self.foreach_queries)
         with timeblock(log, "create_rules({})".format(self.transform)):
             results = []
-            for space in obj_set.get_spaces():
-                if len(self.foreach_queries) == 0 and space == "public":
+            for space, is_public_space in obj_set.get_spaces(return_is_public=True):
+                if len(self.foreach_queries) == 0 and is_public_space:
                     bindings = [{}]
                 else:
                     bindings = self._create_rules(obj_set, space, {}, self.foreach_queries)
@@ -780,6 +815,8 @@ class Jobs:
     def __init__(self, db):
         self.db = db
         self.objects = ObjSet()
+        with transaction(db):
+            self.objects.initialize()
         object_history = ObjHistory()
         self.rule_set = RuleSet(object_history)
         self.rule_templates = []
@@ -954,6 +991,14 @@ class Jobs:
 
         return to_drop
 
+    def get_spaces(self):
+        with transaction(self.db):
+            return self.objects.get_spaces()
+
+    def select_space(self, name, create_if_missing):
+        with transaction(self.db):
+            return self.objects.select_space(name, create_if_missing)
+
     def dump(self):
         with transaction(self.db):
             for obj in self.objects:
@@ -983,7 +1028,11 @@ def open_job_db(filename):
             "create table execution (id INTEGER PRIMARY KEY AUTOINCREMENT, transform STRING, status STRING, execution_xref STRING, job_dir STRING)",
             "create table execution_input (id INTEGER PRIMARY KEY AUTOINCREMENT, execution_id INTEGER, name STRING, obj_id INTEGER, is_list INTEGER)",
             "create table execution_output (id INTEGER PRIMARY KEY AUTOINCREMENT, execution_id INTEGER, obj_id INTEGER)",
-            ]
+            "create table settings (schema_version integer, default_space string)",
+            "insert into settings (schema_version, default_space) values (1, 'public')",
+            "create table space (name string, parent string)",
+            "insert into space (name) values ('public')"
+        ]
         for stmt in stmts:
             db.execute(stmt)
 

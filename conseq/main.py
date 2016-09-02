@@ -10,6 +10,20 @@ def add_list(sub):
 def _list(args):
     depexec.list_cmd(args.dir)
 
+def space(args):
+    if args.name:
+        depexec.select_space(args.dir, args.name, create_if_missing=args.new)
+    else:
+        spaces = depexec.get_spaces(args.dir)
+        for space in spaces:
+            print(space)
+
+def add_space(sub):
+    parser = sub.add_parser("space", help="Switch default space")
+    parser.add_argument("name", nargs="?", help="Name of space to use as the default.  If omitted, lists the names of all spaces")
+    parser.add_argument("--new", "-n", action="store_true")
+    parser.set_defaults(func=space)
+
 def add_ls(sub):
     parser = sub.add_parser("ls", help="List artifacts")
     parser.add_argument('predicates', nargs='*', help="predicates to match in form 'key=value' ")

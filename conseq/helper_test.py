@@ -5,6 +5,10 @@ import uuid
 from boto.s3.connection import S3Connection
 from boto.s3.key import Key
 
+import pytest
+pytestmark = pytest.mark.skipif(os.getenv("AWS_ACCESS_KEY_ID") is None,
+                    reason="requires S3 credentials set as environment variables")
+
 def test_exec(tmpdir):
     uid = uuid.uuid4().hex
     bucket = "broad-datasci"
