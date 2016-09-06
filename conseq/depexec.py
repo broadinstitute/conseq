@@ -464,6 +464,8 @@ def ls_cmd(state_dir, space, predicates, groupby, columns):
     from conseq import depquery
 
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
+    if space is None:
+        space = j.get_current_space()
     subset = j.find_objs(space, dict(predicates))
     subset = [o.props for o in subset]
 
@@ -505,6 +507,8 @@ def ls_cmd(state_dir, space, predicates, groupby, columns):
 
 def rm_cmd(state_dir, dry_run, space, query, with_invalidate):
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
+    if space is None:
+        space = j.get_current_space()
     for o in j.find_objs(space, query):
         print("rm", o)
         if not dry_run:
@@ -666,10 +670,13 @@ def select_space(state_dir, name, create_if_missing):
     j = dep.open_job_db(db_path)
     j.select_space(name, create_if_missing)
 
-def get_spaces(state_dir):
+def print_spaces(state_dir):
     db_path = os.path.join(state_dir, "db.sqlite3")
     j = dep.open_job_db(db_path)
-    return j.get_spaces()
+    current_space = j.get_current_space()
+    for space in j.get_spaces():
+        selected = "*" if current_space == space else " "
+        print("{} {}".format(selected, space))
 
 def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_executions, capture_output, req_confirm, config_file,
          refresh_xrefs=False, maxfail=1):

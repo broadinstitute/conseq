@@ -6,6 +6,7 @@ import re
 import json
 import os
 import datetime
+import collections
 
 def rewrite_file_refs(obj, stage_dir, url_prefix):
     # returns new_props, filenames (pairs of local -> remote)
@@ -103,3 +104,29 @@ def import_artifacts(state_dir, url, config_file):
     timestamp = datetime.datetime.now().isoformat()
     for artifact in artifacts:
         j.add_obj(dep.DEFAULT_SPACE, timestamp, artifact)
+
+def export_conseq(state_dir, output_file):
+    by_group = collections.defaultdict(lambda: [])
+    j = dep.open_state_dir(state_dir)
+
+    objs = j.find_objs(dep.DEFAULT_SPACE, dict())
+    objs = [o.props for o in objs]
+    if output_file is None:
+        import sys
+        fd = sys.stdout
+    else:
+        fd = open(output_file, "wt")
+
+    for obj in objs:
+        by_group[obj.get("type", "")].append(obj)
+
+    for group, objs in by_group.items():
+        fd.write("# Objects with type \"{}\"\n".format(group))
+        for obj in objs:
+            fd.write("add-if-missing ")
+            json.dump(obj, fd, indent=2)
+            fd.write("\n")
+        fd.write("\n")
+
+    if output_file is not None:
+        fd.close()

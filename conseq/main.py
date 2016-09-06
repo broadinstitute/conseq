@@ -14,9 +14,7 @@ def space(args):
     if args.name:
         depexec.select_space(args.dir, args.name, create_if_missing=args.new)
     else:
-        spaces = depexec.get_spaces(args.dir)
-        for space in spaces:
-            print(space)
+        depexec.print_spaces(args.dir)
 
 def add_space(sub):
     parser = sub.add_parser("space", help="Switch default space")
@@ -29,7 +27,7 @@ def add_ls(sub):
     parser.add_argument('predicates', nargs='*', help="predicates to match in form 'key=value' ")
     parser.add_argument('--groupby', default='type')
     parser.add_argument('--columns')
-    parser.add_argument('--space', default=dep.PUBLIC_SPACE)
+    parser.add_argument('--space')
     parser.set_defaults(func=ls)
 
 def ls(args):
@@ -48,6 +46,7 @@ def gc(args):
 
 def add_rm(sub):
     parser = sub.add_parser("rm", help="Remove objects that satisfy given query")
+    parser.add_argument('--space')
     parser.add_argument('--dry-run', action="store_true", dest="dry_run")
     parser.add_argument('--no-invalidate', action="store_false", dest="with_invalidate")
     parser.add_argument('predicates', nargs='+', help="predicates to match in form 'key=value' ")
@@ -59,7 +58,7 @@ def rm(args):
     for pair in args.predicates:
         m = re.match("^([^=]+)=(.*)$", pair)
         query[m.group(1)] = m.group(2)
-    depexec.rm_cmd(args.dir, args.dry_run, dep.PUBLIC_SPACE, query, False)
+    depexec.rm_cmd(args.dir, args.dry_run, args.space, query, False)
 
 def add_run(sub):
     parser = sub.add_parser("run", help="Run rules in the specified file")
@@ -104,6 +103,17 @@ def add_dot(sub):
 def dot(args):
     depexec.dot_cmd(args.dir, args.detailed)
 
+def add_export_conseq(sub):
+    parser = sub.add_parser("export-conseq", help="export artifacts as a conseq file")
+    parser.add_argument("--out", help="Name of file to write output to. Otherwise writes to stdout")
+    parser.set_defaults(func=export_conseq)
+
+def export_conseq(args):
+    from conseq import export_cmd
+    export_cmd.export_conseq(args.dir, args.out)
+
+    #export_meta
+
 def add_export(sub):
     parser = sub.add_parser("export", help="export all artifacts to S3")
     parser.add_argument("url", help="should be of the form s3://bucket/path")
@@ -140,6 +150,8 @@ def main():
     add_dot(sub)
     add_export(sub)
     add_import(sub)
+    add_space(sub)
+    add_export_conseq(sub)
 
     args = parser.parse_args()
     if args.verbose:

@@ -165,13 +165,10 @@ class ObjSet:
         for remove_listener in self.remove_listeners:
             remove_listener(id)
 
-    def get_spaces(self, return_is_public=False):
+    def get_spaces(self, parent=None):
         c = get_cursor()
         c.execute("select name, parent from space")
-        if return_is_public:
-            return [(x[0], x[1] is None) for x in c.fetchall()]
-        else:
-            return [x[0] for x in c.fetchall()]
+        return [x[0] for x in c.fetchall() if parent is None or parent == x[1] or x[0] == parent]
 
     def select_space(self, name, create_if_missing):
         c = get_cursor()
@@ -767,8 +764,8 @@ class Template:
         #print ("create_rules, transform:",self.transform,", queries: ", self.foreach_queries)
         with timeblock(log, "create_rules({})".format(self.transform)):
             results = []
-            for space, is_public_space in obj_set.get_spaces(return_is_public=True):
-                if len(self.foreach_queries) == 0 and is_public_space:
+            for space in obj_set.get_spaces(parent=obj_set.default_space):
+                if len(self.foreach_queries) == 0 and space == obj_set.default_space:
                     bindings = [{}]
                 else:
                     bindings = self._create_rules(obj_set, space, {}, self.foreach_queries)
@@ -998,6 +995,9 @@ class Jobs:
     def select_space(self, name, create_if_missing):
         with transaction(self.db):
             return self.objects.select_space(name, create_if_missing)
+
+    def get_current_space(self):
+        return self.objects.default_space
 
     def dump(self):
         with transaction(self.db):
