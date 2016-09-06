@@ -1018,8 +1018,9 @@ def open_job_db(filename):
 
     db = sqlite3.connect(filename)
 
+    stmts = []
     if needs_create:
-        stmts = [
+        stmts.extend([
             "create table rule (id INTEGER PRIMARY KEY AUTOINCREMENT, transform STRING, key STRING)",
             "create table cur_obj (id INTEGER PRIMARY KEY AUTOINCREMENT, space string, timestamp STRING, json STRING)",
             "create table past_obj (id INTEGER PRIMARY KEY AUTOINCREMENT, space string, timestamp STRING, json STRING)",
@@ -1032,9 +1033,26 @@ def open_job_db(filename):
             "insert into settings (schema_version, default_space) values (1, 'public')",
             "create table space (name string, parent string)",
             "insert into space (name) values ('public')"
-        ]
-        for stmt in stmts:
-            db.execute(stmt)
+        ])
+    else:
+        c = db.cursor()
+        try:
+            c.execute("select schema_version from settings")
+            schema_version = c.fetchone()[0]
+        except sqlite3.OperationalError:
+            schema_version = 0
+        c.close()
+
+        if schema_version < 1:
+            stmts.extend([
+                "create table settings (schema_version integer, default_space string)",
+                "insert into settings (schema_version, default_space) values (1, 'public')",
+                "create table space (name string, parent string)",
+                "insert into space (name) values ('public')"
+            ])
+
+    for stmt in stmts:
+        db.execute(stmt)
 
     return Jobs(db)
 
