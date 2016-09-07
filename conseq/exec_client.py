@@ -695,3 +695,24 @@ class SGEExecution:
 
         return None, outputs
 
+
+#client = exec_client.create_client("default_sge", dec.properties)
+
+def assert_has_only_props(properties, names):
+    assert set(properties.keys()) == set(names), "Expected properties: {}, but got {}".format(names, properties.keys)
+
+def create_client(name, config, properties):
+    for prop in ["WORKING_DIR", "S3_STAGING_URL"]:
+        assert prop in config
+    type = properties.get('type')
+    if type == 'sge':
+        assert_has_only_props(properties, ["SGE_HOST", "SGE_PROLOGUE", "SGE_REMOTE_WORKDIR", "SGE_HELPER_PATH"])
+        return SgeExecClient(properties["SGE_HOST"],
+                             properties["SGE_PROLOGUE"],
+                             config["WORKING_DIR"],
+                             properties["SGE_REMOTE_WORKDIR"],
+                             config["S3_STAGING_URL"],
+                             properties["SGE_HELPER_PATH"])
+    else:
+        raise Exception("Unrecognized exec-profile 'type': {}".format(type))
+

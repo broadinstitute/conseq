@@ -8,7 +8,7 @@ RunStmt = namedtuple("RunStmt", ["exec_profile", "command", "script"])
 FlockInclude = namedtuple("FlockInclude", ["path"])
 FlockStmt = namedtuple("FlockStmt", ["language", "fn_prefix", "scripts"])
 TypeDefStmt = namedtuple("TypeDefStmt", "name properties")
-
+ExecProfileStmt = namedtuple("ExecProfileStmt", "name properties")
 
 class XRef:
     def __init__(self, url, obj):
@@ -22,6 +22,7 @@ class Rule:
         self.outputs = None
         self.options = []
         self.run_stmts = []
+        self.executor = "default"
         assert self.name != "" and self.name != " "
 
     @property
@@ -132,11 +133,16 @@ class Semantics(object):
                 for i in range(0,len(rest),2):
                     options.append(rest[1])
                 rule.options = options
+            elif statement[0] == "executor":
+                rule.executor = statement[1]
             else:
                 raise Exception("unknown {}".format(statement[0]))
         rule.run_stmts.extend(runs)
         #print("rule:", repr(rule))
         return rule
+
+    def exec_profile(self, ast):
+        return ExecProfileStmt(ast[1], ast[2])
 
     def r_flock_file(self, ast):
         if type(ast) == list:

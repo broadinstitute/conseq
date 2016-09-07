@@ -102,8 +102,7 @@ def format_inputs(inputs):
 
     return "".join(lines)
 
-def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, capture_output, resolver_state):
-    client = rule.client
+def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, capture_output, resolver_state, client):
     try:
         prologue = render_template(jinja2_env, config["PROLOGUE"], config)
 
@@ -146,8 +145,8 @@ def reattach(j, rules):
     for e in pending_jobs:
         if e.exec_xref != None:
             rule = rules.get_rule(e.transform)
-
-            ee = rule.client.reattach(e.exec_xref)
+            client = rules.get_client(rule.executor)
+            ee = client.reattach(e.exec_xref)
             executing.append(ee)
             log.warn("Reattaching existing job {}: {}".format(e.transform, e.exec_xref))
         else:
@@ -264,7 +263,8 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, m
                     continue
 
                 # localize paths that will be used in scripts
-                inputs, resolver_state = rule.client.preprocess_inputs(resolver, job.inputs)
+                client = rules.get_client(rule.executor)
+                inputs, resolver_state = client.preprocess_inputs(resolver, job.inputs)
 
                 # if we're required confirmation from the user, do this before we continue
                 if req_confirm:
@@ -283,7 +283,7 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, m
                 if not os.path.exists(job_dir):
                     os.makedirs(job_dir)
 
-                e = execute(job.transform, resolver, jinja2_env, exec_id, job_dir, inputs, rule, rules.get_vars(), capture_output, resolver_state)
+                e = execute(job.transform, resolver, jinja2_env, exec_id, job_dir, inputs, rule, rules.get_vars(), capture_output, resolver_state, client)
                 executing.append(e)
                 #print("updating exec {} with {}".format(e.id, e.get_external_id()))
                 j.update_exec_xref(e.id, e.get_external_id(), job_dir)
@@ -347,6 +347,7 @@ class Rules:
         self.xrefs = []
         self.objs = []
         self.types = {}
+        self.exec_clients = {"default": exec_client.LocalExecClient()}
 
     def add_xref(self, xref):
         self.xrefs.append(xref)
@@ -371,6 +372,12 @@ class Rules:
             raise Exception("Duplicate rules for {}".format(name))
         self.rule_by_name[name] = rule
 
+    def add_client(self, name, client):
+        self.exec_clients[name] = client
+
+    def get_client(self, name):
+        return self.exec_clients[name]
+
     def add_type(self, typedef):
         name = typedef.name
         if name in self.types:
@@ -383,6 +390,7 @@ class Rules:
         self.vars.update(other.vars)
         self.xrefs.extend(other.xrefs)
         self.objs.extend(other.objs)
+        self.exec_clients.update(other.exec_clients)
 
         for t in other.types.values():
             self.types.add_type(t)
@@ -398,43 +406,16 @@ def get_flock_statement(rule):
         return flock_stmts[0]
     return None
 
-from conseq import flockish
-
 def read_deps(filename, initial_vars={}):
     rules = Rules()
     for name, value in initial_vars.items():
         rules.set_var(name, value)
 
-    local_client = exec_client.LocalExecClient()
-    sge_client = None
-    flock_client = None
-
     p = parser.parse(filename)
 
-    needs_sge_client = False
-    needs_flock_client = False
     for dec in p:
-        if isinstance(dec, parser.Rule):
-            if "sge" in dec.options:
-                needs_sge_client = True
-            if get_flock_statement(dec) is not None:
-                needs_flock_client = True
-                needs_sge_client = True
-        elif isinstance(dec, parser.LetStatement):
+        if isinstance(dec, parser.LetStatement):
             rules.set_var(dec.name, dec.value)
-
-    if needs_sge_client:
-        config = rules.get_vars()
-        sge_client = exec_client.SgeExecClient(config["SGE_HOST"],
-                                               config["SGE_PROLOGUE"],
-                                               config["WORKING_DIR"],
-                                               config["SGE_REMOTE_WORKDIR"],
-                                               config["S3_STAGING_URL"],
-                                               config["SGE_HELPER_PATH"])
-
-    if needs_flock_client:
-        db_filename=config["WORKING_DIR"]+"/flock.db"
-        flock_client = flockish.FlockClient(sge_client, db_filename)
 
     for dec in p:
         if isinstance(dec, parser.XRef):
@@ -449,14 +430,11 @@ def read_deps(filename, initial_vars={}):
             rules.merge(child_rules)
         elif isinstance(dec, parser.TypeDefStmt):
             rules.add_type(dec)
+        elif isinstance(dec, parser.ExecProfileStmt):
+            client = exec_client.create_client(dec.name, dec.properties)
+            rules.add_exec_client(dec.name, client)
         else:
             assert isinstance(dec, parser.Rule)
-            if "sge" in dec.options:
-                dec.client = sge_client
-            elif get_flock_statement(dec) is not None:
-                dec.client = flock_client
-            else:
-                dec.client = local_client
             rules.set_rule(dec.name, dec)
     return rules
 

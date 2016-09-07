@@ -31,7 +31,6 @@ def test_parse_three_rules():
     assert len(r.run_stmts) == 1
 
 
-
 constrained_query = """
 rule a:
     inputs: a={"type": "number", "value": value}, b={"type": "other", "value": value}

@@ -30,7 +30,7 @@ type_def = "type" identifier "has" "{" identifier { "," identifier }* "}" ;
 expected_output_type = identifier { "?" | "+" | {} } ;
 expected_output_types = expected_output_type { "," expected_output_type }* ;
 
-run_statement = [ "using" identifier ] "run" quoted_string [ "with" quoted_string ] ;
+run_statement = "run" quoted_string [ "with" quoted_string ] ;
 
 requirement_def = identifier "=" /[0-9]+/ ;
 
@@ -38,6 +38,7 @@ rule_parameters = ("inputs" ":" input_specs |
   "outputs" ":" output_specs |
   "expect-outputs" ":" expected_output_types |
   "options" ":" identifier { "," identifier }* |
+  "executor" ":" identifier |
   "requires" ":" requirement_def { "," requirement_def }* )
   ;
 
@@ -54,4 +55,4 @@ var_stmt = "let" identifier "=" quoted_string ;
 
 include_stmt = "include" quoted_string ;
 
-declarations =  { rule | xref | include_stmt | var_stmt | add_if_missing | type_def }+  $ ;
+declarations =  { rule | xref | include_stmt | var_stmt | add_if_missing | type_def | exec_profile }+  $ ;
