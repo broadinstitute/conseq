@@ -17,7 +17,7 @@ from grako.parsing import graken, Parser
 from grako.util import re, RE_FLAGS, generic_main  # noqa
 
 
-__version__ = (2016, 6, 9, 18, 32, 29, 3)
+__version__ = (2016, 9, 7, 15, 0, 57, 2)
 
 __all__ = [
     'depfileParser',
@@ -187,26 +187,21 @@ class depfileParser(Parser):
         self._closure(block0)
 
     @graken()
-    def _r_flock_file_(self):
-        with self._choice():
-            with self._option():
-                self._token('include')
-                self._quoted_string_()
-            with self._option():
-                self._quoted_string_()
-            self._error('no available options')
-
-    @graken()
-    def _r_flock_files_(self):
-        self._r_flock_file_()
+    def _type_def_(self):
+        self._token('type')
+        self._identifier_()
+        self._token('has')
+        self._token('{')
+        self._identifier_()
 
         def block0():
             self._token(',')
-            self._r_flock_file_()
+            self._identifier_()
         self._closure(block0)
+        self._token('}')
 
     @graken()
-    def _output_type_(self):
+    def _expected_output_type_(self):
         self._identifier_()
 
         def block0():
@@ -221,16 +216,33 @@ class depfileParser(Parser):
         self._closure(block0)
 
     @graken()
-    def _output_types_(self):
-        self._output_type_()
+    def _expected_output_types_(self):
+        self._expected_output_type_()
 
         def block0():
             self._token(',')
-            self._output_type_()
-        self._positive_closure(block0)
+            self._expected_output_type_()
+        self._closure(block0)
 
     @graken()
-    def _statement_(self):
+    def _run_statement_(self):
+        with self._optional():
+            self._token('using')
+            self._identifier_()
+        self._token('run')
+        self._quoted_string_()
+        with self._optional():
+            self._token('with')
+            self._quoted_string_()
+
+    @graken()
+    def _requirement_def_(self):
+        self._identifier_()
+        self._token('=')
+        self._pattern(r'[0-9]+')
+
+    @graken()
+    def _rule_parameters_(self):
         with self._group():
             with self._choice():
                 with self._option():
@@ -242,19 +254,9 @@ class depfileParser(Parser):
                     self._token(':')
                     self._output_specs_()
                 with self._option():
-                    self._token('run')
-                    self._quoted_string_()
-                    with self._optional():
-                        self._token('with')
-                        self._quoted_string_()
-                with self._option():
-                    self._token('submit-r-flock')
-                    self._quoted_string_()
-                    self._r_flock_files_()
-                with self._option():
                     self._token('expect-outputs')
                     self._token(':')
-                    self._output_types_()
+                    self._expected_output_types_()
                 with self._option():
                     self._token('options')
                     self._token(':')
@@ -264,21 +266,30 @@ class depfileParser(Parser):
                         self._token(',')
                         self._identifier_()
                     self._closure(block0)
+                with self._option():
+                    self._token('requires')
+                    self._token(':')
+                    self._requirement_def_()
+
+                    def block1():
+                        self._token(',')
+                        self._requirement_def_()
+                    self._closure(block1)
                 self._error('no available options')
-
-    @graken()
-    def _statements_(self):
-
-        def block0():
-            self._statement_()
-        self._positive_closure(block0)
 
     @graken()
     def _rule_(self):
         self._token('rule')
         self._identifier_()
         self._token(':')
-        self._statements_()
+
+        def block0():
+            self._rule_parameters_()
+        self._closure(block0)
+
+        def block1():
+            self._run_statement_()
+        self._closure(block1)
 
     @graken()
     def _xref_(self):
@@ -292,18 +303,10 @@ class depfileParser(Parser):
         self._json_obj_()
 
     @graken()
-    def _type_def_(self):
-        self._token('type')
+    def _exec_profile_(self):
+        self._token('exec-profile')
         self._identifier_()
-        self._token('has')
-        self._token('(')
-        self._identifier_()
-
-        def block0():
-            self._token(',')
-            self._identifier_()
-        self._closure(block0)
-        self._token(')')
+        self._json_obj_()
 
     @graken()
     def _var_stmt_(self):
@@ -394,22 +397,22 @@ class depfileSemantics(object):
     def output_specs(self, ast):
         return ast
 
-    def r_flock_file(self, ast):
+    def type_def(self, ast):
         return ast
 
-    def r_flock_files(self, ast):
+    def expected_output_type(self, ast):
         return ast
 
-    def output_type(self, ast):
+    def expected_output_types(self, ast):
         return ast
 
-    def output_types(self, ast):
+    def run_statement(self, ast):
         return ast
 
-    def statement(self, ast):
+    def requirement_def(self, ast):
         return ast
 
-    def statements(self, ast):
+    def rule_parameters(self, ast):
         return ast
 
     def rule(self, ast):
@@ -421,7 +424,7 @@ class depfileSemantics(object):
     def add_if_missing(self, ast):
         return ast
 
-    def type_def(self, ast):
+    def exec_profile(self, ast):
         return ast
 
     def var_stmt(self, ast):

@@ -25,28 +25,30 @@ input_specs = input_spec { "," input_spec }* ;
 
 output_specs = json_obj { "," json_obj } ;
 
-r_flock_file = "include" quoted_string |
-    quoted_string ;
-r_flock_files = r_flock_file {"," r_flock_file}* ;
+type_def = "type" identifier "has" "{" identifier { "," identifier }* "}" ;
 
-output_type = identifier { "?" | "+" | {} } ;
-output_types = output_type { "," output_type }+ ;
+expected_output_type = identifier { "?" | "+" | {} } ;
+expected_output_types = expected_output_type { "," expected_output_type }* ;
 
-statement = ( "inputs" ":" input_specs |
+run_statement = [ "using" identifier ] "run" quoted_string [ "with" quoted_string ] ;
+
+requirement_def = identifier "=" /[0-9]+/ ;
+
+rule_parameters = ("inputs" ":" input_specs |
   "outputs" ":" output_specs |
-  "run" quoted_string [ "with" quoted_string ] |
-  "submit-r-flock" quoted_string r_flock_files |
-  "expect-outputs" ":" output_types |
-  "options" ":" identifier { "," identifier }* )  ;
-statements = { statement }+ ;
+  "expect-outputs" ":" expected_output_types |
+  "options" ":" identifier { "," identifier }* |
+  "requires" ":" requirement_def { "," requirement_def }* )
+  ;
 
-rule = "rule" identifier ":" statements ;
+rule = "rule" identifier ":" { rule_parameters } * { run_statement } * 
+;
 
 xref = "xref" url json_obj ;
 
 add_if_missing = "add-if-missing" json_obj ;
 
-type_def = "type" identifier "has" "(" identifier { "," identifier }* ")" ;
+exec_profile = "exec-profile" identifier json_obj;
 
 var_stmt = "let" identifier "=" quoted_string ;
 

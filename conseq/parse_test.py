@@ -20,10 +20,17 @@ rule square:
         conseq.publish(dict(type="squared", value=str(result)))
         \"\"\"
 """
-
 def test_parse_three_rules():
     decs = parser.parse_str(pair_of_rules)
     assert len(decs) == 3
+
+    r = decs[2]
+    assert isinstance(r, parser.Rule)
+
+    assert len(r.inputs) == 1
+    assert len(r.run_stmts) == 1
+
+
 
 constrained_query = """
 rule a:

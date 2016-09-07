@@ -70,7 +70,8 @@ def render_template(jinja2_env, template_text, config, **kwargs):
 def generate_run_stmts(job_dir, command_and_bodies, jinja2_env, config, inputs, resolver_state):
     run_stmts = []
     for i, x in enumerate(command_and_bodies):
-        command, script_body = x
+        exec_profile, command, script_body = x
+        assert exec_profile == "default"
         command, script_body = expand_run(jinja2_env, command, script_body, config, inputs)
         if script_body != None:
             formatted_script_body = textwrap.dedent(script_body)

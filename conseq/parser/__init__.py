@@ -4,7 +4,7 @@ import re
 import six
 
 QueryVariable = namedtuple("QueryVariable", ["name"])
-RunStmt = namedtuple("RunStmt", ["command", "script"])
+RunStmt = namedtuple("RunStmt", ["exec_profile", "command", "script"])
 FlockInclude = namedtuple("FlockInclude", ["path"])
 FlockStmt = namedtuple("FlockStmt", ["language", "fn_prefix", "scripts"])
 TypeDefStmt = namedtuple("TypeDefStmt", "name properties")
@@ -58,8 +58,22 @@ def unquote(s):
     raise Exception("{} does not look like a valid string".format(s))
 
 class Semantics(object):
-    def statement(self, ast):
+    def rule_parameters(self, ast):
+        #print("rule_parameters", ast)
         return tuple(ast)
+
+    def run_statement(self, ast):
+        exec_profile = "default"
+        if ast[0] == "using":
+            exec_profile = ast[1]
+            ast = ast[2:]
+
+        assert ast[0] == "run"
+        if len(ast) > 3:
+            script_body = ast[3]
+        else:
+            script_body = None
+        return RunStmt(exec_profile, ast[1], script_body)
 
     def input_spec_each(self, ast):
         inspec = InputSpec(ast[0], ast[2], False)
@@ -68,9 +82,6 @@ class Semantics(object):
     def input_spec_all(self, ast):
         inspec = InputSpec(ast[0], ast[3], True)
         return inspec
-
-    def statements(self, ast):
-        return ast
 
     def json_name_value_pair(self, ast):
         return (ast[0], ast[2])
@@ -106,20 +117,14 @@ class Semantics(object):
     def rule(self, ast):
         #print("rule", repr(ast))
         rule_name = ast[1]
-        statements = ast[3]
-        #print("rule: {}".format(repr(ast)))
+        rule_parameters = ast[3]
+        runs = ast[4]
         rule = Rule(rule_name)
-        for statement in statements:
+        for statement in rule_parameters:
             if statement[0] == "inputs":
                 rule.inputs = statement[2]
             elif statement[0] == "outputs":
                 rule.outputs = statement[2]
-            elif statement[0] == "run":
-                if len(statement) > 3:
-                    script_body = statement[3]
-                else:
-                    script_body = None
-                rule.run_stmts.append( RunStmt(statement[1], script_body) )
             elif statement[0] == "options":
                 #print("----> options", statement)
                 options = [statement[2]]
@@ -127,10 +132,9 @@ class Semantics(object):
                 for i in range(0,len(rest),2):
                     options.append(rest[1])
                 rule.options = options
-            elif statement[0] == "submit-r-flock":
-                rule.run_stmts.append( FlockStmt("R", statement[1], statement[2]) )
             else:
                 raise Exception("unknown {}".format(statement[0]))
+        rule.run_stmts.extend(runs)
         #print("rule:", repr(rule))
         return rule
 
