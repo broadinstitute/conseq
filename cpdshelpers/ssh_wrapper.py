@@ -7,6 +7,7 @@ from io import StringIO
 import getpass
 
 import logging
+import socket
 
 log = logging.getLogger(__name__)
 
@@ -66,11 +67,11 @@ class SimpleSSH:
             captured_stdout.write(buf.decode("utf-8"))
         status = chan.recv_exit_status()
         if assert_success:
-            assert status == 0, "status={}, captured_stdout={}".format(status, captured_stdout)
+            assert status == 0, "status={}, captured_stdout={}".format(status, captured_stdout.getvalue())
 
         return captured_stdout.getvalue()
 
-    def _get_client(self, host):
+    def _get_client(self, host, timeout=1, connect_attempts=5):
         if host in self.client_cache:
             client = self.client_cache[host]
         else:
@@ -84,7 +85,19 @@ class SimpleSSH:
             key_filename = os.path.expanduser("~/.ssh/id_rsa")
             if 'identityfile' in host_config:
                 key_filename = host_config['identityfile']
-            client.connect(host_config["hostname"], username=username, key_filename=key_filename)
+
+            successful_connect = False
+            for attempts in range(connect_attempts):
+                try:
+                    client.connect(host_config["hostname"], username=username, key_filename=key_filename, timeout=timeout)
+                    successful_connect = True
+                    break
+                except socket.timeout:
+                    pass
+
+            if not successful_connect:
+                raise Exception("Connect to {} failed with timeout for {} attempts".format(host_config["hostname"], connect_attempts))
+
             self.client_cache[host] = client
         assert client != None
         return client

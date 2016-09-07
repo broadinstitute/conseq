@@ -17,7 +17,7 @@ from grako.parsing import graken, Parser
 from grako.util import re, RE_FLAGS, generic_main  # noqa
 
 
-__version__ = (2016, 9, 7, 15, 0, 57, 2)
+__version__ = (2016, 9, 7, 18, 44, 0, 2)
 
 __all__ = [
     'depfileParser',
@@ -226,9 +226,6 @@ class depfileParser(Parser):
 
     @graken()
     def _run_statement_(self):
-        with self._optional():
-            self._token('using')
-            self._identifier_()
         self._token('run')
         self._quoted_string_()
         with self._optional():
@@ -266,6 +263,10 @@ class depfileParser(Parser):
                         self._token(',')
                         self._identifier_()
                     self._closure(block0)
+                with self._option():
+                    self._token('executor')
+                    self._token(':')
+                    self._identifier_()
                 with self._option():
                     self._token('requires')
                     self._token(':')
@@ -337,6 +338,8 @@ class depfileParser(Parser):
                     self._add_if_missing_()
                 with self._option():
                     self._type_def_()
+                with self._option():
+                    self._exec_profile_()
                 self._error('no available options')
         self._positive_closure(block0)
         self._check_eof()

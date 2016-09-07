@@ -431,8 +431,9 @@ def read_deps(filename, initial_vars={}):
         elif isinstance(dec, parser.TypeDefStmt):
             rules.add_type(dec)
         elif isinstance(dec, parser.ExecProfileStmt):
-            client = exec_client.create_client(dec.name, dec.properties)
-            rules.add_exec_client(dec.name, client)
+            # would like to instantiate client here, but cannot because we don't have config fully populated yet.
+            # do this after config is fully initialized
+            rules.add_client(dec.name, dec.properties)
         else:
             assert isinstance(dec, parser.Rule)
             rules.set_rule(dec.name, dec)
@@ -697,7 +698,23 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
     for obj in rules.objs:
         add_artifact_if_missing(j, obj)
 
-    executing = reattach(j, rules)
+    # finish initializing exec clients
+    for name, props in list(rules.exec_clients.items()):
+        if isinstance(props, dict):
+            props = expand_dict(jinja2_env, props, rules.get_vars())
+            client = exec_client.create_client(name, rules.get_vars(), props)
+            rules.add_client(name, client)
+
+    # Reattach or cancel jobs from previous invocation
+    reattach_existing = False
+    if reattach_existing:
+        executing = reattach(j, rules)
+    else:
+        pending_jobs = j.get_started_executions()
+        for e in pending_jobs:
+            log.warn("Canceling {} which was started from earlier execution".format(e.id))
+            j.cancel_execution(e.id)
+        executing = []
 
     # any jobs killed or other failures need to be removed so we'll attempt to re-run them
     j.cleanup_failed()

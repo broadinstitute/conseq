@@ -134,7 +134,7 @@ class Semantics(object):
                     options.append(rest[1])
                 rule.options = options
             elif statement[0] == "executor":
-                rule.executor = statement[1]
+                rule.executor = statement[2]
             else:
                 raise Exception("unknown {}".format(statement[0]))
         rule.run_stmts.extend(runs)
