@@ -205,8 +205,37 @@ def ask_user_to_cancel(j, executing):
         # as no longer running so that we don't attempt to re-attach them
         #j.cleanup_incomplete()
 
+
+def get_satisfiable_jobs(resources, pending_jobs, active_job_ids):
+    evaluating = []
+    ready = []
+
+    resources_remaining = dict(resources)
+
+    for job in pending_jobs:
+        if job.id in active_job_ids:
+            for resource, amount in job.resources.items():
+                resources_remaining[resource] -= amount
+        else:
+            evaluating.append(job)
+
+    for job in evaluating:
+        satisfiable = True
+        for resource, amount in job.resources.items():
+            if resources_remaining[resource] < amount:
+                satisfiable = False
+                break
+
+        if satisfiable:
+            for resource, amount in job.resources.items():
+                resources_remaining[resource] -= amount
+
+        ready.append(job)
+
+    return ready
+
 from conseq import xref
-def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, max_concurrent_executions, capture_output, req_confirm, maxfail):
+def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, resources, capture_output, req_confirm, maxfail):
     active_job_ids = set([e.id for e in executing])
 
     resolver = xref.Resolver(rules.vars)
@@ -240,16 +269,12 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, m
                 break
 
             did_useful_work = False
-            for job in pending_jobs:
+
+            # might be worth checking to see if the inputs are identical to previous call
+            # to avoid wasting CPU time checking to schedule over and over when resources are exhausted.
+            ready_jobs = get_satisfiable_jobs(resources, pending_jobs, active_job_ids)
+            for job in ready_jobs:
                 assert isinstance(job, dep.RuleExecution)
-
-                # if we've hit our cap on concurrent executions, just bail before spawning anything new
-                if len(executing) >= max_concurrent_executions:
-                    break
-
-                # if this job is one we're currently running, just move along
-                if job.id in active_job_ids:
-                    continue
 
                 active_job_ids.add(job.id)
                 did_useful_work = True
@@ -660,6 +685,7 @@ def print_spaces(state_dir):
 
 def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_executions, capture_output, req_confirm, config_file,
          refresh_xrefs=False, maxfail=1):
+    resources = {"cpu": max_concurrent_executions}
     jinja2_env = create_jinja2_env()
 
     if not os.path.exists(state_dir):
@@ -731,7 +757,7 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
         timestamp = datetime.datetime.now().isoformat()
         j.add_obj(timestamp, obj)
     try:
-        main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, max_concurrent_executions, capture_output, req_confirm, maxfail)
+        main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, resources, capture_output, req_confirm, maxfail)
     except FatalUserError as e:
         print("Error: {}".format(e))
         return -1

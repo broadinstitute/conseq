@@ -285,6 +285,7 @@ class RuleExecution:
         self.id = id
         self.state = state
         self.execution_id = None
+        self.resources = {"cpu": 1}
 
     def __repr__(self):
         return "<Rule {} in:{}:{} transform:{} state:{}>".format(self.space, self.id, self.inputs, self.transform, self.state)
