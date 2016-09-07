@@ -706,14 +706,18 @@ class Template:
         # props_to_fix is a list of (prop name, list of (name, propr))
         q_map = dict( [(q.variable, q) for q in queries] )
         for prop, targets in props_to_fix:
-            value = obj[prop]
-            for target_name, target_prop in targets:
-                if target_name in q_map:
-                    q = q_map[target_name]
-                    const_constraints = dict(q.const_constraints)
-                    const_constraints[target_prop] = value
-                    new_q = ForEach(q.variable, const_constraints)
-                    q_map[target_name] = new_q
+            if prop in obj.props:
+                value = obj[prop]
+                for target_name, target_prop in targets:
+                    if target_name in q_map:
+                        q = q_map[target_name]
+                        const_constraints = dict(q.const_constraints)
+                        const_constraints[target_prop] = value
+                        new_q = ForEach(q.variable, const_constraints)
+                        q_map[target_name] = new_q
+            else:
+                # if the object is missing the prop, then there's no queries that should be done
+                return [ForEach("_INVALID_", {"_INVALID_": "_INVALID_"})]
         return list(q_map.values())
 
     def _create_rules(self, obj_set, space, bindings, queries):
