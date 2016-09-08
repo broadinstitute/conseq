@@ -206,36 +206,51 @@ def ask_user_to_cancel(j, executing):
         #j.cleanup_incomplete()
 
 
-def get_satisfiable_jobs(resources, pending_jobs, active_job_ids):
-    evaluating = []
+def get_satisfiable_jobs(rules, resources_per_client, pending_jobs, executions):
+    #print("get_satisfiable_jobs", len(pending_jobs), executions)
     ready = []
 
-    resources_remaining = dict(resources)
+    # copy resources_per_client to a version we'll decrement as we consume
+    resources_remaining_per_client = dict([ (name, dict(resources)) for name, resources in resources_per_client.items()])
+    #print("max resources", resources_remaining_per_client)
+
+    def get_remaining(job):  # returns the remaining resources for the client used by a given job
+        rule = rules.get_rule(job.transform)
+        return resources_remaining_per_client[rule.executor]
+
+    for job in executions:
+        rule = rules.get_rule(job.transform)
+        resources = rule.resources
+        #print("job.id={}, active_job_ids={}".format(repr(job.id), repr(active_job_ids)))
+        resources_remaining = get_remaining(job)
+        #print("decrementing ", job.transform, rules.get_rule(job.transform).executor, resources_remaining, " by ", resources)
+        for resource, amount in resources.items():
+            resources_remaining[resource] -= amount
+
 
     for job in pending_jobs:
-        if job.id in active_job_ids:
-            for resource, amount in job.resources.items():
-                resources_remaining[resource] -= amount
-        else:
-            evaluating.append(job)
-
-    for job in evaluating:
         satisfiable = True
-        for resource, amount in job.resources.items():
+        rule = rules.get_rule(job.transform)
+        resources = rule.resources
+        resources_remaining = get_remaining(job)
+        #print("for ", job.transform, rules.get_rule(job.transform).executor, resources_remaining)
+        for resource, amount in resources.items():
             if resources_remaining[resource] < amount:
                 satisfiable = False
                 break
 
         if satisfiable:
-            for resource, amount in job.resources.items():
+            for resource, amount in resources.items():
                 resources_remaining[resource] -= amount
 
-        ready.append(job)
+            ready.append(job)
 
     return ready
 
 from conseq import xref
-def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, resources, capture_output, req_confirm, maxfail):
+def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, capture_output, req_confirm, maxfail):
+    resources_per_client = dict([ (name, client.resources) for name, client in rules.exec_clients.items()])
+
     active_job_ids = set([e.id for e in executing])
 
     resolver = xref.Resolver(rules.vars)
@@ -243,6 +258,7 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, r
     prev_msg = None
     abort = False
     interrupted = False
+    success_count = 0
     failure_count = 0
     with capture_sigint() as was_interrupted_fn:
         while not abort:
@@ -272,7 +288,7 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, r
 
             # might be worth checking to see if the inputs are identical to previous call
             # to avoid wasting CPU time checking to schedule over and over when resources are exhausted.
-            ready_jobs = get_satisfiable_jobs(resources, pending_jobs, active_job_ids)
+            ready_jobs = get_satisfiable_jobs(rules, resources_per_client, pending_jobs, executing)
             for job in ready_jobs:
                 assert isinstance(job, dep.RuleExecution)
 
@@ -327,15 +343,20 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, r
                     failure_count += 1
                 elif completion != None:
                     j.record_completed(timestamp, e.id, dep.STATUS_COMPLETED, completion)
+                    success_count += 1
 
                 did_useful_work = True
 
             if not did_useful_work:
                 time.sleep(0.5)
 
-    # interrupted and
     if len(executing) > 0:
         ask_user_to_cancel(j, executing)
+
+    log.info("%d jobs successfully executed", success_count)
+    if failure_count > 0:
+        # maybe also show summary of which jobs failed?
+        log.warn("%d jobs failed", failure_count)
 
 def _datetimefromiso(isostr):
     return datetime.datetime.strptime(isostr,"%Y-%m-%dT%H:%M:%S.%f")
@@ -372,7 +393,7 @@ class Rules:
         self.xrefs = []
         self.objs = []
         self.types = {}
-        self.exec_clients = {"default": exec_client.LocalExecClient()}
+        self.exec_clients = {}
 
     def add_xref(self, xref):
         self.xrefs.append(xref)
@@ -400,8 +421,11 @@ class Rules:
     def add_client(self, name, client):
         self.exec_clients[name] = client
 
-    def get_client(self, name):
-        return self.exec_clients[name]
+    def get_client(self, name, must=True):
+        if must:
+            return self.exec_clients[name]
+        else:
+            return self.exec_clients.get(name)
 
     def add_type(self, typedef):
         name = typedef.name
@@ -685,7 +709,6 @@ def print_spaces(state_dir):
 
 def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_executions, capture_output, req_confirm, config_file,
          refresh_xrefs=False, maxfail=1):
-    resources = {"cpu": max_concurrent_executions}
     jinja2_env = create_jinja2_env()
 
     if not os.path.exists(state_dir):
@@ -714,6 +737,10 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
         initial_config.update(load_config(config_file))
 
     rules = read_deps(depfile, initial_vars=initial_config)
+    if rules.get_client("default", must=False) is None:
+        rules.add_client("default", exec_client.LocalExecClient({}))
+    # override with max_concurrent_executions
+    rules.get_client("default").resources["slots"] = max_concurrent_executions
 
     for var, value in override_vars.items():
         rules.set_var(var, value)
@@ -757,7 +784,7 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
         timestamp = datetime.datetime.now().isoformat()
         j.add_obj(timestamp, obj)
     try:
-        main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, resources, capture_output, req_confirm, maxfail)
+        main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, capture_output, req_confirm, maxfail)
     except FatalUserError as e:
         print("Error: {}".format(e))
         return -1

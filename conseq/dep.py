@@ -285,7 +285,6 @@ class RuleExecution:
         self.id = id
         self.state = state
         self.execution_id = None
-        self.resources = {"cpu": 1}
 
     def __repr__(self):
         return "<Rule {} in:{}:{} transform:{} state:{}>".format(self.space, self.id, self.inputs, self.transform, self.state)
@@ -468,7 +467,7 @@ class Execution:
         self.job_dir = job_dir
 
     def __repr__(self):
-        return "<Rule id:{} inputs:{} outputs:{} transform:{} status:{} exec_xref:{}>".format(self.id, self.inputs, self.outputs, self.transform, self.status, self.exec_xref)
+        return "<Execution id:{} inputs:{} outputs:{} transform:{} status:{} exec_xref:{}>".format(self.id, self.inputs, self.outputs, self.transform, self.status, self.exec_xref)
 
 
 class ExecutionLog:

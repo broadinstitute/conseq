@@ -346,6 +346,9 @@ class PidProcStub:
 
 
 class LocalExecClient:
+    def __init__(self, resources):
+        self.resources = resources
+
     def reattach(self, external_ref):
         d = json.loads(external_ref)
         return Execution(d['transform'], d['id'], d['job_dir'], PidProcStub(d['pid']), d['outputs'], d['captured_stdouts'], d['desc_name'])
@@ -412,13 +415,14 @@ def push_to_cas_with_pullmap(remote, filenames):
 
 
 class SgeExecClient:
-    def __init__(self, host, sge_prologue, local_workdir, remote_workdir, remote_url, helper_path, sge_cmd_prologue):
+    def __init__(self, host, sge_prologue, local_workdir, remote_workdir, remote_url, helper_path, sge_cmd_prologue, resources):
         self.ssh_host = host
         self.sge_prologue = sge_prologue
         self.remote_workdir = remote_workdir
         self.remote_url = remote_url
         self.local_workdir = local_workdir
         self.helper_path = helper_path
+        self.resources = resources
 
         self.ssh = SimpleSSH()
 
@@ -725,18 +729,20 @@ def assert_has_only_props(properties, names):
     assert set(properties.keys()) == set(names), "Expected properties: {}, but got {}".format(names, properties.keys())
 
 def create_client(name, config, properties):
-#    for prop in ["WORKING_DIR", "S3_STAGING_URL"]:
-#        assert prop in config, "Config needs to contain {}".format(prop)
     type = properties.get('type')
     if type == 'sge':
-        assert_has_only_props(properties, ["type", "SGE_HOST", "SGE_PROLOGUE", "SGE_REMOTE_WORKDIR", "SGE_HELPER_PATH", "SGE_CMD_PROLOGUE"])
+        assert_has_only_props(properties, ["type", "SGE_HOST", "SGE_PROLOGUE", "SGE_REMOTE_WORKDIR", "SGE_HELPER_PATH", "SGE_CMD_PROLOGUE", "resources"])
         return SgeExecClient(properties["SGE_HOST"],
                              properties["SGE_PROLOGUE"],
                              config["WORKING_DIR"],
                              properties["SGE_REMOTE_WORKDIR"],
                              config["S3_STAGING_URL"],
                              properties["SGE_HELPER_PATH"],
-                             properties["SGE_CMD_PROLOGUE"])
+                             properties["SGE_CMD_PROLOGUE"],
+                             properties["resources"])
+    elif type == "local":
+        assert_has_only_props(properties, ["type", "resources"])
+        return LocalExecClient(properties['resources'])
     else:
         raise Exception("Unrecognized exec-profile 'type': {}".format(type))
 

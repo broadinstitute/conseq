@@ -24,6 +24,7 @@ class Rule:
         self.run_stmts = []
         self.executor = "default"
         assert self.name != "" and self.name != " "
+        self.resources = {"slots": 1}
 
     @property
     def language(self):
