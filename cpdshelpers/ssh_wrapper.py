@@ -48,8 +48,11 @@ class SimpleSSH:
         tfile.close()
         return result
     
-    def exec_cmd(self, host, command, echo=False, assert_success=True):
-        log.info("%s: executing %s", host, command)
+    def exec_cmd(self, host, command, echo=False, assert_success=True, logger=None):
+        if logger is None:
+            logger = log.info
+        logger("%s: executing %s", host, command)
+
         captured_stdout = StringIO()
 
         client = self._get_client(host)

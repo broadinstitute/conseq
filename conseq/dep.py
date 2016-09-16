@@ -457,8 +457,8 @@ class RuleSet:
             return None
         return rules[0]
 
-    def remove_failed(self):
-        incomplete = self._find_rule_execs("state = ?", (RE_STATUS_FAILED,))
+    def remove_unsuccessful(self):
+        incomplete = self._find_rule_execs("state in (?, ?, ?)", (RE_STATUS_FAILED, RE_STATUS_PENDING, RE_STATUS_DEFERRED))
         for rule in incomplete:
             self.remove_rule(rule.id)
 
@@ -968,9 +968,9 @@ class Jobs:
         with transaction(self.db):
             self.log.update_exec_xref(exec_id, xref, job_dir)
 
-    def cleanup_failed(self):
+    def cleanup_unsuccessful(self):
         with transaction(self.db):
-            self.rule_set.remove_failed()
+            self.rule_set.remove_unsuccessful()
             #self.log.mark_incomplete()
 
     def invalidate_rule_execution(self, transform):

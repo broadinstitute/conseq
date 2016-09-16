@@ -210,6 +210,14 @@ def ask_user_to_cancel(j, executing):
         # as no longer running so that we don't attempt to re-attach them
         #j.cleanup_incomplete()
 
+def user_says_we_should_stop(executing):
+    while True:
+        answer = input("Aborting due to failures, but there are {} jobs still running.  Terminate now (y/n)? ".format(len(executing)))
+        if (answer in ["y", "n"]):
+            break
+        print("Invalid input")
+
+    return answer == 'y'
 
 def get_satisfiable_jobs(rules, resources_per_client, pending_jobs, executions):
     #print("get_satisfiable_jobs", len(pending_jobs), executions)
@@ -297,7 +305,15 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
                 break
 
             if failure_count >= maxfail:
-                break
+                we_should_stop = True
+                if len(executing) > 0:
+                    # if we have other tasks which are still running, ask user if we really want to abort now.
+                    we_should_stop = user_says_we_should_stop(executing)
+                    if not we_should_stop:
+                        # if we're not stopping, keep going until we get another failure
+                        maxfail += 1
+                if we_should_stop:
+                    break
 
             pending_jobs = j.get_pending()
             summary = get_execution_summary(executing)
@@ -743,6 +759,10 @@ def print_spaces(state_dir):
         selected = "*" if current_space == space else " "
         print("{} {}".format(selected, space))
 
+def make_uuid():
+    import uuid
+    return uuid.uuid4().hex
+
 def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_executions, capture_output, req_confirm, config_file,
          refresh_xrefs=False, maxfail=1):
     jinja2_env = create_jinja2_env()
@@ -768,7 +788,8 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
     initial_config = dict(DL_CACHE_DIR=dlcache,
                           SCRIPT_DIR=script_dir,
                           PROLOGUE="",
-                          WORKING_DIR=state_dir)
+                          WORKING_DIR=state_dir,
+                          EXECUTION_ID=make_uuid())
     if config_file is not None:
         initial_config.update(load_config(config_file))
 
@@ -806,7 +827,9 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
         executing = []
 
     # any jobs killed or other failures need to be removed so we'll attempt to re-run them
-    j.cleanup_failed()
+    j.cleanup_unsuccessful()
+
+    assert len(j.get_pending()) == 0
 
     for dec in rules:
         assert (isinstance(dec, parser.Rule))

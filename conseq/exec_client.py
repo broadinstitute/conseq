@@ -31,7 +31,12 @@ def _tail_file(filename, line_count=20):
         for line in lines[-line_count:]:
             print(line)
 
-def log_job_output(stdout_path, stderr_path, line_count=20):
+def log_job_output(stdout_path, stderr_path, line_count=20, stdout_path_to_print=None, stderr_path_to_print=None):
+    if stdout_path_to_print is None:
+        stdout_path_to_print = stdout_path
+    if stderr_path_to_print is None:
+        stderr_path_to_print = stderr_path
+
     log.error("Dumping last {} lines of stdout ({})".format(line_count, stdout_path))
     _tail_file(stdout_path)
     log.error("Dumping last {} lines of stderr ({})".format(line_count, stderr_path))
@@ -393,6 +398,7 @@ def drop_prefix(prefix, value):
     return value[len(prefix):]
 
 def push_to_cas_with_pullmap(remote, source_and_dest):
+    source_and_dest = [ (os.path.abspath(source), dest) for source, dest in source_and_dest]
     print("push_to_cas_with_pullmap, filenames: ", source_and_dest)
     name_mapping = helper.push_to_cas(remote, [source for source, dest in source_and_dest])
 
@@ -453,7 +459,7 @@ class SgeExecClient:
         if self.sge_cmd_prologue is not None:
             qstat_command = self.sge_cmd_prologue +" ; " + qstat_command
 
-        stdout = self.ssh.exec_cmd(self.ssh_host, qstat_command)
+        stdout = self.ssh.exec_cmd(self.ssh_host, qstat_command, logger=log.debug)
 
         self.last_refresh_id += 1
 
@@ -514,6 +520,8 @@ class SgeExecClient:
                     v = new_name
                 elif isinstance(v, dict) and len(v) == 1 and "$value" in v:
                     v = v["$value"]
+                else:
+                    assert isinstance(v, str), "Expected value for {} ({}) to be a string but was {}".format(k, repr(v), type(v))
 
                 new_obj[k] = v
 
@@ -572,9 +580,10 @@ class SgeExecClient:
         source_and_dest = list(resolver_state.files_to_upload_and_download)
 
         if outputs is not None:
-            source_and_dest += [ ("write_results.py", "write_results.py") ]
+            local_write_results_path = os.path.join(local_job_dir, 'write_results.py')
+            source_and_dest += [ (local_write_results_path, "write_results.py") ]
             run_stmts += ["python write_results.py"]
-            with open("{}/write_results.py".format(local_job_dir), "wt") as fd:
+            with open(local_write_results_path, "wt") as fd:
                 fd.write("import json\n"
                          "results = {}\n"
                          "fd = open('results.json', 'wt')\n"
@@ -624,6 +633,7 @@ class SgeExecClient:
             path = os.path.join(dir, filename)
             try:
                 self.ssh.get(self.ssh_host, path, destination)
+                return "{}:{}".format(self.ssh_host, path)
             except FileNotFoundError:
                 log.warn("No file at {}:{}".format(self.ssh_host, path))
         return fetch
@@ -673,16 +683,16 @@ class SGEExecution:
         with tempfile.NamedTemporaryFile() as tmpstderr:
             with tempfile.NamedTemporaryFile() as tmpstdout:
                 log.info("Fetching error and output logs for failed job's 'helper'")
-                self.file_fetch("helper_stderr.txt", tmpstderr.name)
-                self.file_fetch("helper_stdout.txt", tmpstdout.name)
-                log_job_output(tmpstdout.name, tmpstderr.name)
+                helper_stderr_path = self.file_fetch("helper_stderr.txt", tmpstderr.name)
+                helper_stdout_path = self.file_fetch("helper_stdout.txt", tmpstdout.name)
+                log_job_output(tmpstdout.name, tmpstderr.name, stdout_path_to_print=helper_stderr_path, stderr_path_to_print=helper_stdout_path)
 
         with tempfile.NamedTemporaryFile() as tmpstderr:
             with tempfile.NamedTemporaryFile() as tmpstdout:
                 log.info("Fetching error and output logs for failed job")
-                self.file_fetch("stderr.txt", tmpstderr.name)
-                self.file_fetch("stdout.txt", tmpstdout.name)
-                log_job_output(tmpstdout.name, tmpstderr.name)
+                stderr_path = self.file_fetch("stderr.txt", tmpstderr.name)
+                stdout_path = self.file_fetch("stdout.txt", tmpstdout.name)
+                log_job_output(tmpstdout.name, tmpstderr.name, stdout_path_to_print=stdout_path, stderr_path_to_print=stderr_path)
 
         # TODO: Add dumping of stderr,stdout
 
@@ -754,8 +764,8 @@ def create_client(name, config, properties):
         return SgeExecClient(properties["SGE_HOST"],
                              properties["SGE_PROLOGUE"],
                              config["WORKING_DIR"],
-                             properties["SGE_REMOTE_WORKDIR"],
-                             config["S3_STAGING_URL"],
+                             properties["SGE_REMOTE_WORKDIR"]+"/"+config["EXECUTION_ID"],
+                             config["S3_STAGING_URL"]+"/"+config["EXECUTION_ID"],
                              properties["SGE_HELPER_PATH"],
                              properties["SGE_CMD_PROLOGUE"],
                              resources)
