@@ -109,7 +109,7 @@ def test_sge_job_write_file(tmpdir):
 
 
 ONE_REMOTE_ONE_LOCAL_CONFIG = '''
-let S3_STAGING_URL = "s3://broad-datasci/conseq-test"
+let S3_STAGING_URL = "s3://broad-datasci/conseq-test/{{config.RANDSTR}}"
 
 exec-profile sge {
     "type": "sge",
@@ -120,7 +120,7 @@ source /data2/miniconda3/bin/activate /data2/conda/depcon
 export AWS_ACCESS_KEY_ID="{{config.AWS_ACCESS_KEY_ID}}"
 export AWS_SECRET_ACCESS_KEY="{{config.AWS_SECRET_ACCESS_KEY}}"
 """,
-    "SGE_REMOTE_WORKDIR": "/data2/conseq_work",
+    "SGE_REMOTE_WORKDIR": "/data2/conseq_work/{{config.RANDSTR}}",
     "SGE_HELPER_PATH": "/data2/conda/depcon/bin/python /data2/helper.py",
     "resources": { "slots": "100" }
 }
@@ -137,7 +137,6 @@ rule a:
     run "bash" with """
     echo hello > message
     """
-
 
 rule b:
     executor: sge
@@ -157,16 +156,17 @@ rule c:
 
 from conseq.functional_test import run_conseq
 
-def get_aws_vars() :
+def get_aws_vars():
     return """
     let AWS_ACCESS_KEY_ID = "{}"
     let AWS_SECRET_ACCESS_KEY = "{}"
-    """.format(os.getenv("AWS_ACCESS_KEY_ID"), os.getenv("AWS_SECRET_ACCESS_KEY"))
+    let RANDSTR = "{}"
+    """.format(os.getenv("AWS_ACCESS_KEY_ID"), os.getenv("AWS_SECRET_ACCESS_KEY"), time.time())
 
 def test_end_to_end(tmpdir):
     s3_config = get_aws_vars()
     j = run_conseq(tmpdir, s3_config + ONE_REMOTE_ONE_LOCAL_CONFIG)
-    assert len(j.find_objs("public", {}))==2
+    assert len(j.find_objs("public", {}))==3
     objs = (j.find_objs("public", {"name": "final"}))
     assert len(objs) == 1
     assert open(objs[0]['file']["$filename"]).read() == "hello\nhello\n"

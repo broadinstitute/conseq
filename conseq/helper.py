@@ -19,7 +19,7 @@ def parse_remote(path, accesskey=None, secretaccesskey=None):
     path = m.group(2)
 
     c = S3Connection(accesskey, secretaccesskey)
-    bucket = c.get_bucket(bucket_name)
+    bucket = c.get_bucket(bucket_name, validate=False)
 
     return bucket, path
 
@@ -87,7 +87,8 @@ class Remote:
         remote_path = os.path.normpath(self.remote_path + "/" + remote)
         local_path = os.path.normpath(os.path.join(self.local_dir, local))
         # local_path = local
-
+        uploaded_url = None
+        
         if os.path.exists(local_path):
             if os.path.isfile(local_path):
                 # if it's a file, upload it
@@ -96,6 +97,7 @@ class Remote:
                     key.name = remote_path
                     log.info("Uploading file %s to %s", local, remote)
                     key.set_contents_from_filename(local_path)
+                uploaded_url = "s3://"+self.bucket.name+"/"+remote_path
             else:
                 # upload everything in the dir
                 for fn in os.listdir(local_path):
@@ -107,8 +109,12 @@ class Remote:
                             k.key = r
                             log.info("Uploading dir %s (%s to %s)", local_path, fn, fn)
                             k.set_contents_from_filename(full_fn)
+                        else:
+                            log.info("Uploading dir %s (%s to %s), skiping existing file",  local_path, fn, fn)
         elif not ignoreMissing:
             raise Exception("Could not find {}".format(local))
+        
+        return uploaded_url
 
     def download_as_str(self, remote, timeout=5):
         if remote.startswith("s3:"):
@@ -128,6 +134,7 @@ class Remote:
         remote_path = self.remote_path+"/"+remote
         k = Key(self.bucket)
         k.key = remote_path
+        log.info("Uploading %s from memory", remote_path)
         k.set_contents_from_string(text)
 
 def drop_prefix(prefix, value):
@@ -196,26 +203,32 @@ def read_config(filename):
             config[m.group(1)] = m.group(2)
     return config
 
+def publish_results(results_json_file, remote, published_files_root):
+    with open(results_json_file) as fd:
+        results = json.load(fd)
+
+    outputs_to_publish = []
+    for output in results['outputs']:
+        rewritten_output = {}
+        for k, v in output.items():
+            if isinstance(v, dict) and "$filename" in v:
+                filename = os.path.join(published_files_root, v["$filename"])
+                log.info("Uploading artifact from %s to %s", filename, filename)
+                file_url = remote.upload(filename, filename)
+                assert file_url is not None
+                rewritten_output[k] = {"$file_url": file_url}
+            else:
+                rewritten_output[k] = v
+        outputs_to_publish.append(rewritten_output)
+
+    results["outputs"] = outputs_to_publish
+    new_results_json = json.dumps(results, fd)
+    remote.upload_str(os.path.normpath(os.path.join(published_files_root, "results.json")), new_results_json)
+
 def publish_cmd(args, config):
     remote = Remote(args.remote_url, args.local_dir, config["AWS_ACCESS_KEY_ID"], config["AWS_SECRET_ACCESS_KEY"])
     published_files_root = drop_prefix(args.local_dir, os.path.abspath(os.path.dirname(args.results_json)))
-
-    with open(args.results_json) as fd:
-        results = json.load(fd)
-
-    t_published = {}
-    for k, v in results['outputs'].items():
-        if isinstance(v, dict) and "$filename" in v:
-            filename = os.path.join(published_files_root, v["$filename"])
-            file_url = remote.upload(filename, filename)
-            assert file_url is not None
-            t_published[k] = {"$file_url": file_url}
-        else:
-            t_published[k] = v
-
-    results["outputs"] = t_published
-    new_results_json = json.dumps({"outputs": t_published}, fd)
-    remote.upload_str(os.path.join(published_files_root, "results.json"), new_results_json)
+    publish_results(results_json_file, remote, published_files_root)
 
 def convert_json_mapping(d):
     result = []
@@ -271,12 +284,17 @@ def exec_cmd(args, config):
     for mapping_str in args.download:
         pull_map.append(parse_mapping_str(mapping_str))
 
-
     pull(remote, pull_map, ignoreMissing=True)
 
     exec_command_with_capture(args.command, args.stderr, args.stdout, args.retcode, args.local_dir)
 
-    push(remote, args.upload)
+    print("args.upload:", args.upload)
+    for upload in args.upload:
+        push(remote, upload)
+    if args.uploadresults:
+        results_json_file = "./results.json"
+        published_files_root = args.local_dir # drop_prefix(args.local_dir, os.path.abspath(os.path.dirname(results_json_file)))
+        publish_results(results_json_file, remote, published_files_root)
 
 def exec_command_with_capture(command, stderr_path, stdout_path, retcode_path, local_dir):
     stderr_fd = None
@@ -296,7 +314,6 @@ def exec_command_with_capture(command, stderr_path, stdout_path, retcode_path, l
         state = "success" if retcode == 0 else "failed"
         fd.write(json.dumps({"retcode": retcode, "state": state}))
         fd.close()
-
 
 def main(varg = None):
     parser = argparse.ArgumentParser("push or pull files from cloud storage")
@@ -321,11 +338,12 @@ def main(varg = None):
     exec_parser.add_argument("remote_url")
     exec_parser.add_argument("local_dir")
     exec_parser.add_argument("--download_pull_map", "-f")
-    exec_parser.add_argument("--download", "-d", nargs="*", default=[])
-    exec_parser.add_argument("--upload", "-u", nargs="*", default=[])
+    exec_parser.add_argument("--download", "-d", nargs="*", default=[], action="append")
+    exec_parser.add_argument("--upload", "-u", nargs="*", default=[], action="append")
     exec_parser.add_argument("--stdout", "-o")
     exec_parser.add_argument("--stderr", "-e")
     exec_parser.add_argument("--retcode", "-r")
+    exec_parser.add_argument("--uploadresults", action="store_true")
     exec_parser.add_argument("command", nargs=argparse.REMAINDER)
     exec_parser.set_defaults(func=exec_cmd)
 

@@ -9,6 +9,8 @@ def run_conseq(tmpdir, config, targets=[], assert_clean=True):
     with open(filename, "wt") as fd:
         fd.write(config)
 
+    print("state_dir=",state_dir)
+
     db_path = os.path.join(state_dir, "db.sqlite3")
     if assert_clean:
         assert not os.path.exists(db_path)

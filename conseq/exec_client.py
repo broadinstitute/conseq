@@ -392,10 +392,11 @@ def drop_prefix(prefix, value):
     assert value[:len(prefix)] == prefix, "prefix=%r, value=%r" % (prefix, value)
     return value[len(prefix):]
 
-def push_to_cas_with_pullmap(remote, filenames):
-    name_mapping = helper.push_to_cas(remote, filenames)
+def push_to_cas_with_pullmap(remote, source_and_dest):
+    print("push_to_cas_with_pullmap, filenames: ", source_and_dest)
+    name_mapping = helper.push_to_cas(remote, [source for source, dest in source_and_dest])
 
-    mapping = [ dict(remote="{}/{}".format(remote.remote_url, v), local=k) for k, v in name_mapping.items() ]
+    mapping = [ dict(remote="{}/{}".format(remote.remote_url, name_mapping[source]), local=dest) for source, dest in source_and_dest ]
 
     log.warn("name_mapping: %s", name_mapping)
     log.warn("mapping: %s", mapping)
@@ -485,6 +486,7 @@ class SgeExecClient:
         return status_obj.status
 
     def preprocess_inputs(self, resolver, inputs):
+        print("\n\npreprocess_inputs, before inputs: ", inputs)
         files_to_upload_and_download = []
         files_to_download = []
 
@@ -497,25 +499,25 @@ class SgeExecClient:
             obj = obj_.props
             assert isinstance(obj, dict)
 
-            print("resolve", type(obj), obj)
             new_obj = {}
             for k, v in obj.items():
                 if type(v) == dict and "$filename" in v:
-                    cur_name = os.path.abspath(v["$filename"])
+                    cur_name = v["$filename"]
                     #Need to do something to avoid collisions.  Store under working dir?  maybe temp/filename-v
                     new_name = "temp/{}.{}".format(os.path.basename(cur_name), next_file_index())
                     files_to_upload_and_download.append((cur_name, new_name))
-                    v = {"$filename": new_name}
+                    v = new_name
                 elif isinstance(v, dict) and "$file_url" in v:
                     cur_name = v["$file_url"]
                     new_name = "temp/{}.{}".format(os.path.basename(cur_name), next_file_index())
                     files_to_download.append((cur_name, new_name))
-                    v = {"$filename": new_name}
+                    v = new_name
+                elif isinstance(v, dict) and len(v) == 1 and "$value" in v:
+                    v = v["$value"]
 
-                v = flatten_value(v)
                 new_obj[k] = v
 
-            return flatten_parameters(obj)
+            return new_obj
 
         result = {}
         for bound_name, obj_or_list in inputs:
@@ -526,10 +528,14 @@ class SgeExecClient:
                 obj_ = obj_or_list
                 result[bound_name] = resolve(obj_)
 
+        print("preprocess_inputs, after inputs: ", result)
+        print("files_to_upload_and_download:",files_to_upload_and_download)
+        print("files_to_download:", files_to_download)
         return result, SGEResolveState(files_to_upload_and_download, files_to_download)
 
     def add_script(self, resolver_state, filename):
-        resolver_state.files_to_upload_and_download.append((filename, filename))
+        #assert not filename[0] == "/"
+        resolver_state.files_to_upload_and_download.append((filename, os.path.basename(filename)))
 
     def _exec_qsub(self, stdout, stderr, script_path, mem_in_mb):
         qsub_command = "qsub -l h_vmem={mem_in_mb}M -terse -o {stdout} -e {stderr} {script_path}".format(stdout=stdout, stderr=stderr, script_path=script_path, mem_in_mb=mem_in_mb)
@@ -563,10 +569,10 @@ class SgeExecClient:
         local_wrapper_path = os.path.join(local_job_dir, "wrapper.sh")
         remote_wrapper_path = os.path.join(remote_job_dir, "wrapper.sh")
 
-        filenames = [x[0] for x in resolver_state.files_to_upload_and_download]
+        source_and_dest = list(resolver_state.files_to_upload_and_download)
 
         if outputs is not None:
-            filenames += ["write_results.py"]
+            source_and_dest += [ ("write_results.py", "write_results.py") ]
             run_stmts += ["python write_results.py"]
             with open("{}/write_results.py".format(local_job_dir), "wt") as fd:
                 fd.write("import json\n"
@@ -576,12 +582,14 @@ class SgeExecClient:
                          "fd.close()\n".format(repr(dict(outputs=outputs))))
 
         remote = helper.Remote(remote_url, local_job_dir)
-        pull_map = push_to_cas_with_pullmap(remote, filenames)
+        for _, dest in source_and_dest:
+            assert dest[0] != '/'
+        pull_map = push_to_cas_with_pullmap(remote, source_and_dest)
 
         self.ssh.exec_cmd(self.ssh_host, "mkdir -p {}".format(remote_job_dir))
         helper_script = "cd {remote_job_dir}\n" \
-                        "{helper_path} exec " \
-                        "-u . -o stdout.txt -e stderr.txt -r retcode.txt -f {pull_map} " \
+                        "{helper_path} exec --uploadresults " \
+                        "-u retcode.json -u stdout.txt -u stderr.txt -o stdout.txt -e stderr.txt -r retcode.json -f {pull_map} " \
                         "{remote_url} . " \
                         "bash wrapper.sh\n".format(helper_path=self.helper_path,
                                                  remote_url = remote_url,
@@ -635,7 +643,7 @@ class SGEResolveState:
         self.files_to_download = files_to_download
 
     def add_script(self, filename):
-        self.files_to_upload_and_download.append( (filename, filename) )
+        self.files_to_upload_and_download.append( (filename, os.path.basename(filename)) )
 
 class SGEExecution:
     def __init__(self, transform, id, job_dir, sge_job_id, desc_name, client, remote, extern_ref, file_fetch):
@@ -701,12 +709,14 @@ class SGEExecution:
         if status != SGE_STATUS_COMPLETE:
             return None, None
 
-        retcode = self.remote.download_as_str("retcode.txt")
+        retcode_content = self.remote.download_as_str("retcode.json")
+        if retcode_content is not None:
+            retcode = json.loads(retcode_content)['retcode']
+        else:
+            retcode = None
 
-        # print("retcode=", repr(retcode))
-        if retcode != "0":
+        if retcode != 0:
             return("shell command failed with {}".format(repr(retcode)), None)
-        # print("okay, everything is fine")
 
         results_str = self.remote.download_as_str("results.json")
         if results_str is None:
