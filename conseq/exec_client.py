@@ -219,7 +219,7 @@ def write_wrapper_script(wrapper_path, job_dir, prologue, run_stmts, retcode_pat
         if retcode_path is not None:
             fd.write("echo $EXIT_STATUS > {retcode_path}\n".format(**locals()))
 
-def exec_script(name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name):
+def local_exec_script(name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name):
     stdout_path = os.path.join(job_dir, "stdout.txt")
     stderr_path = os.path.join(job_dir, "stderr.txt")
     # results_path = os.path.join(job_dir, "results.json")
@@ -370,8 +370,8 @@ class LocalExecClient:
                 result[bound_name] = resolve(obj_)
         return result, NullResolveState()
 
-    def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name, resolve_state):
-        return exec_script(name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name)
+    def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name, resolve_state, resources):
+        return local_exec_script(name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name)
 
 import collections
 import time
@@ -397,10 +397,11 @@ def push_to_cas_with_pullmap(remote, filenames):
 
     mapping = [ dict(remote="{}/{}".format(remote.remote_url, v), local=k) for k, v in name_mapping.items() ]
 
-    print(name_mapping)
+    log.warn("name_mapping: %s", name_mapping)
+    log.warn("mapping: %s", mapping)
     for rec in mapping:
         if rec["local"].startswith("/"):
-            rec['local'] = drop_prefix(os.path.abspath(remote.local_dir)+"/", rec['local'])
+            rec['local'] = os.path.relpath(rec['local'], remote.local_dir)
 
     mapping_str = json.dumps(dict(mapping=mapping))
     print("Mapping str: ", mapping_str)
@@ -500,7 +501,7 @@ class SgeExecClient:
             new_obj = {}
             for k, v in obj.items():
                 if type(v) == dict and "$filename" in v:
-                    cur_name = v["$filename"]
+                    cur_name = os.path.abspath(v["$filename"])
                     #Need to do something to avoid collisions.  Store under working dir?  maybe temp/filename-v
                     new_name = "temp/{}.{}".format(os.path.basename(cur_name), next_file_index())
                     files_to_upload_and_download.append((cur_name, new_name))
@@ -530,8 +531,8 @@ class SgeExecClient:
     def add_script(self, resolver_state, filename):
         resolver_state.files_to_upload_and_download.append((filename, filename))
 
-    def _exec_qsub(self, stdout, stderr, script_path):
-        qsub_command = "qsub -terse -o {stdout} -e {stderr} {script_path}".format(stdout=stdout, stderr=stderr, script_path=script_path)
+    def _exec_qsub(self, stdout, stderr, script_path, mem_in_mb):
+        qsub_command = "qsub -l h_vmem={mem_in_mb}M -terse -o {stdout} -e {stderr} {script_path}".format(stdout=stdout, stderr=stderr, script_path=script_path, mem_in_mb=mem_in_mb)
 
         if self.sge_cmd_prologue is not None:
             qsub_command = self.sge_cmd_prologue +" ; " + qsub_command
@@ -542,16 +543,17 @@ class SgeExecClient:
 
         return sge_job_id
 
-    def exec_generic_command(self, rel_job_dir, command):
+    def exec_generic_command(self, rel_job_dir, command, mem_in_mb):
         remote_job_dir = "{}/{}".format(self.remote_workdir, rel_job_dir)
 
         docker_launch_script = "{}/run.sh".format(remote_job_dir)
         script = "#!/bin/bash\n{}\n".format(" ".join(command))
         self.ssh.put_string(self.ssh_host, script, docker_launch_script)
 
-        self._exec_qsub(remote_job_dir+"/stdout.txt", remote_job_dir+"/stderr.txt", docker_launch_script)
+        self._exec_qsub(remote_job_dir+"/stdout.txt", remote_job_dir+"/stderr.txt", docker_launch_script, mem_in_mb)
 
-    def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name, resolver_state):
+    def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name, resolver_state, resources):
+        mem_in_mb = resources.get("mem", 1000)
         assert job_dir[:len(self.local_workdir)] == self.local_workdir
         rel_job_dir = job_dir[len(self.local_workdir)+1:]
 
@@ -597,12 +599,15 @@ class SgeExecClient:
         print("put", local_wrapper_path, remote_wrapper_path)
         self.ssh.put(self.ssh_host, local_wrapper_path, remote_wrapper_path)
 
-        sge_job_id = self._exec_qsub(remote_job_dir+"/helper_stdout.txt", remote_job_dir+"/helper_stderr.txt", pull_and_run_script)
+        sge_job_id = self._exec_qsub(remote_job_dir+"/helper_stdout.txt", remote_job_dir+"/helper_stderr.txt", pull_and_run_script, mem_in_mb)
 
-        extern_ref = dict(remote_url=remote_url, local_job_dir=local_job_dir, name=name,
+        extern_ref = dict(remote_url=remote_url,
+                          local_job_dir=local_job_dir,
+                          name=name,
                           id=id, job_dir=rel_job_dir,
                           sge_job_id=sge_job_id,
-                          desc_name=desc_name)
+                          desc_name=desc_name,
+                          remote_job_dir=remote_job_dir)
 
         return SGEExecution(name, id, job_dir, sge_job_id, desc_name, self, remote, extern_ref, self._mk_file_fetcher(remote_job_dir))
 
@@ -633,8 +638,8 @@ class SGEResolveState:
         self.files_to_upload_and_download.append( (filename, filename) )
 
 class SGEExecution:
-    def __init__(self, name, id, job_dir, sge_job_id, desc_name, client, remote, extern_ref, file_fetch):
-        self.name = name
+    def __init__(self, transform, id, job_dir, sge_job_id, desc_name, client, remote, extern_ref, file_fetch):
+        self.transform = transform
         self.id = id
         self.job_dir = job_dir
         self.sge_job_id = sge_job_id
@@ -729,8 +734,12 @@ def assert_has_only_props(properties, names):
     assert set(properties.keys()) == set(names), "Expected properties: {}, but got {}".format(names, properties.keys())
 
 def create_client(name, config, properties):
+    resources = {"slots": 1}
+    for k, v in properties.get("resources", {}).items():
+        resources[k] = float(v)
     type = properties.get('type')
     if type == 'sge':
+        resources['mem'] = 1e20
         assert_has_only_props(properties, ["type", "SGE_HOST", "SGE_PROLOGUE", "SGE_REMOTE_WORKDIR", "SGE_HELPER_PATH", "SGE_CMD_PROLOGUE", "resources"])
         return SgeExecClient(properties["SGE_HOST"],
                              properties["SGE_PROLOGUE"],
@@ -739,10 +748,10 @@ def create_client(name, config, properties):
                              config["S3_STAGING_URL"],
                              properties["SGE_HELPER_PATH"],
                              properties["SGE_CMD_PROLOGUE"],
-                             properties["resources"])
+                             resources)
     elif type == "local":
         assert_has_only_props(properties, ["type", "resources"])
-        return LocalExecClient(properties['resources'])
+        return LocalExecClient(resources)
     else:
         raise Exception("Unrecognized exec-profile 'type': {}".format(type))
 

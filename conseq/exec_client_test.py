@@ -13,10 +13,13 @@ from conseq import exec_client
 import os
 
 TEST_HOST = "datasci-dev"
-TEST_PROLOGUE = "use UGER"
+TEST_REMOTE_PROLOGUE = "source /broad/software/scripts/useuse\n" \
+                       "use -q Python-2.7 R-3.2\n"
+TEST_SGE_CMD_PROLOGUE = "use -q UGER"
 TEST_REMOTE_WORKDIR = "/home/unix/pmontgom/temp_conseq_work"
 TEST_REMOTE_URL_ROOT = "s3://broad-datasci/conseq-test"
 TEST_HELPER_PATH = "python /home/unix/pmontgom/helper.py"
+TEST_RESOURCES = {"mem": 10}
 
 def create_client_for(tmpdir, script, uid=None):
     workdir = str(tmpdir)
@@ -35,7 +38,9 @@ def create_client_for(tmpdir, script, uid=None):
     remote_url = TEST_REMOTE_URL_ROOT + "/" + uid
     remote_workdir = TEST_REMOTE_WORKDIR + "/" + uid
 
-    c = exec_client.SgeExecClient(TEST_HOST, TEST_PROLOGUE, workdir, remote_workdir, remote_url, TEST_HELPER_PATH)
+    print("remote_workdir=",remote_workdir)
+
+    c = exec_client.SgeExecClient(TEST_HOST, TEST_REMOTE_PROLOGUE, workdir, remote_workdir, remote_url, TEST_HELPER_PATH, TEST_SGE_CMD_PROLOGUE, TEST_RESOURCES)
     resolver_state = exec_client.SGEResolveState([("script1", "script1")],[])
     return job_dir, c, uid, resolver_state
 
@@ -44,7 +49,8 @@ def test_basic_sge_job_exec(tmpdir):
         print("run")
         """)
 
-    e = c.exec_script("name", "ID", job_dir, ["python script1"], [{"name": "banana"}], True, "", "desc", resolver_state)
+    print("resolver_state", resolver_state.files_to_upload_and_download)
+    e = c.exec_script("name", "ID", job_dir, ["python script1"], [{"name": "banana"}], True, "", "desc", resolver_state, {"mem": 10})
     while True:
         failure, output = e.get_completion()
         assert failure is None
@@ -55,14 +61,14 @@ def test_basic_sge_job_exec(tmpdir):
     assert output == [{"name": "banana"}]
 
 def test_sge_job_reattach(tmpdir):
-    job_dir, c, uid = create_client_for(tmpdir, """
+    job_dir, c, uid, resolver_state = create_client_for(tmpdir, """
         print("run")
         """)
 
-    e = c.exec_script("name", "ID", job_dir, ["python script1"], [{"name": "test_sge_job_reattach"}], True, "", "desc", exec_client.SGEResolveState([],[]))
+    e = c.exec_script("name", "ID", job_dir, ["python script1"], [{"name": "test_sge_job_reattach"}], True, "", "desc", resolver_state, {"mem": 10})
     extern_id = e.get_external_id()
 
-    _, c2, _ = create_client_for(tmpdir, None, uid)
+    _, c2, _, resolver_state = create_client_for(tmpdir, None, uid)
     e2 = c2.reattach(extern_id)
 
     while True:
@@ -75,13 +81,13 @@ def test_sge_job_reattach(tmpdir):
     assert output == [{"name": "test_sge_job_reattach"}]
 
 def test_sge_job_write_file(tmpdir):
-    job_dir, c, _ = create_client_for(tmpdir, """
+    job_dir, c, _, resolver_state = create_client_for(tmpdir, """
         fd = open("output.txt", "wt")
         fd.write("hello")
         fd.close()
         """)
 
-    e = c.exec_script("name", "ID", job_dir, ["python script1"], [{"file": {"$filename": "output.txt"}}], True, "", "desc", exec_client.SGEResolveState([],[]))
+    e = c.exec_script("name", "ID", job_dir, ["python script1"], [{"file": {"$filename": "output.txt"}}], True, "", "desc", resolver_state, {"mem": 10})
     while True:
         failure, output = e.get_completion()
         assert failure is None
@@ -103,14 +109,30 @@ def test_sge_job_write_file(tmpdir):
 
 
 ONE_REMOTE_ONE_LOCAL_CONFIG = '''
-let SGE_HOST="datasci-dev"
-let SGE_PROLOGUE=""
-let SGE_REMOTE_WORKDIR="/home/unix/pmontgom/temp_conseq_work"
-let S3_STAGING_URL="s3://broad-datasci/conseq-test"
-let SGE_HELPER_PATH="python /home/unix/pmontgom/helper.py"
+let S3_STAGING_URL = "s3://broad-datasci/conseq-test"
+
+exec-profile sge {
+    "type": "sge",
+    "SGE_HOST": "sc-master",
+    "SGE_CMD_PROLOGUE": "source /etc/profile.d/sge.sh",
+    "SGE_PROLOGUE":"""
+source /data2/miniconda3/bin/activate /data2/conda/depcon
+export AWS_ACCESS_KEY_ID="{{config.AWS_ACCESS_KEY_ID}}"
+export AWS_SECRET_ACCESS_KEY="{{config.AWS_SECRET_ACCESS_KEY}}"
+""",
+    "SGE_REMOTE_WORKDIR": "/data2/conseq_work",
+    "SGE_HELPER_PATH": "/data2/conda/depcon/bin/python /data2/helper.py",
+    "resources": { "slots": "100" }
+}
+
+#let SGE_HOST="datasci-dev"
+#let SGE_PROLOGUE=""
+#let SGE_REMOTE_WORKDIR="/home/unix/pmontgom/temp_conseq_work"
+#let S3_STAGING_URL="s3://broad-datasci/conseq-test"
+#let SGE_HELPER_PATH="python /home/unix/pmontgom/helper.py"
 
 rule a:
-    options: sge
+    executor: sge
     outputs: {"name":"a", "file":{"$filename": "message"}}
     run "bash" with """
     echo hello > message
@@ -118,10 +140,18 @@ rule a:
 
 
 rule b:
+    executor: sge
     inputs: in={"name": "a"}
+    outputs: {"name":"remote", "file":{"$filename": "remote_file"}}
+    run "bash" with """
+        cat {{ inputs.in.file }} {{ inputs.in.file }} > remote_file
+    """
+
+rule c:
+    inputs: in={"name":"remote"}
     outputs: {"name":"final", "file":{"$filename": "final"}}
     run "bash" with """
-        cat {{ inputs.in.file }} {{ inputs.in.file }} > final
+        cp {{ inputs.in.file }} final
     """
 '''
 
@@ -142,31 +172,3 @@ def test_end_to_end(tmpdir):
     assert open(objs[0]['file']["$filename"]).read() == "hello\nhello\n"
 
 
-SIMPLE_FLOCK_JOB = '''
-let SGE_HOST="datasci-dev"
-let SGE_PROLOGUE=""
-let SGE_REMOTE_WORKDIR="/home/unix/pmontgom/temp_conseq_work"
-let S3_STAGING_URL="s3://broad-datasci/conseq-test"
-let SGE_HELPER_PATH="python /home/unix/pmontgom/helper.py"
-
-rule a:
-    submit-r-flock "a" """
-        a.scatter <- function() {
-          list(inputs=seq(3), shared=NULL)
-        }
-        a.map <- function(input, shared) {
-          return(input*2)
-        }
-        a.gather <- function(files, shared) {
-          values <- sapply(files, function(fn) { readRDS(fn) } )
-          writeLines(as.character(values), "results/final.txt")
-          writeLines("{"outputs": [{"name": "final", "file": {"$filename": "results/final.txt"}}]}", "results/results.json")
-        }
-    """
-'''
-
-def test_flockish(tmpdir):
-    j = run_conseq(tmpdir, get_aws_vars() + SIMPLE_FLOCK_JOB)
-    objs = j.find_objs("public", {})
-    assert len(objs)==1
-    assert open(objs[0]['file']["$filename"]).read() == "2\n4\n6"

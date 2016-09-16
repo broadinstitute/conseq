@@ -39,6 +39,7 @@ rule_parameters = ("inputs" ":" input_specs |
   "expect-outputs" ":" expected_output_types |
   "options" ":" identifier { "," identifier }* |
   "executor" ":" identifier |
+  "resources" ":" json_obj |
   "requires" ":" requirement_def { "," requirement_def }* )
   ;
 

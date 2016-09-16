@@ -17,7 +17,7 @@ from grako.parsing import graken, Parser
 from grako.util import re, RE_FLAGS, generic_main  # noqa
 
 
-__version__ = (2016, 9, 7, 18, 44, 0, 2)
+__version__ = (2016, 9, 15, 20, 27, 16, 3)
 
 __all__ = [
     'depfileParser',
@@ -267,6 +267,10 @@ class depfileParser(Parser):
                     self._token('executor')
                     self._token(':')
                     self._identifier_()
+                with self._option():
+                    self._token('resources')
+                    self._token(':')
+                    self._json_obj_()
                 with self._option():
                     self._token('requires')
                     self._token(':')

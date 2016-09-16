@@ -54,6 +54,8 @@ class TaigaClient:
         return hash, previous_version_dsid, already_latest
 
     def upload_columnar(self, name, description, is_published, is_public, filename):
+        assert description is not None
+
         hash, previous_version_dsid, already_latest = self._handle_existing_versions(name, filename)
         if already_latest:
             print("Already exists as", previous_version_dsid)
@@ -69,10 +71,14 @@ class TaigaClient:
         print("uploading columnar", params)
         files = {'file': open(filename, 'rb')}
         r = requests.post(self.url+"/upload/columnar", files=files, data=params, headers=self.auth_headers)
+        assert str(r.status_code)[0] == "3"
+        assert not r.url.endswith("/upload/columnar")
         # scrape off the dataset id
         return r.url.split("/")[-1]
 
     def upload_tabular(self, columns, rows, name, description, is_published, is_public, data_type, format, filename):
+        assert description is not None
+
         hash, previous_version_dsid, already_latest = self._handle_existing_versions(name, filename)
         if already_latest:
             print("Already exists as", previous_version_dsid)
@@ -90,6 +96,8 @@ class TaigaClient:
         print("uploading tabular", params)
         files = {'file': open(filename, 'rb')}
         r = requests.post(self.url+"/upload/tabular", files=files, data=params, headers=self.auth_headers)
+        assert str(r.status_code)[0] == "3"
+        assert not r.url.endswith("/upload/tabular")
         # scrape off the dataset id
         return r.url.split("/")[-1]
 

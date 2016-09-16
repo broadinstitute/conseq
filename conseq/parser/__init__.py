@@ -136,6 +136,10 @@ class Semantics(object):
                 rule.options = options
             elif statement[0] == "executor":
                 rule.executor = statement[2]
+            elif statement[0] == "resources":
+                rule.resources = dict([ (k, float(v)) for k,v in statement[2].items() ])
+                if "slots" not in rule.resources:
+                    rule.resources["slots"] = 1
             else:
                 raise Exception("unknown {}".format(statement[0]))
         rule.run_stmts.extend(runs)

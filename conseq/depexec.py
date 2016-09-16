@@ -123,10 +123,15 @@ def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, captu
                 run_stmts = generate_run_stmts(job_dir, rule.run_stmts, jinja2_env, config, inputs, resolver_state)
 
                 execution = client.exec_script(name,
-                                   id,
-                                   job_dir,
-                                   run_stmts,
-                                   outputs, capture_output, prologue, desc_name, resolver_state)
+                                               id,
+                                               job_dir,
+                                               run_stmts,
+                                               outputs,
+                                               capture_output,
+                                               prologue,
+                                               desc_name,
+                                               resolver_state,
+                                               rule.resources)
         else:
             # fast path when there's no need to spawn an external process.  (mostly used by tests)
             assert outputs != None, "No body, nor outputs specified.  This rule does nothing"
@@ -247,10 +252,35 @@ def get_satisfiable_jobs(rules, resources_per_client, pending_jobs, executions):
 
     return ready
 
+class TimelineLog:
+    def __init__(self, filename):
+        if filename is not None:
+            import csv
+            is_new = not os.path.exists(filename)
+            self.fd = open(filename, "at")
+            self.w = csv.writer(self.fd)
+            if is_new:
+                self.w.writerow(["timestamp","jobid","status"])
+
+        else:
+            self.fd = None
+            self.w = None
+
+    def log(self, job_id, status):
+        if self.fd is None:
+            return
+        self.w.writerow([datetime.datetime.now().isoformat(), job_id, status])
+        self.fd.flush()
+
+    def close(self):
+        self.fd.close()
+        self.fd = None
+        self.w = None
+
 from conseq import xref
 def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, capture_output, req_confirm, maxfail):
     resources_per_client = dict([ (name, client.resources) for name, client in rules.exec_clients.items()])
-
+    timings = TimelineLog(state_dir+"/timeline.log")
     active_job_ids = set([e.id for e in executing])
 
     resolver = xref.Resolver(rules.vars)
@@ -297,12 +327,15 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
 
                 rule = rules.get_rule(job.transform)
 
+                timings.log(job.id, "preprocess_xrefs")
                 # process xrefs which might require rewriting an artifact
                 xrefs_resolved = exec_client.preprocess_xref_inputs(j, resolver, job.inputs)
                 if xrefs_resolved:
                     log.info("Resolved xrefs on rule, new version will be executed next pass")
+                    timings.log(job.id, "resolved_xrefs")
                     continue
 
+                timings.log(job.id, "preprocess_inputs")
                 # localize paths that will be used in scripts
                 client = rules.get_client(rule.executor)
                 inputs, resolver_state = client.preprocess_inputs(resolver, job.inputs)
@@ -319,6 +352,7 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
                 # maybe record_started and update_exec_xref should be merged so anything started
                 # always has an xref
                 exec_id = j.record_started(job.id)
+                timings.log(job.id, "start")
 
                 job_dir = get_job_dir(state_dir, exec_id)
                 if not os.path.exists(job_dir):
@@ -339,11 +373,13 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
                 timestamp = datetime.datetime.now().isoformat()
 
                 if failure != None:
-                    j.record_completed(timestamp, e.id, dep.STATUS_FAILED, {})
+                    job_id = j.record_completed(timestamp, e.id, dep.STATUS_FAILED, {})
                     failure_count += 1
+                    timings.log(job_id, "fail")
                 elif completion != None:
-                    j.record_completed(timestamp, e.id, dep.STATUS_COMPLETED, completion)
+                    job_id = j.record_completed(timestamp, e.id, dep.STATUS_COMPLETED, completion)
                     success_count += 1
+                    timings.log(job_id, "complete")
 
                 did_useful_work = True
 
@@ -749,7 +785,7 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
         add_xref(j, expand_xref(jinja2_env, xref, rules.vars), refresh_xrefs)
 
     for obj in rules.objs:
-        add_artifact_if_missing(j, obj)
+        add_artifact_if_missing(j, expand_dict(jinja2_env, obj, rules.vars))
 
     # finish initializing exec clients
     for name, props in list(rules.exec_clients.items()):

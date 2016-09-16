@@ -432,6 +432,7 @@ class RuleSet:
         return rule.space
 
     def completed_execution(self, execution_id, new_status):
+        # returns rule_execution_id
         assert execution_id != None
         if new_status == STATUS_COMPLETED:
             s = RE_STATUS_COMPLETE
@@ -442,6 +443,13 @@ class RuleSet:
 
         c = get_cursor()
         c.execute("update rule_execution set state = ? where execution_id = ?", (s, execution_id))
+
+        c.execute("select id from rule_execution where execution_id = ?", (execution_id, ))
+        rule_exec_id = c.fetchone()
+        if rule_exec_id is None:
+            return "norow"
+        else:
+            return rule_exec_id[0]
 
     def _get_by_execution_id(self, execution_id):
         rules = self._find_rule_execs("execution_id = ?", (execution_id,))
@@ -954,7 +962,7 @@ class Jobs:
                     obj_id = self.add_obj(space, timestamp, output)
                     interned_outputs.append( self.objects.get(obj_id) )
                 self.log.record_completed(execution_id, new_status, interned_outputs)
-                self.rule_set.completed_execution(execution_id, new_status)
+                return self.rule_set.completed_execution(execution_id, new_status)
 
     def update_exec_xref(self, exec_id, xref, job_dir):
         with transaction(self.db):

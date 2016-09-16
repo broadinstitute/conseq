@@ -155,3 +155,38 @@ Another common case is listing all of the artifacts stored in the conseq databas
 conseq ls
 ```
 
+Special key/values $file, $xref, $hash, $value
+
+Requires:
+    mem=x
+    cpu=y, capability
+    
+define named execution profiles:
+    sge: host=foo, username=y
+
+define-exec-profile foo
+    resources:
+        mem: x
+        cpu: y
+        aws
+    type: sge|local|ssh|docker|kubernetes
+    parameters:
+
+firecloud submission would be better done as a local job making an API call I think...
+
+default profile:
+    1 cpu, infinite memory
+
+resources are either: a number or a tag.  If resources are a tag, then a job marked with tag can only execute against a profile also with that tag.  (it is a nonconsumable resource but validated)
+This is a bit silly because it's suggests the config contains a bad exec-profile.  However, it might be useful in guarenteing jobs are run against the right kind of profile.  If validation fails, 
+the job should be treated as a failure.
+
+resources which have a number are consumable.  While a job is executing it holds on to a reservation of that resource.  If the resource is insufficient the job will not be considered as availible for 
+execution.  (Should do a validation that the job is requesting < the max resource.  If > that is a hard error and job should fail as opposed to wait forever)
+
+Update run syntax:
+    [using EXECPROFILE] run CMD [with CONTENT]
+
+Should I make helper.py into a go binary?  Would enable me to get/exec/put with no extra deps.  Would likely have to bake binary into image for execution on kubernettes. (On second thought, can accomplish this by having two containers, one with bin and the target container and share the bin volume)
+
+
