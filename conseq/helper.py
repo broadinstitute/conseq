@@ -308,6 +308,7 @@ def exec_command_with_capture(command, stderr_path, stdout_path, retcode_path, l
     if stdout_path is not None:
         stdout_fd = os.open(os.path.join(local_dir, stdout_path), os.O_WRONLY|os.O_APPEND|os.O_CREAT)
 
+    command = ['/usr/bin/time','-v'] + command
     log.info("executing {}".format(command))
     retcode = subprocess.call(command, stdout=stdout_fd, stderr=stderr_fd, cwd=local_dir)
     log.info("Command returned {}".format(retcode))
