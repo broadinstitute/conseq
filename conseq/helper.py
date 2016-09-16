@@ -204,6 +204,9 @@ def read_config(filename):
     return config
 
 def publish_results(results_json_file, remote, published_files_root):
+    if not os.path.exists(results_json_file):
+        log.info("Skipping publishing results back. %s does not exist", results_json_file)
+        return 
     with open(results_json_file) as fd:
         results = json.load(fd)
 
