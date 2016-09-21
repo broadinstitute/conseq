@@ -65,8 +65,10 @@ def split_props_into_key_and_other(props):
     other_props = {}
 
     for k, v in props.items():
-        if isinstance(v, dict) and len(v) == 1 and list(v.keys())[0].startswith("$"):
+        if (isinstance(v, dict) and len(v) == 1 and list(v.keys())[0].startswith("$")):
             other_props[k] = list(v.values())[0]
+        elif k=='$hash':
+            other_props[k] = v
         else:
             key_props[k] = v
 

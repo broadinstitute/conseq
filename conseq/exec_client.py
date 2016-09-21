@@ -37,9 +37,9 @@ def log_job_output(stdout_path, stderr_path, line_count=20, stdout_path_to_print
     if stderr_path_to_print is None:
         stderr_path_to_print = stderr_path
 
-    log.error("Dumping last {} lines of stdout ({})".format(line_count, stdout_path))
+    log.error("Dumping last {} lines of stdout ({})".format(line_count, stdout_path_to_print))
     _tail_file(stdout_path)
-    log.error("Dumping last {} lines of stderr ({})".format(line_count, stderr_path))
+    log.error("Dumping last {} lines of stderr ({})".format(line_count, stderr_path_to_print))
     _tail_file(stderr_path)
 
 class FailedExecutionStub:
@@ -423,11 +423,12 @@ def push_to_cas_with_pullmap(remote, source_and_dest):
 
 
 class SgeExecClient:
-    def __init__(self, host, sge_prologue, local_workdir, remote_workdir, remote_url, helper_path, sge_cmd_prologue, resources):
+    def __init__(self, host, sge_prologue, local_workdir, remote_workdir, remote_url, cas_remote_url, helper_path, sge_cmd_prologue, resources):
         self.ssh_host = host
         self.sge_prologue = sge_prologue
         self.remote_workdir = remote_workdir
         self.remote_url = remote_url
+        self.cas_remote_url = cas_remote_url
         self.local_workdir = local_workdir
         self.helper_path = helper_path
         self.resources = resources
@@ -545,8 +546,8 @@ class SgeExecClient:
         #assert not filename[0] == "/"
         resolver_state.files_to_upload_and_download.append((filename, os.path.basename(filename)))
 
-    def _exec_qsub(self, stdout, stderr, script_path, mem_in_mb):
-        qsub_command = "qsub -l h_vmem={mem_in_mb}M -terse -o {stdout} -e {stderr} {script_path}".format(stdout=stdout, stderr=stderr, script_path=script_path, mem_in_mb=mem_in_mb)
+    def _exec_qsub(self, stdout, stderr, script_path, mem_in_mb, name):
+        qsub_command = "qsub -N {name} -l h_vmem={mem_in_mb}M -terse -o {stdout} -e {stderr} {script_path}".format(name=name, stdout=stdout, stderr=stderr, script_path=script_path, mem_in_mb=mem_in_mb)
 
         if self.sge_cmd_prologue is not None:
             qsub_command = self.sge_cmd_prologue +" ; " + qsub_command
@@ -557,14 +558,14 @@ class SgeExecClient:
 
         return sge_job_id
 
-    def exec_generic_command(self, rel_job_dir, command, mem_in_mb):
+    def exec_generic_command(self, rel_job_dir, command, mem_in_mb, name):
         remote_job_dir = "{}/{}".format(self.remote_workdir, rel_job_dir)
 
         docker_launch_script = "{}/run.sh".format(remote_job_dir)
         script = "#!/bin/bash\n{}\n".format(" ".join(command))
         self.ssh.put_string(self.ssh_host, script, docker_launch_script)
 
-        self._exec_qsub(remote_job_dir+"/stdout.txt", remote_job_dir+"/stderr.txt", docker_launch_script, mem_in_mb)
+        self._exec_qsub(remote_job_dir+"/stdout.txt", remote_job_dir+"/stderr.txt", docker_launch_script, mem_in_mb, name)
 
     def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name, resolver_state, resources):
         mem_in_mb = resources.get("mem", 1000)
@@ -591,9 +592,10 @@ class SgeExecClient:
                          "fd.close()\n".format(repr(dict(outputs=outputs))))
 
         remote = helper.Remote(remote_url, local_job_dir)
+        cas_remote = helper.Remote(self.cas_remote_url, local_job_dir)
         for _, dest in source_and_dest:
             assert dest[0] != '/'
-        pull_map = push_to_cas_with_pullmap(remote, source_and_dest)
+        pull_map = push_to_cas_with_pullmap(cas_remote, source_and_dest)
 
         self.ssh.exec_cmd(self.ssh_host, "mkdir -p {}".format(remote_job_dir))
         helper_script = "cd {remote_job_dir}\n" \
@@ -616,7 +618,7 @@ class SgeExecClient:
         print("put", local_wrapper_path, remote_wrapper_path)
         self.ssh.put(self.ssh_host, local_wrapper_path, remote_wrapper_path)
 
-        sge_job_id = self._exec_qsub(remote_job_dir+"/helper_stdout.txt", remote_job_dir+"/helper_stderr.txt", pull_and_run_script, mem_in_mb)
+        sge_job_id = self._exec_qsub(remote_job_dir+"/helper_stdout.txt", remote_job_dir+"/helper_stderr.txt", pull_and_run_script, mem_in_mb, rel_job_dir)
 
         extern_ref = dict(remote_url=remote_url,
                           local_job_dir=local_job_dir,
@@ -699,6 +701,7 @@ class SGEExecution:
     def get_completion(self):
         failure, outputs = self._get_completion()
         if failure is not None:
+            log.error("SGE Job {} running {} failed".format(self.sge_job_id, self.desc_name))
             self._log_failure(failure)
         return failure, outputs
 
@@ -766,6 +769,7 @@ def create_client(name, config, properties):
                              config["WORKING_DIR"],
                              properties["SGE_REMOTE_WORKDIR"]+"/"+config["EXECUTION_ID"],
                              config["S3_STAGING_URL"]+"/"+config["EXECUTION_ID"],
+                             config["S3_STAGING_URL"],
                              properties["SGE_HELPER_PATH"],
                              properties["SGE_CMD_PROLOGUE"],
                              resources)

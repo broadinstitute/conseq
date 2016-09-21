@@ -231,3 +231,15 @@ def test_rerun_same_result(tmpdir):
     # only "c" should run this time.
     assert len(j2.get_all_executions()) == 3
 
+    j2 = run_conseq(tmpdir, """
+    rule d:
+        outputs: {"type": "thing", "$hash": "2"}
+    rule b:
+        inputs: in={"type": "thing"}
+        outputs: {"type": "otherthing"}
+    """, assert_clean=False)
+
+    # now that the has has changed, d and b should execute
+    assert len(j2.get_all_executions()) == 5
+    # however, we should only have one instance of "thing"
+    assert len(j.find_objs("public", dict(type="thing"))) == 1

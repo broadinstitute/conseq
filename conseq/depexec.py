@@ -67,6 +67,11 @@ def render_template(jinja2_env, template_text, config, **kwargs):
 
     return render_template_callback(template_text)
 
+
+def indent_str(s, depth):
+    pad = " " * depth
+    return "\n".join([pad + x for x in s.split("\n")])
+
 def generate_run_stmts(job_dir, command_and_bodies, jinja2_env, config, inputs, resolver_state):
     run_stmts = []
     for i, x in enumerate(command_and_bodies):
@@ -142,10 +147,7 @@ def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, captu
     except MissingTemplateVar as ex:
         return exec_client.FailedExecutionStub(id, ex.get_error())
 
-def reattach(j, rules):
-    pending_jobs = j.get_started_executions()
-    if len(pending_jobs) > 0:
-        log.warn("Reattaching jobs that were started in a previous invocation of conseq, but had not terminated before conseq exited: %s", pending_jobs)
+def reattach(j, rules, pending_jobs):
     executing = []
     for e in pending_jobs:
         if e.exec_xref != None:
@@ -168,6 +170,30 @@ def confirm_execution(transform, inputs):
         if not (answer in ["y", "a", "q"]):
             print("Invalid input")
         return answer
+
+def get_long_execution_summary(executing, pending):
+    from tabulate import tabulate
+    counts = collections.defaultdict(lambda: dict(count=0, dirs=[]))
+    for e in executing:
+        k = (e.get_state_label(), e.transform)
+        rec = counts[k]
+        rec['count'] += 1
+        rec['dirs'].append(e.job_dir)
+
+    for p in pending:
+        k = ("pending", p.transform)
+        rec = counts[k]
+        rec['count'] += 1
+
+    rows = []
+    for k, rec in counts.items():
+        state, transform = k
+        dirs=" ".join(rec['dirs'])
+        if len(dirs) > 30:
+            dirs = dirs[:30-4]+" ..."
+        rows.append([state, transform, rec['count'], dirs])
+    return indent_str(tabulate(rows, ["state", "transform", "count", "dirs"], tablefmt="simple"), 4)
+
 
 def get_execution_summary(executing):
     counts = collections.defaultdict(lambda: 0)
@@ -196,27 +222,37 @@ def capture_sigint():
 
     signal.signal(signal.SIGINT, original_sigint)
 
-def ask_user_to_cancel(j, executing):
+def ask_user(message, options, default=None):
+    formatted_options=[]
+    for option in options:
+        if option == default:
+            option = "["+default+"]"
+        formatted_options.append(option)
+    formatted_options = "/".join(formatted_options)
+
     while True:
-        answer = input("Terminate {} running before exiting (y/n)? ".format(len(executing)))
-        if (answer in ["y", "n"]):
+        answer = input("{} ({})? ".format(message, formatted_options))
+        if answer == "" and default is not None:
+            return default
+        if (answer in options):
             break
         print("Invalid input")
+
+    return answer
+
+
+def user_wants_reattach():
+    return ask_user("Would you like to reattach existing jobs", ["y", "n"], "y") == 'y'
+
+def ask_user_to_cancel(j, executing):
+    answer = ask_user("Terminate {} running before exiting".format(len(executing)), ["y", "n"])
 
     if answer == 'y':
         for e in executing:
             e.cancel()
-        #TODO: I think this might be here as an unfinished change.  We need to mark the jobs that were running
-        # as no longer running so that we don't attempt to re-attach them
-        #j.cleanup_incomplete()
 
 def user_says_we_should_stop(executing):
-    while True:
-        answer = input("Aborting due to failures, but there are {} jobs still running.  Terminate now (y/n)? ".format(len(executing)))
-        if (answer in ["y", "n"]):
-            break
-        print("Invalid input")
-
+    answer = ask_user("Aborting due to failures, but there are {} jobs still running.  Terminate now".format(len(executing)), ["y", "n"])
     return answer == 'y'
 
 def get_satisfiable_jobs(rules, resources_per_client, pending_jobs, executions):
@@ -317,9 +353,14 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
 
             pending_jobs = j.get_pending()
             summary = get_execution_summary(executing)
+
             msg = "%d processes running (%s), %d executions pending" % ( len(executing), summary, len(pending_jobs) )
             if prev_msg != msg:
                 log.info(msg)
+                if len(pending_jobs) + len(executing) > 0:
+                    long_summary = get_long_execution_summary(executing, pending_jobs)
+                    log.info("Summary of queue:\n%s\n", long_summary)
+
             prev_msg = msg
             if len(executing) == 0 and len(pending_jobs) == 0:
                 # now that we've completed everything, check for deferred jobs by marking them as ready.  If we have any, loop again
@@ -549,10 +590,6 @@ def ls_cmd(state_dir, space, predicates, groupby, columns):
         space = j.get_current_space()
     subset = j.find_objs(space, dict(predicates))
     subset = [o.props for o in subset]
-
-    def indent_str(s, depth):
-        pad = " "*depth
-        return "\n".join([pad + x for x in s.split("\n")])
 
     def print_table(subset, indent):
         if len(subset) > 1 and columns == None:
@@ -816,15 +853,20 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
             rules.add_client(name, client)
 
     # Reattach or cancel jobs from previous invocation
-    reattach_existing = False
-    if reattach_existing:
-        executing = reattach(j, rules)
-    else:
-        pending_jobs = j.get_started_executions()
-        for e in pending_jobs:
-            log.warn("Canceling {} which was started from earlier execution".format(e.id))
-            j.cancel_execution(e.id)
-        executing = []
+    executing = []
+    pending_jobs = j.get_started_executions()
+    if len(pending_jobs) > 0:
+        log.warn("Reattaching jobs that were started in a previous invocation of conseq, but had not terminated before conseq exited: %s", pending_jobs)
+
+        reattach_existing = user_wants_reattach()
+
+        if reattach_existing:
+            executing = reattach(j, rules, pending_jobs)
+        else:
+            pending_jobs = j.get_started_executions()
+            for e in pending_jobs:
+                log.warn("Canceling {} which was started from earlier execution".format(e.id))
+                j.cancel_execution(e.id)
 
     # any jobs killed or other failures need to be removed so we'll attempt to re-run them
     j.cleanup_unsuccessful()
