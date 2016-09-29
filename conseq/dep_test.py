@@ -4,7 +4,9 @@ def test_limit_to_rule(tmpdir):
     jobdb = str(tmpdir.join("db"))
 
     j = dep.open_job_db(jobdb)
-    j.limitStartToTemplates("template1")
+    def is_template1(inputs, transform):
+        return transform == "template1"
+    j.limitStartToTemplates([is_template1])
 
     # two templates which don't require any inputs.
     template1 = dep.Template([],[],"template1")
