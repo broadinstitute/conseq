@@ -133,6 +133,9 @@ def _import(args):
     export_cmd.import_artifacts(args.dir, args.url, args.config)
 
 def main():
+    from conseq import trace_on_demand
+    trace_on_demand.install()
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--dir', metavar="DIR", help="The directory to write working versions of files to", default="state")
     parser.add_argument('--verbose', dest='verbose', action='store_true')
