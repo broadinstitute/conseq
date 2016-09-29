@@ -706,6 +706,10 @@ class Template:
         self.predicates = predicates
         self.transform = transform
 
+    @property
+    def name(self):
+        return self.transform
+
     def _predicate_satisifed(self, bindings):
         for p in self.predicates:
             if not p.satisfied(bindings):
@@ -796,14 +800,15 @@ class Template:
             return results
 
 class RuleAndDerivativesFilter:
-    def __init__(self, templateNames, last_existing_id):
-        self.templateNames = templateNames
+    def __init__(self, rules_allowed, last_existing_id):
+        self.rules_allowed = rules_allowed
         self.last_existing_id = last_existing_id
 
     def rule_allowed(self, inputs, transform):
         # if we are executing a rule we've explictly whitelisted
-        if transform in self.templateNames:
-            return True
+        for is_allowed in self.rules_allowed:
+            if is_allowed(inputs, transform):
+                return True
 
         # or we are executing a rule which uses an object that was created since this
         # process started (implying it must have come from a whitelisted rule) then
@@ -831,17 +836,21 @@ class Jobs:
         object_history = ObjHistory()
         self.rule_set = RuleSet(object_history)
         self.rule_templates = []
+        self.rule_template_by_name = {}
         self.add_new_obj_listener(self._object_added)
         self.objects.remove_listeners.append(self._object_removed)
         self.log = ExecutionLog(object_history)
         self.rule_allowed = lambda inputs, transform: True
 
-    def limitStartToTemplates(self, templateNames):
+    def has_template(self, rule_name):
+        return rule_name in self.rule_template_by_name
+
+    def limitStartToTemplates(self, rules_allowed):
         with transaction(self.db):
             last_existing_id = self.objects.get_last_id()
             if last_existing_id is None:
                 last_existing_id = -1
-        filter = RuleAndDerivativesFilter(templateNames, last_existing_id)
+        filter = RuleAndDerivativesFilter(rules_allowed, last_existing_id)
         self.rule_allowed = filter.rule_allowed
 
     def _object_removed(self, obj):
@@ -882,6 +891,7 @@ class Jobs:
     def add_template(self, template):
         with transaction(self.db):
             self.rule_templates.append(template)
+            self.rule_template_by_name[template.name] = template
             new_rules = template.create_rules(self.objects)
             for rule in new_rules:
                 self._add_rule(*rule)

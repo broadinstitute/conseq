@@ -755,9 +755,10 @@ def create_jinja2_env():
 
 def print_rules(depfile):
     rules = read_deps(depfile)
-    for rule in rules:
-        assert (isinstance(rule, parser.Rule))
-        print(rule.name)
+    names = [rule.name for rule in rules]
+    names.sort()
+    for name in names:
+        print(name)
 
 def gc(state_dir):
     db_path = os.path.join(state_dir, "db.sqlite3")
@@ -800,6 +801,46 @@ def make_uuid():
     import uuid
     return uuid.uuid4().hex
 
+def force_execution_of_rules(j, forced_targets):
+    import re
+    rule_names = []
+    limits = []
+    for target in forced_targets:
+        # handle syntax rulename:variable=value to limit to only executions where an input had that value
+        m = re.match("([^:]+):([^.]+)\\.([^=]+)=(.*)", target)
+        if m is not None:
+            rule_name = m.group(1)
+            constraint_input = m.group(2)
+            constraint_var = m.group(3)
+            constraint_value = m.group(4)
+
+            def only_rules_with_input(inputs, rule_name, expected_rule_name=rule_name, constraint_var=constraint_var, constraint_value=constraint_value, constraint_input=constraint_input):
+                if rule_name != expected_rule_name:
+                    return False
+
+                for name, value in inputs:
+                    if name == constraint_input and constraint_var in value.props:
+                        v = value.props[constraint_var]
+                        if v == constraint_value:
+                            return True
+                return False
+
+            limits.append(only_rules_with_input)
+
+        else:
+            rule_name = target
+            limits.append(lambda inputs, name, expected_rule_name=rule_name: name == expected_rule_name)
+        rule_names.append(rule_name)
+
+    j.limitStartToTemplates(limits)
+    for rule_name in rule_names:
+        # TODO: would be better to only invalidate those that satisfied the constraint as well
+        j.invalidate_rule_execution(rule_name)
+        log.info("Cleared old executions of %s", rule_name)
+
+    return rule_names
+
+
 def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_executions, capture_output, req_confirm, config_file,
          refresh_xrefs=False, maxfail=1):
     jinja2_env = create_jinja2_env()
@@ -815,10 +856,9 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
 
     # handle case where we explicitly state some templates to execute.  Make sure nothing else executes
     if len(forced_targets) > 0:
-        j.limitStartToTemplates(forced_targets)
-        for target in forced_targets:
-            j.invalidate_rule_execution(target)
-            log.info("Cleared old executions of %s", target)
+        forced_rule_names = force_execution_of_rules(j, forced_targets)
+    else:
+        forced_rule_names = []
 
     script_dir = os.path.dirname(os.path.abspath(depfile))
 
@@ -880,6 +920,11 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
         except MissingTemplateVar as ex:
             log.error("Could not load rule {}: {}".format(dec.name, ex.get_error()))
             return -1
+
+    # now check the rules we requested exist
+    for rule_name in forced_rule_names:
+        if not (j.has_template(rule_name)):
+            raise Exception("No such rule: {}".format(rule_name))
 
     def new_object_listener(obj):
         timestamp = datetime.datetime.now().isoformat()
