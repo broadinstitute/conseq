@@ -322,18 +322,19 @@ class TimelineLog:
         self.w = None
 
 from conseq import xref
-def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, capture_output, req_confirm, maxfail):
+def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, capture_output, req_confirm, maxfail, maxstart):
     resources_per_client = dict([ (name, client.resources) for name, client in rules.exec_clients.items()])
     timings = TimelineLog(state_dir+"/timeline.log")
     active_job_ids = set([e.id for e in executing])
 
-    resolver = xref.Resolver(rules.vars)
+    resolver = xref.Resolver(state_dir, rules.vars)
 
     prev_msg = None
     abort = False
     interrupted = False
     success_count = 0
     failure_count = 0
+    start_count = 0
     with capture_sigint() as was_interrupted_fn:
         while not abort:
             interrupted = was_interrupted_fn()
@@ -344,10 +345,7 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
                 we_should_stop = True
                 if len(executing) > 0:
                     # if we have other tasks which are still running, ask user if we really want to abort now.
-                    we_should_stop = user_says_we_should_stop(executing)
-                    if not we_should_stop:
-                        # if we're not stopping, keep going until we get another failure
-                        maxfail += 1
+                    we_should_stop, maxfail = user_says_we_should_stop(failure_count, executing)
                 if we_should_stop:
                     break
 
@@ -362,11 +360,12 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
                     log.info("Summary of queue:\n%s\n", long_summary)
 
             prev_msg = msg
-            if len(executing) == 0 and len(pending_jobs) == 0:
+            cannot_start_more = (maxstart is not None and start_count >= maxstart)
+            if len(executing) == 0 and (cannot_start_more or len(pending_jobs) == 0):
                 # now that we've completed everything, check for deferred jobs by marking them as ready.  If we have any, loop again
                 j.enable_deferred()
                 deferred_jobs = len(j.get_pending())
-                if deferred_jobs > 0:
+                if deferred_jobs > 0 and not cannot_start_more:
                     log.info("Marked deferred %d executions as ready", deferred_jobs)
                     continue
                 break
@@ -378,6 +377,9 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
             ready_jobs = get_satisfiable_jobs(rules, resources_per_client, pending_jobs, executing)
             for job in ready_jobs:
                 assert isinstance(job, dep.RuleExecution)
+
+                if maxstart is not None and start_count >= maxstart:
+                    break
 
                 active_job_ids.add(job.id)
                 did_useful_work = True
@@ -845,7 +847,7 @@ def force_execution_of_rules(j, forced_targets):
 
 
 def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_executions, capture_output, req_confirm, config_file,
-         refresh_xrefs=False, maxfail=1):
+         refresh_xrefs=False, maxfail=1, maxstart=None):
     jinja2_env = create_jinja2_env()
 
     if not os.path.exists(state_dir):
@@ -933,7 +935,7 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
         timestamp = datetime.datetime.now().isoformat()
         j.add_obj(timestamp, obj)
     try:
-        main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, capture_output, req_confirm, maxfail)
+        main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, capture_output, req_confirm, maxfail, maxstart)
     except FatalUserError as e:
         print("Error: {}".format(e))
         return -1

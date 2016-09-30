@@ -67,16 +67,17 @@ def add_run(sub):
     parser.add_argument("--nocapture", action="store_true")
     parser.add_argument("--confirm", action="store_true")
     parser.add_argument("--maxfail", type=int, default=1)
+    parser.add_argument("--maxstart", type=int, default=None)
     parser.add_argument('--refresh_xrefs', help='refresh xrefs', action="store_true")
     parser.add_argument('targets', nargs='*')
-    parser.set_defaults(func=run)
+    parser.set_defaults(func=run_cmd)
 
-def run(args):
+def run_cmd(args):
     concurrent = args.concurrent
     if args.nocapture:
         concurrent = 1
     depexec.main(args.file, args.dir, args.targets, {}, concurrent, not args.nocapture, args.confirm, args.config,
-                 refresh_xrefs=args.refresh_xrefs, maxfail=args.maxfail)
+                 refresh_xrefs=args.refresh_xrefs, maxfail=args.maxfail, maxstart=args.maxstart)
 
 def add_rules(sub):
     parser = sub.add_parser("rules", help="Print the names all rules in the file")
@@ -132,6 +133,14 @@ def _import(args):
     from conseq import export_cmd
     export_cmd.import_artifacts(args.dir, args.url, args.config)
 
+def history_cmd(args):
+    depexec.print_history(args.dir)
+
+def add_history_cmd(sub):
+    parser = sub.add_parser("history", help="Print the history of all executions")
+    parser.set_defaults(func=history_cmd)
+
+
 def main():
     from conseq import trace_on_demand
     trace_on_demand.install()
@@ -155,6 +164,7 @@ def main():
     add_import(sub)
     add_space(sub)
     add_export_conseq(sub)
+    add_history_cmd(sub)
 
     args = parser.parse_args()
     if args.verbose:
