@@ -8,6 +8,8 @@ import six
 
 log = logging.getLogger(__name__)
 
+DISABLE_AUTO_CREATE_RULES = False
+
 class InstanceTemplate:
     def __init__(self, props):
         pass
@@ -162,10 +164,11 @@ class ObjSet:
         return Obj(id, space, timestamp, json.loads(_json))
 
     def remove(self, id):
+        obj = self.get(id)
         c = get_cursor()
         c.execute("delete from cur_obj where id = ?", [id])
         for remove_listener in self.remove_listeners:
-            remove_listener(id)
+            remove_listener(obj)
 
     def get_spaces(self, parent=None):
         c = get_cursor()
@@ -466,6 +469,7 @@ class RuleSet:
 
 class Execution:
     def __init__(self, id, inputs, outputs, transform, status, exec_xref, job_dir):
+        # would be nice to have a status history (list of timestamp and new status, so we could see when job start/stopped)
         assertInputsValid(inputs)
 
         self.id = id
@@ -706,6 +710,26 @@ class Template:
         self.predicates = predicates
         self.transform = transform
 
+    def is_interested_in(self, obj):
+        assert isinstance(obj, Obj), "obj is of type {}".format(type(obj))
+        props = obj.props
+        assert isinstance(props, dict)
+
+        key_value_pairs = set()
+        for k, v in obj.props.items():
+            if isinstance(v, str):
+                key_value_pairs.add( (k,v) )
+
+        for q in self.foreach_queries + self.forall_queries:
+            matched = True
+            for constraint in q.const_constraints.items():
+                if constraint not in key_value_pairs:
+                    matched = False
+                    break
+            if matched:
+                return True
+        return False
+
     @property
     def name(self):
         return self.transform
@@ -780,7 +804,7 @@ class Template:
 
     def create_rules(self, obj_set):
         #print ("create_rules, transform:",self.transform,", queries: ", self.foreach_queries)
-        with timeblock(log, "create_rules({})".format(self.transform)):
+        with timeblock(log, "create_rules({})".format(self.transform), min_time=1):
             results = []
             for space in obj_set.get_spaces(parent=obj_set.default_space):
                 if len(self.foreach_queries) == 0 and space == obj_set.default_space:
@@ -854,21 +878,25 @@ class Jobs:
         self.rule_allowed = filter.rule_allowed
 
     def _object_removed(self, obj):
-        for rule_id in self.rule_set.find_by_input(obj):
+        for rule_id in self.rule_set.find_by_input(obj.id):
             self.rule_set.remove_rule(rule_id)
 
         # forall might result in rules being recreated even without this input
         new_rules = []
-        for template in self.rule_templates:
-            new_rules.extend(template.create_rules(self.objects))
+        if not DISABLE_AUTO_CREATE_RULES:
+            for template in self.rule_templates:
+                if template.is_interested_in(obj):
+                    new_rules.extend(template.create_rules(self.objects))
 
         for space, inputs, transform in new_rules:
             self._add_rule(space, inputs, transform)
 
     def _object_added(self, obj):
         new_rules = []
-        for template in self.rule_templates:
-            new_rules.extend(template.create_rules(self.objects))
+        if not DISABLE_AUTO_CREATE_RULES:
+            for template in self.rule_templates:
+                if template.is_interested_in(obj):
+                    new_rules.extend(template.create_rules(self.objects))
 
         for space, inputs, transform in new_rules:
             self._add_rule(space, inputs, transform)
@@ -892,9 +920,17 @@ class Jobs:
         with transaction(self.db):
             self.rule_templates.append(template)
             self.rule_template_by_name[template.name] = template
+
             new_rules = template.create_rules(self.objects)
             for rule in new_rules:
                 self._add_rule(*rule)
+
+    def refresh_rules(self):
+        with transaction(self.db):
+            for template in self.rule_templates:
+                new_rules = template.create_rules(self.objects)
+                for rule in new_rules:
+                    self._add_rule(*rule)
 
     def add_obj(self, space, timestamp, obj_props, overwrite=True):
         """

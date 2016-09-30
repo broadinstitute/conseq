@@ -440,6 +440,9 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
 
                 did_useful_work = True
 
+            if dep.DISABLE_AUTO_CREATE_RULES and new_completions:
+                j.refresh_rules()
+
             if not did_useful_work:
                 time.sleep(0.5)
 
