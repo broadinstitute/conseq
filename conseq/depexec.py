@@ -812,23 +812,38 @@ def force_execution_of_rules(j, forced_targets):
     limits = []
     for target in forced_targets:
         # handle syntax rulename:variable=value to limit to only executions where an input had that value
-        m = re.match("([^:]+):([^.]+)\\.([^=]+)=(.*)", target)
+        m = re.match("([^:]+):(.*)", target)
         if m is not None:
             rule_name = m.group(1)
-            constraint_input = m.group(2)
-            constraint_var = m.group(3)
-            constraint_value = m.group(4)
+            constraints = m.group(2).split(",")
+            constraint_list = []
+            for constraint in constraints:
+                m = re.match("([^.]+)\\.([^=]+)=(.*)", constraint)
+                if m is None:
+                    raise Exception("Could not parse target {}", repr(target))
+                constraint_input = m.group(1)
+                constraint_var = m.group(2)
+                constraint_value = m.group(3)
+                constraint_list.append( (constraint_input, constraint_var, constraint_value ))
 
-            def only_rules_with_input(inputs, rule_name, expected_rule_name=rule_name, constraint_var=constraint_var, constraint_value=constraint_value, constraint_input=constraint_input):
-                if rule_name != expected_rule_name:
-                    return False
+            print(rule_name, constraint_list)
 
+            def inputs_has_constraint(inputs, constraint_var, constraint_value, constraint_input):
                 for name, value in inputs:
                     if name == constraint_input and constraint_var in value.props:
                         v = value.props[constraint_var]
                         if v == constraint_value:
                             return True
                 return False
+
+            def only_rules_with_input(inputs, rule_name, expected_rule_name=rule_name, constraint_list=constraint_list):
+                if rule_name != expected_rule_name:
+                    return False
+
+                for constraint_input, constraint_var, constraint_value in constraint_list:
+                    if not inputs_has_constraint(inputs,  constraint_var, constraint_value, constraint_input):
+                        return False
+                return True
 
             limits.append(only_rules_with_input)
 
