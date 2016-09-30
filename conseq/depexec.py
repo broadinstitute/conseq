@@ -251,9 +251,14 @@ def ask_user_to_cancel(j, executing):
         for e in executing:
             e.cancel()
 
-def user_says_we_should_stop(executing):
-    answer = ask_user("Aborting due to failures, but there are {} jobs still running.  Terminate now".format(len(executing)), ["y", "n"])
-    return answer == 'y'
+def user_says_we_should_stop(failure_count, executing):
+    answer = ask_user("Aborting due to failures {}, but there are {} jobs still running.  Terminate now".format(failure_count, len(executing)), ["y", "n", "never"])
+    if answer == "y":
+        return True, failure_count
+    elif answer == "n":
+        return False, failure_count + 1
+    else:
+        return False, 1e10
 
 def get_satisfiable_jobs(rules, resources_per_client, pending_jobs, executions):
     #print("get_satisfiable_jobs", len(pending_jobs), executions)
