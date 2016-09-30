@@ -166,9 +166,18 @@ def get_aws_vars():
 def test_end_to_end(tmpdir):
     s3_config = get_aws_vars()
     j = run_conseq(tmpdir, s3_config + ONE_REMOTE_ONE_LOCAL_CONFIG)
+
+    # verify all outputs generated
     assert len(j.find_objs("public", {}))==3
+
+    # verify the final output is intact
     objs = (j.find_objs("public", {"name": "final"}))
     assert len(objs) == 1
     assert open(objs[0]['file']["$filename"]).read() == "hello\nhello\n"
 
-
+    # verify that the artfact that went from sge -> sge did not ever get cached locally
+    objs = (j.find_objs("public", {"name": "a"}))
+    assert len(objs) == 1
+    obj = objs[0]
+    file_details = list(obj.props["file"].keys())
+    assert file_details == ["$file_url"]
