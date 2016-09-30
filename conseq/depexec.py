@@ -118,7 +118,7 @@ def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, captu
         assert isinstance(inputs, dict)
 
         log.info("Executing %s in %s with inputs:\n%s", name, job_dir, format_inputs(inputs))
-        desc_name = "{} with inputs {} ({})".format(name, inputs, job_dir)
+        desc_name = "{} with inputs {} ({})".format(name, format_inputs(inputs), job_dir)
 
         if len(rule.run_stmts) > 0:
             flock_stmt = get_flock_statement(rule)
@@ -446,9 +446,11 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
 
                 e = execute(job.transform, resolver, jinja2_env, exec_id, job_dir, inputs, rule, rules.get_vars(), capture_output, resolver_state, client)
                 executing.append(e)
-                #print("updating exec {} with {}".format(e.id, e.get_external_id()))
                 j.update_exec_xref(e.id, e.get_external_id(), job_dir)
+                start_count += 1
 
+            # now poll the jobs which are running and look for which have completed
+            new_completions = False
             for i, e in reversed(list(enumerate(executing))):
                 failure, completion = e.get_completion()
 
@@ -465,6 +467,7 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
                 elif completion != None:
                     job_id = j.record_completed(timestamp, e.id, dep.STATUS_COMPLETED, completion)
                     success_count += 1
+                    new_completions = True
                     timings.log(job_id, "complete")
 
                 did_useful_work = True
@@ -959,8 +962,15 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
     # finish initializing exec clients
     for name, props in list(rules.exec_clients.items()):
         if isinstance(props, dict):
-            props = expand_dict(jinja2_env, props, rules.get_vars())
-            client = exec_client.create_client(name, rules.get_vars(), props)
+            config = rules.get_vars()
+            props = expand_dict(jinja2_env, props, config)
+
+            class VirtualDict():
+                def __getitem__(self, key):
+                    value = rules.get_vars()[key]
+                    return render_template(jinja2_env, value, config)
+
+            client = exec_client.create_client(name, VirtualDict(), props)
             rules.add_client(name, client)
 
     # Reattach or cancel jobs from previous invocation

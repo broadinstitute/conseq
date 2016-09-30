@@ -70,7 +70,6 @@ class SuccessfulExecutionStub:
 #         with open(retcode_file, "wt") as fd:
 #             fd.write("0")
 
-
 # returns None if no errors were found.  Else returns a string with the error to report to the user
 def validate_result_json_obj(obj, types):
     if not ("outputs" in obj):
@@ -201,6 +200,7 @@ class Execution:
         return None, outputs
 
 def write_wrapper_script(wrapper_path, job_dir, prologue, run_stmts, retcode_path):
+    job_dir = os.path.abspath(job_dir)
     with open(wrapper_path, "wt") as fd:
         fd.write("set -ex\n")
         fd.write("cd {job_dir}\n".format(**locals()))
@@ -256,30 +256,28 @@ def local_exec_script(name, id, job_dir, run_stmts, outputs, capture_output, pro
 
     return Execution(name, id, job_dir, proc, outputs, captured_stdouts, desc_name)
 
-def needs_url_fetch(obj):
-    for v in obj.values():
-        if isinstance(v, dict) and "$file_url" in v:
-            return True
-    return False
-
-def needs_resolution(obj):
-    if not ("$xref_url" in obj):
-        return False
-    for v in obj.values():
-        if isinstance(v, dict) and "$value" in v:
-            return False
-    return True
 
 def fetch_urls(obj, resolver):
+    assert isinstance(obj, dict)
     new_obj = {}
     for k,v in obj.items():
         if isinstance(v, dict) and "$file_url" in v:
             url = v["$file_url"]
             filename = resolver.resolve(url)['filename']
-            new_obj[k] = {"$filename": filename}
+            new_obj[k] = filename
         else:
             new_obj[k] = v
     return new_obj
+
+
+def needs_resolution(obj):
+    if not ("$xref_url" in obj):
+        return False
+    # Just noticed this.  weird, isn't it?  I think this should _probably_ be removed.
+    for v in obj.values():
+        if isinstance(v, dict) and "$value" in v:
+            return False
+    return True
 
 def flatten_value(v):
     if isinstance(v, dict) and len(v) == 1 and "$value" in v:
@@ -289,6 +287,7 @@ def flatten_value(v):
     return v
 
 def flatten_parameters(d):
+    "make dictionary into simple (string, string) pairs by handling $value and $filename special cases"
     pairs = []
     for k, v in d.items():
         v = flatten_value(v)
@@ -302,10 +301,8 @@ def preprocess_xref_inputs(j, resolver, inputs):
         assert isinstance(obj_, dep.Obj)
         obj = obj_.props
         obj_copy = None
-        if needs_url_fetch(obj):
-            obj_copy = fetch_urls(obj, resolver)
 
-        elif needs_resolution(obj):
+        if needs_resolution(obj):
             extra_params = resolver.resolve(obj["$xref_url"])
             obj_copy = dict(obj)
             for k, v in extra_params.items():
@@ -363,6 +360,7 @@ class LocalExecClient:
             assert isinstance(obj_, dep.Obj)
             obj = obj_.props
             assert isinstance(obj, dict)
+            obj = fetch_urls(obj, resolver)
             return flatten_parameters(obj)
 
         result = {}
@@ -397,12 +395,16 @@ def drop_prefix(prefix, value):
     assert value[:len(prefix)] == prefix, "prefix=%r, value=%r" % (prefix, value)
     return value[len(prefix):]
 
-def push_to_cas_with_pullmap(remote, source_and_dest):
+def push_to_cas_with_pullmap(remote, source_and_dest, url_and_dest):
     source_and_dest = [ (os.path.abspath(source), dest) for source, dest in source_and_dest]
-    print("push_to_cas_with_pullmap, filenames: ", source_and_dest)
+    log.debug("push_to_cas_with_pullmap, filenames: %s", source_and_dest)
     name_mapping = helper.push_to_cas(remote, [source for source, dest in source_and_dest])
 
-    mapping = [ dict(remote="{}/{}".format(remote.remote_url, name_mapping[source]), local=dest) for source, dest in source_and_dest ]
+    mapping = [ dict(remote="{}/{}".format(remote.remote_url, name_mapping[source]), local=dest)
+                for source, dest in source_and_dest ]
+
+    mapping += [dict(remote=src_url, local=dest)
+                for src_url, dest in url_and_dest ]
 
     log.warn("name_mapping: %s", name_mapping)
     log.warn("mapping: %s", mapping)
@@ -411,7 +413,7 @@ def push_to_cas_with_pullmap(remote, source_and_dest):
             rec['local'] = os.path.relpath(rec['local'], remote.local_dir)
 
     mapping_str = json.dumps(dict(mapping=mapping))
-    print("Mapping str: ", mapping_str)
+    log.debug("Mapping str: %s", mapping_str)
     fd = tempfile.NamedTemporaryFile(mode="wt")
     fd.write(mapping_str)
     fd.flush()
@@ -424,6 +426,7 @@ def push_to_cas_with_pullmap(remote, source_and_dest):
 
 class SgeExecClient:
     def __init__(self, host, sge_prologue, local_workdir, remote_workdir, remote_url, cas_remote_url, helper_path, sge_cmd_prologue, resources):
+        assert "{{" not in cas_remote_url
         self.ssh_host = host
         self.sge_prologue = sge_prologue
         self.remote_workdir = remote_workdir
@@ -493,7 +496,7 @@ class SgeExecClient:
         return status_obj.status
 
     def preprocess_inputs(self, resolver, inputs):
-        print("\n\npreprocess_inputs, before inputs: ", inputs)
+        log.debug("preprocess_inputs, before inputs: %s", inputs)
         files_to_upload_and_download = []
         files_to_download = []
 
@@ -537,9 +540,9 @@ class SgeExecClient:
                 obj_ = obj_or_list
                 result[bound_name] = resolve(obj_)
 
-        print("preprocess_inputs, after inputs: ", result)
-        print("files_to_upload_and_download:",files_to_upload_and_download)
-        print("files_to_download:", files_to_download)
+        log.debug("preprocess_inputs, after inputs: %s", result)
+        log.debug("files_to_upload_and_download: %s",files_to_upload_and_download)
+        log.debug("files_to_download: %s", files_to_download)
         return result, SGEResolveState(files_to_upload_and_download, files_to_download)
 
     def add_script(self, resolver_state, filename):
@@ -595,7 +598,7 @@ class SgeExecClient:
         cas_remote = helper.Remote(self.cas_remote_url, local_job_dir)
         for _, dest in source_and_dest:
             assert dest[0] != '/'
-        pull_map = push_to_cas_with_pullmap(cas_remote, source_and_dest)
+        pull_map = push_to_cas_with_pullmap(cas_remote, source_and_dest, resolver_state.files_to_download)
 
         self.ssh.exec_cmd(self.ssh_host, "mkdir -p {}".format(remote_job_dir))
         helper_script = "cd {remote_job_dir}\n" \
@@ -615,7 +618,7 @@ class SgeExecClient:
 
         write_wrapper_script(local_wrapper_path, remote_job_dir, prologue, run_stmts, None)
 
-        print("put", local_wrapper_path, remote_wrapper_path)
+        log.debug("put %s %s", local_wrapper_path, remote_wrapper_path)
         self.ssh.put(self.ssh_host, local_wrapper_path, remote_wrapper_path)
 
         sge_job_id = self._exec_qsub(remote_job_dir+"/helper_stdout.txt", remote_job_dir+"/helper_stderr.txt", pull_and_run_script, mem_in_mb, rel_job_dir)
@@ -712,7 +715,7 @@ class SGEExecution:
                 v = {"$file_url": self.remote.remote_url+"/"+v["$filename"]}
             new_artifact[k] = v
 
-        print("translated %r -> %r"% (artifact, new_artifact))
+        log.debug("translated %r -> %r", artifact, new_artifact)
 
         return new_artifact
 
@@ -756,14 +759,16 @@ class SGEExecution:
 def assert_has_only_props(properties, names):
     assert set(properties.keys()) == set(names), "Expected properties: {}, but got {}".format(names, properties.keys())
 
-def create_client(name, config, properties):
+
+def create_client(name, config, properties, ):
     resources = {"slots": 1}
     for k, v in properties.get("resources", {}).items():
         resources[k] = float(v)
     type = properties.get('type')
     if type == 'sge':
         resources['mem'] = 1e20
-        assert_has_only_props(properties, ["type", "SGE_HOST", "SGE_PROLOGUE", "SGE_REMOTE_WORKDIR", "SGE_HELPER_PATH", "SGE_CMD_PROLOGUE", "resources"])
+        expected_props = ["type", "SGE_HOST", "SGE_PROLOGUE", "SGE_REMOTE_WORKDIR", "SGE_HELPER_PATH", "SGE_CMD_PROLOGUE", "resources"]
+        assert_has_only_props(properties, expected_props)
         return SgeExecClient(properties["SGE_HOST"],
                              properties["SGE_PROLOGUE"],
                              config["WORKING_DIR"],
