@@ -379,6 +379,28 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
 
             # might be worth checking to see if the inputs are identical to previous call
             # to avoid wasting CPU time checking to schedule over and over when resources are exhausted.
+
+            # also, the current design has an issue when rerunning part of of the execution tree.  Imagine
+            # rule "A" produces "a1", "b1", and "c1", rule "T" transforms "a1" to "a2", "b1" to "b2, and "c1" to "c2".
+            # Lastly rule F takes in a2, b2, and c2 and produces "f".
+            # Now, everything is great if starting from a clean slate.  But we've run once, in the artifact db we have
+            # a1, a2, b1, b2, c1, c2, f.   If we then rerun T, then we'll get the following executions:  (new objects denoted with
+            # "*", old objects from previous run have no star.)
+            # T(a1) -> a2*
+            # F(a2*, b2, c2) -> f*
+            # T(b1) -> b2*
+            # F(a2*, b2*, c2) -> f*
+            # T(c1) -> c2*
+            # F(a2*, b2*, c2*) -> f*
+            #
+            # So in the end the right thing would get done.  However, we've run F three times as many as necessary.  If we
+            # had a priority queue for work, then we could just set each rule execution priority to be the max(input.id)
+            # That would force a breadth-first execution of the graph.  However, since jobs can execute in parallel,
+            # priortizing is not enough.  (And we can't block based on priority or there'd be no parallelism!)
+            #
+            # ultimately, I don't think there's a shortcut, and we may need to check the DAG from the previous execution to see
+            # if ancestor node is being re-executed, if so, prune that pending rule execution from the pending list until that
+            # task is done.
             ready_jobs = get_satisfiable_jobs(rules, resources_per_client, pending_jobs, executing)
             for job in ready_jobs:
                 assert isinstance(job, dep.RuleExecution)
