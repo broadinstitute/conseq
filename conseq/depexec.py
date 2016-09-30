@@ -613,6 +613,30 @@ def read_deps(filename, initial_vars={}):
             rules.set_rule(dec.name, dec)
     return rules
 
+def print_history(state_dir):
+    j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
+    for exec in j.get_all_executions():
+
+        lines = []
+        lines.append("  inputs:")
+        for name, value in exec.inputs:
+            lines.append("    {}:".format(name))
+            for k, v in value.props.items():
+                lines.append("      {}: {}".format(k, v))
+
+        if len(exec.outputs) > 0:
+            lines.append("  outputs:")
+            for value in exec.outputs:
+                for k, v in value.props.items():
+                    lines.append("    {}: {}".format(k, v))
+
+        print("rule {}: (execution id: {}, status: {})".format(exec.transform, exec.id, exec.status))
+        for line in lines:
+            print(line)
+
+        print("")
+#        print(exec)
+
 def ls_cmd(state_dir, space, predicates, groupby, columns):
     from tabulate import tabulate
     from conseq import depquery
