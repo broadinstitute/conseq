@@ -472,8 +472,8 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
 
                 did_useful_work = True
 
-            if dep.DISABLE_AUTO_CREATE_RULES and new_completions:
-                j.refresh_rules()
+            #if dep.DISABLE_AUTO_CREATE_RULES and new_completions:
+            j.refresh_rules()
 
             if not did_useful_work:
                 time.sleep(0.5)
@@ -522,6 +522,10 @@ class Rules:
         self.objs = []
         self.types = {}
         self.exec_clients = {}
+        self.remember_executed = []
+
+    def add_remember_executed(self, value):
+        self.remember_executed.append(value)
 
     def add_xref(self, xref):
         self.xrefs.append(xref)
@@ -568,6 +572,7 @@ class Rules:
         self.xrefs.extend(other.xrefs)
         self.objs.extend(other.objs)
         self.exec_clients.update(other.exec_clients)
+        self.remember_executed.extend(other.remember_executed)
 
         for t in other.types.values():
             self.types.add_type(t)
@@ -597,6 +602,8 @@ def read_deps(filename, initial_vars={}):
     for dec in p:
         if isinstance(dec, parser.XRef):
             rules.add_xref(dec)
+        elif isinstance(dec, parser.RememberExecutedStmt):
+            rules.add_remember_executed(dec)
         elif isinstance(dec, parser.AddIfMissingStatement):
             rules.add_if_missing(dec.json_obj)
         elif isinstance(dec, parser.LetStatement):
@@ -623,9 +630,12 @@ def print_history(state_dir):
         lines = []
         lines.append("  inputs:")
         for name, value in exec.inputs:
+            if isinstance(value, dep.Obj):
+                value = [value]
             lines.append("    {}:".format(name))
-            for k, v in value.props.items():
-                lines.append("      {}: {}".format(k, v))
+            for _value in value:
+                for k, v in _value.props.items():
+                    lines.append("      {}: {}".format(k, v))
 
         if len(exec.outputs) > 0:
             lines.append("  outputs:")
@@ -640,9 +650,29 @@ def print_history(state_dir):
         print("")
 #        print(exec)
 
+def localize_cmd(state_dir, space, predicates, depfile, config_file):
+    initial_config = _load_initial_config(state_dir, depfile, config_file)
+    rules = read_deps(depfile, initial_vars=initial_config)
+
+    resolver = xref.Resolver(state_dir, rules.vars)
+
+    j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
+    if space is None:
+        space = j.get_current_space()
+    subset = j.find_objs(space, dict(predicates))
+    for obj in subset:
+        for k, v in obj.props.items():
+            if isinstance(v, dict) and "$file_url" in v:
+                url = v["$file_url"]
+                r = resolver.resolve(url)
+                log.info("resolved %s to %s", url, r)
+
+
 def ls_cmd(state_dir, space, predicates, groupby, columns):
     from tabulate import tabulate
     from conseq import depquery
+
+    cache_db = xref.open_cache_db(state_dir)
 
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
     if space is None:
@@ -667,7 +697,15 @@ def ls_cmd(state_dir, space, predicates, groupby, columns):
 
         variable_table = []
         for row in subset:
-            variable_table.append( [row.get(k) for k in variable_keys] )
+            full_row = []
+            for k in variable_keys:
+                v = row.get(k)
+                if isinstance(v, dict) and "$file_url" in v:
+                    cache_rec = cache_db.get(v["$file_url"])
+                    if cache_rec is not None:
+                        v = {"$filename": cache_rec[0]}
+                full_row.append(str(v))
+            variable_table.append( full_row )
         print(indent_str(tabulate(variable_table, variable_keys, tablefmt="simple"), indent))
 
     if groupby == None:
@@ -914,6 +952,25 @@ def force_execution_of_rules(j, forced_targets):
 
     return rule_names
 
+def _get_dlcache_dir(state_dir):
+    dlcache = os.path.join(state_dir, 'dlcache')
+    if not os.path.exists(dlcache):
+        os.makedirs(dlcache)
+    return dlcache
+
+def _load_initial_config(state_dir, depfile, config_file):
+    dlcache = _get_dlcache_dir(state_dir)
+    script_dir = os.path.dirname(os.path.abspath(depfile))
+    initial_config = dict(DL_CACHE_DIR=dlcache,
+                          SCRIPT_DIR=script_dir,
+                          PROLOGUE="",
+                          WORKING_DIR=state_dir,
+                          EXECUTION_ID=make_uuid())
+
+    if config_file is not None:
+        initial_config.update(load_config(config_file))
+
+    return initial_config
 
 def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_executions, capture_output, req_confirm, config_file,
          refresh_xrefs=False, maxfail=1, maxstart=None):
@@ -922,9 +979,6 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
     if not os.path.exists(state_dir):
         os.makedirs(state_dir)
 
-    dlcache = os.path.join(state_dir, 'dlcache')
-    if not os.path.exists(dlcache):
-        os.makedirs(dlcache)
     db_path = os.path.join(state_dir, "db.sqlite3")
     j = dep.open_job_db(db_path)
 
@@ -934,15 +988,7 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
     else:
         forced_rule_names = []
 
-    script_dir = os.path.dirname(os.path.abspath(depfile))
-
-    initial_config = dict(DL_CACHE_DIR=dlcache,
-                          SCRIPT_DIR=script_dir,
-                          PROLOGUE="",
-                          WORKING_DIR=state_dir,
-                          EXECUTION_ID=make_uuid())
-    if config_file is not None:
-        initial_config.update(load_config(config_file))
+    initial_config = _load_initial_config(state_dir, depfile, config_file)
 
     rules = read_deps(depfile, initial_vars=initial_config)
     if rules.get_client("default", must=False) is None:
@@ -953,11 +999,18 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
     for var, value in override_vars.items():
         rules.set_var(var, value)
 
+    # handle xrefs
     for xref in rules.xrefs:
         add_xref(j, expand_xref(jinja2_env, xref, rules.vars), refresh_xrefs)
 
+    # handle the "add-if-missing" objects
     for obj in rules.objs:
         add_artifact_if_missing(j, expand_dict(jinja2_env, obj, rules.vars))
+
+    # handle the remember-executed statements
+    with j.transaction():
+        for exec in rules.remember_executed:
+            j.remember_executed(exec)
 
     # finish initializing exec clients
     for name, props in list(rules.exec_clients.items()):
@@ -996,11 +1049,22 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
 
     for dec in rules:
         assert (isinstance(dec, parser.Rule))
-        try:
-            j.add_template(to_template(jinja2_env, dec, rules.vars))
-        except MissingTemplateVar as ex:
-            log.error("Could not load rule {}: {}".format(dec.name, ex.get_error()))
-            return -1
+
+        # if we have at least a single value for "if_defined", then assume we're not going add this rule
+        include_rule = len(dec.if_defined) == 0
+        # however, if we have one of the vars in if_defined defined, then we're okay to add the rule
+        for varname in dec.if_defined:
+            if varname in rules.vars:
+                include_rule = True
+
+        if not include_rule:
+            log.warn("Skipping {} because none of the following were set: {}".format(dec.name, ", ".join(dec.if_defined)))
+        else:
+            try:
+                j.add_template(to_template(jinja2_env, dec, rules.vars))
+            except MissingTemplateVar as ex:
+                log.error("Could not load rule {}: {}".format(dec.name, ex.get_error()))
+                return -1
 
     # now check the rules we requested exist
     for rule_name in forced_rule_names:

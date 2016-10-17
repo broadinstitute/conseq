@@ -46,7 +46,7 @@ class Remote:
         return key != None
 
     # TODO: make download atomic by dl and rename (assuming get_contents_to_filename doesn't already)
-    def download(self, remote, local, ignoreMissing=False):
+    def download(self, remote, local, ignoreMissing=False, skipExisting=True, stage_dir=None):
         # maybe upload and download should use trailing slash to indicate directory should be uploaded instead of just a file
         if not local.startswith("/"):
             local =  os.path.normpath(self.local_dir + "/" + local)
@@ -65,7 +65,24 @@ class Remote:
             log.info("Downloading file %s to %s", remote_path, abs_local)
             if not os.path.exists(os.path.dirname(abs_local)):
                 os.makedirs(os.path.dirname(abs_local))
-            key.get_contents_to_filename(abs_local)
+
+            hash = key.get_metadata("sha256")
+            if (stage_dir is not None) and (hash is not None):
+                stage_path = os.path.join(stage_dir, hash)
+                if os.path.exists(stage_path) and skipExisting:
+                    log.info("Already %s downloaded as %s", remote, stage_path)
+                else:
+                    key.get_contents_to_filename(stage_path)
+                os.link(stage_path, abs_local)
+            else:
+                for i in range(100):
+                    temp_name = abs_local + ".in.progress."+str(i)
+                    if not os.path.exists(temp_name):
+                        break
+
+                key.get_contents_to_filename(temp_name)
+                os.rename(temp_name, abs_local)
+
             assert os.path.exists(local)
         else:
             # download everything with the prefix
@@ -82,7 +99,7 @@ class Remote:
             if transferred == 0 and not ignoreMissing:
                 raise Exception("Could not find {}".format(local))
 
-    def upload(self, local, remote, ignoreMissing=False, force=False):
+    def upload(self, local, remote, ignoreMissing=False, force=False, hash=None):
         # maybe upload and download should use trailing slash to indicate directory should be uploaded instead of just a file
         remote_path = os.path.normpath(self.remote_path + "/" + remote)
         local_path = os.path.normpath(os.path.join(self.local_dir, local))
@@ -97,9 +114,13 @@ class Remote:
                     key.name = remote_path
                     log.info("Uploading file %s to %s", local, remote)
                     key.set_contents_from_filename(local_path)
+                    if hash is None:
+                        hash = calc_hash(local_path)
+                    key.set_metadata("sha256", hash)
                 uploaded_url = "s3://"+self.bucket.name+"/"+remote_path
             else:
                 # upload everything in the dir
+                assert hash is None
                 for fn in os.listdir(local_path):
                     full_fn = os.path.join(local_path, fn)
                     if os.path.isfile(full_fn):
@@ -109,6 +130,8 @@ class Remote:
                             k.key = r
                             log.info("Uploading dir %s (%s to %s)", local_path, fn, fn)
                             k.set_contents_from_filename(full_fn)
+                            hash = calc_hash(local_path)
+                            k.set_metadata("sha256", hash)
                         else:
                             log.info("Uploading dir %s (%s to %s), skiping existing file",  local_path, fn, fn)
         elif not ignoreMissing:
@@ -170,7 +193,7 @@ def push_to_cas(remote, filenames):
         if remote.exists(remote_name):
             log.info("Skipping upload of %s because %s already exists", filename, remote_name)
         else:
-            remote.upload(filename, remote_name)
+            remote.upload(filename, remote_name, hash=hash)
         name_mapping[filename] = remote_name
 
     return name_mapping
@@ -186,9 +209,9 @@ def push_cmd(args, config):
     else:
         push(remote, args.filenames)
 
-def pull(remote, file_mappings, ignoreMissing=False):
+def pull(remote, file_mappings, ignoreMissing=False, skipExisting=True, stage_dir=None):
     for remote_path, local_path in file_mappings:
-        remote.download(remote_path, local_path, ignoreMissing=ignoreMissing)
+        remote.download(remote_path, local_path, ignoreMissing=ignoreMissing, skipExisting=skipExisting, stage_dir=stage_dir)
 
 def pull_cmd(args, config):
     remote = Remote(args.remote_url, args.local_dir, config["AWS_ACCESS_KEY_ID"], config["AWS_SECRET_ACCESS_KEY"])
@@ -287,7 +310,7 @@ def exec_cmd(args, config):
     for mapping_str in args.download:
         pull_map.append(parse_mapping_str(mapping_str))
 
-    pull(remote, pull_map, ignoreMissing=True)
+    pull(remote, pull_map, ignoreMissing=True, skipExisting=not args.forcedl, stage_dir=args.stage_dir)
 
     exec_command_with_capture(args.command, args.stderr, args.stdout, args.retcode, args.local_dir)
 
@@ -347,6 +370,8 @@ def main(varg = None):
     exec_parser.add_argument("--stdout", "-o")
     exec_parser.add_argument("--stderr", "-e")
     exec_parser.add_argument("--retcode", "-r")
+    exec_parser.add_argument("--forcedl", help="Force download of files even if the destination already exists")
+    exec_parser.add_argument("--stage", help="directory to use for staging in local CAS", dest="stage_dir")
     exec_parser.add_argument("--uploadresults", action="store_true")
     exec_parser.add_argument("command", nargs=argparse.REMAINDER)
     exec_parser.set_defaults(func=exec_cmd)

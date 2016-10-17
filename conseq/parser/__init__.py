@@ -9,6 +9,7 @@ FlockInclude = namedtuple("FlockInclude", ["path"])
 FlockStmt = namedtuple("FlockStmt", ["language", "fn_prefix", "scripts"])
 TypeDefStmt = namedtuple("TypeDefStmt", "name properties")
 ExecProfileStmt = namedtuple("ExecProfileStmt", "name properties")
+RememberExecutedStmt = namedtuple("RememberExecutedStmt", "transform inputs outputs")
 
 class XRef:
     def __init__(self, url, obj):
@@ -25,6 +26,7 @@ class Rule:
         self.executor = "default"
         assert self.name != "" and self.name != " "
         self.resources = {"slots": 1}
+        self.if_defined = []
 
     @property
     def language(self):
@@ -112,6 +114,15 @@ class Semantics(object):
         #print("xref ast", ast)
         return XRef(ast[1],ast[2])
 
+    def remember_executed(self, ast):
+        return RememberExecutedStmt(transform=ast[3], inputs=ast[4], outputs=ast[5])
+
+    def remember_executed_input(self, ast):
+        return (ast[1], ast[3])
+
+    def remember_executed_output(self, ast):
+        return ast[2]
+
     def query_variable(self, ast):
         assert isinstance(ast, six.string_types)
         return QueryVariable(ast)
@@ -140,6 +151,8 @@ class Semantics(object):
                 rule.resources = dict([ (k, float(v)) for k,v in statement[2].items() ])
                 if "slots" not in rule.resources:
                     rule.resources["slots"] = 1
+            elif statement[0] == "if-defined":
+                rule.if_defined.extend ( [statement[2]] + [x[1] for x in statement[3]] )
             else:
                 raise Exception("unknown {}".format(statement[0]))
         rule.run_stmts.extend(runs)

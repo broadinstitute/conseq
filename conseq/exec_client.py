@@ -425,7 +425,7 @@ def push_to_cas_with_pullmap(remote, source_and_dest, url_and_dest):
 
 
 class SgeExecClient:
-    def __init__(self, host, sge_prologue, local_workdir, remote_workdir, remote_url, cas_remote_url, helper_path, sge_cmd_prologue, resources):
+    def __init__(self, host, sge_prologue, local_workdir, remote_workdir, remote_url, cas_remote_url, helper_path, sge_cmd_prologue, resources, stage_dir):
         assert "{{" not in cas_remote_url
         self.ssh_host = host
         self.sge_prologue = sge_prologue
@@ -446,6 +446,8 @@ class SgeExecClient:
 
         # map of sge_job_id to sge status
         self.last_status = {}
+
+        self.stage_dir = stage_dir
 
     def reattach(self, external_ref):
         d = json.loads(external_ref)
@@ -603,12 +605,20 @@ class SgeExecClient:
         self.ssh.exec_cmd(self.ssh_host, "mkdir -p {}".format(remote_job_dir))
         helper_script = "cd {remote_job_dir}\n" \
                         "{helper_path} exec --uploadresults " \
-                        "-u retcode.json -u stdout.txt -u stderr.txt -o stdout.txt -e stderr.txt -r retcode.json -f {pull_map} " \
+                        "-u retcode.json " \
+                        "-u stdout.txt " \
+                        "-u stderr.txt " \
+                        "-o stdout.txt " \
+                        "-e stderr.txt " \
+                        "-r retcode.json " \
+                        "-f {pull_map} " \
+                        "--stage {stage_dir} " \
                         "{remote_url} . " \
                         "bash wrapper.sh\n".format(helper_path=self.helper_path,
-                                                 remote_url = remote_url,
-                                                 remote_job_dir = remote_job_dir,
-                                                 pull_map = pull_map)
+                                                     remote_url = remote_url,
+                                                     remote_job_dir = remote_job_dir,
+                                                     pull_map = pull_map,
+                                                     stage_dir=self.stage_dir)
 
         if self.sge_prologue is not None:
             helper_script = self.sge_prologue + "\n" + helper_script
@@ -777,7 +787,9 @@ def create_client(name, config, properties, ):
                              config["S3_STAGING_URL"],
                              properties["SGE_HELPER_PATH"],
                              properties["SGE_CMD_PROLOGUE"],
-                             resources)
+                             resources,
+                             properties["SGE_REMOTE_WORKDIR"] + "/CAS"
+                             )
     elif type == "local":
         assert_has_only_props(properties, ["type", "resources"])
         return LocalExecClient(resources)

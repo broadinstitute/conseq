@@ -52,13 +52,16 @@ def add_rm(sub):
     parser.add_argument('predicates', nargs='+', help="predicates to match in form 'key=value' ")
     parser.set_defaults(func=rm)
 
-def rm(args):
+def _parse_query(predicates):
     import re
     query = {}
-    for pair in args.predicates:
+    for pair in predicates:
         m = re.match("^([^=]+)=(.*)$", pair)
         query[m.group(1)] = m.group(2)
-    depexec.rm_cmd(args.dir, args.dry_run, args.space, query, False)
+    return query
+
+def rm(args):
+    depexec.rm_cmd(args.dir, args.dry_run, args.space, _parse_query(args.predicates), False)
 
 def add_run(sub):
     parser = sub.add_parser("run", help="Run rules in the specified file")
@@ -107,11 +110,12 @@ def dot(args):
 def add_export_conseq(sub):
     parser = sub.add_parser("export-conseq", help="export artifacts as a conseq file")
     parser.add_argument("--out", help="Name of file to write output to. Otherwise writes to stdout")
+    parser.add_argument("--upload", help="Path to upload files so that they will be accessible on a different machine.  Should be of the form s3://bucket/prefix/CAS")
     parser.set_defaults(func=export_conseq)
 
 def export_conseq(args):
     from conseq import export_cmd
-    export_cmd.export_conseq(args.dir, args.out)
+    export_cmd.export_conseq(args.dir, args.out, args.upload)
 
     #export_meta
 
@@ -140,6 +144,15 @@ def add_history_cmd(sub):
     parser = sub.add_parser("history", help="Print the history of all executions")
     parser.set_defaults(func=history_cmd)
 
+def localize_cmd(args):
+    depexec.localize_cmd(args.dir, args.space, _parse_query(args.predicates), args.file, args.config)
+
+def add_localize(sub):
+    parser = sub.add_parser("localize", help="Download any artifacts with $file_url references")
+    parser.add_argument('--space')
+    parser.add_argument('file', metavar="FILE", help="the input file to parse")
+    parser.add_argument('predicates', nargs='+', help="predicates to match in form 'key=value' ")
+    parser.set_defaults(func=localize_cmd)
 
 def main():
     from conseq import trace_on_demand
@@ -165,6 +178,7 @@ def main():
     add_space(sub)
     add_export_conseq(sub)
     add_history_cmd(sub)
+    add_localize(sub)
 
     args = parser.parse_args()
     if args.verbose:

@@ -281,7 +281,7 @@ class RuleExecution:
     """
     Represents a statement describing what transform to run to generate a set of Objs (outputs) from a different set of Objs (inputs)
     """
-    def __init__(self, id, space, inputs, transform, state):
+    def __init__(self, id, space, inputs, transform, state, execution_id=None):
         assertInputsValid(inputs)
 
         self.space = space
@@ -289,7 +289,7 @@ class RuleExecution:
         self.transform = transform
         self.id = id
         self.state = state
-        self.execution_id = None
+        self.execution_id = execution_id
 
     def __repr__(self):
         return "<Rule {} in:{}:{} transform:{} state:{}>".format(self.space, self.id, self.inputs, self.transform, self.state)
@@ -331,7 +331,7 @@ class RuleSet:
                 else:
                     inputs.append( (name, objs[0]))
 
-            results.append( RuleExecution(id, space, tuple(inputs), transform, state) )
+            results.append( RuleExecution(id, space, tuple(inputs), transform, state, execution_id=execution_id) )
         return results
 
 
@@ -355,9 +355,38 @@ class RuleSet:
         return self._find_rule_execs("transform = ?", (transform,))
 
     def find_by_input(self, input_id):
+        "given an input id, find all of the rule executions ids which refer to that input"
         rules = self._find_rule_execs("EXISTS (select 1 from rule_execution_input rei where rei.rule_execution_id = re.id and rei.obj_id = ?)", (input_id,))
         rule_ids = [x.id for x in rules]
         return rule_ids
+
+    def find_downstream_from_rule(self, rule_id):
+        n_obj_ids = set()
+        n_rule_ids = set()
+
+        obj_ids = self.get_outputs(rule_id)
+
+        n_obj_ids.update(obj_ids)
+        for obj_id in obj_ids:
+            _rule_ids, _obj_ids = self.find_downstream_from_obj(obj_id)
+            n_obj_ids.update(_obj_ids)
+            n_rule_ids.update(_rule_ids)
+
+        return n_rule_ids, n_obj_ids
+
+    def find_downstream_from_obj(self, input_id):
+        "given an object, return all the rule_execution ids and object that executed downstream of that object"
+        n_obj_ids = set()
+        n_rule_ids = set()
+
+        rule_ids = self.find_by_input(input_id)
+        n_rule_ids.update(rule_ids)
+        for rule_id in rule_ids:
+            _rule_ids, _obj_ids = self.find_downstream_from_rule_exec(rule_id)
+            n_obj_ids.update(_obj_ids)
+            n_rule_ids.update(_rule_ids)
+
+        return n_rule_ids, n_obj_ids
 
     def get(self, id):
         rules = self._find_rule_execs("id = ?", (id,))
@@ -405,11 +434,11 @@ class RuleSet:
                 self.objects.add(obj)
                 c.execute("insert into rule_execution_input (rule_execution_id, name, obj_id, is_list) values (?, ?, ?, ?)", (rule_execution_id, name, obj.id, is_list))
 
-        rule = RuleExecution(id, space, inputs, transform, state)
+        rule = RuleExecution(rule_execution_id, space, inputs, transform, state)
         for add_rule_listener in self.add_rule_listeners:
             add_rule_listener(rule)
 
-        return id
+        return rule_execution_id
 
     def remove_rule(self, rule_id):
         c = get_cursor()
@@ -547,7 +576,7 @@ class ExecutionLog:
 
     def get(self, id):
         c = get_cursor()
-        c.execute("select id, rule_id, transform, status, execution_xref, job_dir from execution where id = ?", [id])
+        c.execute("select id, transform, status, execution_xref, job_dir from execution where id = ?", [id])
         rules = self._as_RuleList(c)
         if len(rules) == 1:
             return rules[0]
@@ -865,6 +894,7 @@ class Jobs:
         self.objects.remove_listeners.append(self._object_removed)
         self.log = ExecutionLog(object_history)
         self.rule_allowed = lambda inputs, transform: True
+        self.pending_rules_to_evaluate = set()
 
     def has_template(self, rule_name):
         return rule_name in self.rule_template_by_name
@@ -886,7 +916,9 @@ class Jobs:
         if not DISABLE_AUTO_CREATE_RULES:
             for template in self.rule_templates:
                 if template.is_interested_in(obj):
-                    new_rules.extend(template.create_rules(self.objects))
+                    log.info("Need to refresh %s on next pass", template.transform)
+                    self.pending_rules_to_evaluate.add(template.transform)
+                    #new_rules.extend(template.create_rules(self.objects))
 
         for space, inputs, transform in new_rules:
             self._add_rule(space, inputs, transform)
@@ -896,7 +928,8 @@ class Jobs:
         if not DISABLE_AUTO_CREATE_RULES:
             for template in self.rule_templates:
                 if template.is_interested_in(obj):
-                    new_rules.extend(template.create_rules(self.objects))
+                    self.pending_rules_to_evaluate.add(template.transform)
+                    #new_rules.extend(template.create_rules(self.objects))
 
         for space, inputs, transform in new_rules:
             self._add_rule(space, inputs, transform)
@@ -907,6 +940,9 @@ class Jobs:
 
     def add_new_obj_listener(self, listener):
         self.objects.add_listeners.append(listener)
+
+    def transaction(self):
+        return transaction(self.db)
 
     def to_dot(self, detailed):
         with transaction(self.db):
@@ -926,11 +962,23 @@ class Jobs:
                 self._add_rule(*rule)
 
     def refresh_rules(self):
+        if len(self.pending_rules_to_evaluate) == 0:
+            return
+
         with transaction(self.db):
+            refresh_count = 0
+            add_executions = 0
+            pending_rules_to_evaluate = self.pending_rules_to_evaluate
+            self.pending_rules_to_evaluate = set()
             for template in self.rule_templates:
+                if template.transform not in pending_rules_to_evaluate:
+                    continue
+                refresh_count += 1
                 new_rules = template.create_rules(self.objects)
+                add_executions += len(new_rules)
                 for rule in new_rules:
                     self._add_rule(*rule)
+            #log.info("Refreshed the following templates: %s, refresh_count=%s, added=%s", pending_rules_to_evaluate, refresh_count, add_executions)
 
     def add_obj(self, space, timestamp, obj_props, overwrite=True):
         """
@@ -977,6 +1025,7 @@ class Jobs:
             return self.rule_set.enable_deferred()
 
     def record_started(self, rule_id):
+        assert isinstance(rule_id, int)
         with transaction(self.db):
             rule = self.rule_set.get(rule_id)
             execution_id = self.log.started_execution(rule)
@@ -987,6 +1036,10 @@ class Jobs:
         with transaction(self.db):
             self.rule_set.completed_execution(exec_id, RE_STATUS_FAILED)
             self.log.record_completed(exec_id, STATUS_FAILED, [])
+
+    def _record_completed(self, execution_id, new_status, interned_outputs):
+        self.log.record_completed(execution_id, new_status, interned_outputs)
+        return self.rule_set.completed_execution(execution_id, new_status)
 
     def record_completed(self, timestamp, execution_id, new_status, outputs):
         with transaction(self.db):
@@ -1009,12 +1062,38 @@ class Jobs:
 
                     obj_id = self.add_obj(space, timestamp, output)
                     interned_outputs.append( self.objects.get(obj_id) )
-                self.log.record_completed(execution_id, new_status, interned_outputs)
-                return self.rule_set.completed_execution(execution_id, new_status)
+                return self._record_completed(execution_id, new_status, interned_outputs)
 
     def update_exec_xref(self, exec_id, xref, job_dir):
         with transaction(self.db):
             self.log.update_exec_xref(exec_id, xref, job_dir)
+
+    def remember_executed(self, exec_stmt):
+        space = self.get_current_space()
+        transform = exec_stmt.transform
+
+        def resolve_obj(props):
+            objs = self.objects.find(space, props)
+            if len(objs) != 1:
+                raise Exception("Expected to find a single object with properties: {}".format(props))
+            return objs[0]
+
+        # find inputs in repo.  Errors if no such object exists
+        inputs_json = exec_stmt.inputs
+        inputs = []
+        for name, value_json in inputs_json:
+            if isinstance(value_json, list):
+                value = tuple([resolve_obj(i) for i in value_json])
+            else:
+                value = resolve_obj(value_json)
+            inputs.append( (name, value) )
+
+        outputs_json = exec_stmt.outputs
+        interned_outputs = [resolve_obj(o) for o in outputs_json]
+
+        rule_id = self.rule_set.add_rule(space, inputs, transform)
+        execution_id = self.record_started(rule_id)
+        self._record_completed(execution_id, STATUS_COMPLETED, interned_outputs)
 
     def cleanup_unsuccessful(self):
         with transaction(self.db):

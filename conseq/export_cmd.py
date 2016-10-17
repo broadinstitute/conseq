@@ -105,12 +105,85 @@ def import_artifacts(state_dir, url, config_file):
     for artifact in artifacts:
         j.add_obj(dep.DEFAULT_SPACE, timestamp, artifact)
 
-def export_conseq(state_dir, output_file):
+def rule_execution_as_json(rule_execution, execution_result):
+    def obj_key_props(obj):
+        obj_json = {}
+
+        for prop, value in obj.props.items():
+            # drop any non-key props
+            if not isinstance(value, dict):
+                obj_json[prop] = value
+        return obj_json
+
+    def obj_or_list_key_props(objs):
+        if isinstance(objs, tuple):
+            return tuple([obj_key_props(x) for x in objs])
+        else:
+            return obj_key_props(objs)
+
+    inputs_json = []
+    for name, value in rule_execution.inputs:
+        input_json = {"name": name, "value": obj_or_list_key_props(value)}
+        inputs_json.append(input_json)
+
+    outputs_json = []
+    for output in execution_result.outputs:
+        outputs_json.append(obj_key_props(output))
+
+    return rule_execution.transform, inputs_json, outputs_json
+
+
+from conseq import helper
+
+import logging
+log = logging.getLogger(__name__)
+
+def upload_and_rewrite(remote, objs):
+    # collect all of the filenames needing to be pushed
+    filenames = set()
+    filenames_to_skip = set()
+
+    for props in objs:
+        for k, v in props.items():
+            if isinstance(v, dict) and "$filename" in v:
+                filename = os.path.abspath(v["$filename"])
+                if os.path.isdir(filename):
+                    filenames_to_skip.add(filename)
+                    log.warn("Could not push %s because it is a directory.  Skipping...", filename)
+                else:
+                    filenames.add(filename)
+
+    # now push them all
+    name_mapping = helper.push_to_cas(remote, filenames)
+
+    rewritten_objs = []
+    for props in objs:
+        rewritten_props = {}
+        for k, v in props.items():
+            if isinstance(v, dict) and "$filename" in v:
+                filename = os.path.abspath(v["$filename"])
+                if filename in filenames_to_skip:
+                    rewritten_props[k] = {"$file_url": "invalid-due-cannot-upload-dir"}
+                else:
+                    new_url = name_mapping[filename]
+                    rewritten_props[k] = {"$file_url": new_url}
+            else:
+                rewritten_props[k] = v
+        rewritten_objs.append(rewritten_props)
+
+    return rewritten_objs
+
+def export_conseq(state_dir, output_file, cas_remote_url):
     by_group = collections.defaultdict(lambda: [])
     j = dep.open_state_dir(state_dir)
 
     objs = j.find_objs(dep.DEFAULT_SPACE, dict())
     objs = [o.props for o in objs]
+
+    if cas_remote_url:
+        cas_remote = helper.Remote(cas_remote_url, ".")
+        objs = upload_and_rewrite(cas_remote, objs)
+
     if output_file is None:
         import sys
         fd = sys.stdout
@@ -127,6 +200,24 @@ def export_conseq(state_dir, output_file):
             json.dump(obj, fd, indent=2)
             fd.write("\n")
         fd.write("\n")
+
+    fd.write("# Rule executions\n")
+    with j.transaction():
+        for rule_execution in j.rule_set:
+            if rule_execution.execution_id is None:
+                print("Skipping ", rule_execution)
+                continue
+
+            execution_result = j.log.get( rule_execution.execution_id )
+
+            transform, inputs, outputs = rule_execution_as_json(rule_execution, execution_result)
+            fd.write("remember-executed\n")
+            fd.write("  transform: {}\n".format(json.dumps(transform)))
+            for input in inputs:
+                fd.write("  input "+json.dumps(input["name"])+": "+json.dumps(input["value"])+"\n")
+            for output in outputs:
+                fd.write("  output: "+json.dumps(output)+"\n")
+            fd.write("\n\n")
 
     if output_file is not None:
         fd.close()

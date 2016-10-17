@@ -17,7 +17,7 @@ from grako.parsing import graken, Parser
 from grako.util import re, RE_FLAGS, generic_main  # noqa
 
 
-__version__ = (2016, 9, 15, 20, 27, 16, 3)
+__version__ = (2016, 10, 17, 13, 52, 12, 0)
 
 __all__ = [
     'depfileParser',
@@ -247,6 +247,15 @@ class depfileParser(Parser):
                     self._token(':')
                     self._input_specs_()
                 with self._option():
+                    self._token('if-defined')
+                    self._token(':')
+                    self._identifier_()
+
+                    def block0():
+                        self._token(',')
+                        self._identifier_()
+                    self._closure(block0)
+                with self._option():
                     self._token('outputs')
                     self._token(':')
                     self._output_specs_()
@@ -259,10 +268,10 @@ class depfileParser(Parser):
                     self._token(':')
                     self._identifier_()
 
-                    def block0():
+                    def block1():
                         self._token(',')
                         self._identifier_()
-                    self._closure(block0)
+                    self._closure(block1)
                 with self._option():
                     self._token('executor')
                     self._token(':')
@@ -276,10 +285,10 @@ class depfileParser(Parser):
                     self._token(':')
                     self._requirement_def_()
 
-                    def block1():
+                    def block2():
                         self._token(',')
                         self._requirement_def_()
-                    self._closure(block1)
+                    self._closure(block2)
                 self._error('no available options')
 
     @graken()
@@ -306,6 +315,34 @@ class depfileParser(Parser):
     def _add_if_missing_(self):
         self._token('add-if-missing')
         self._json_obj_()
+
+    @graken()
+    def _remember_executed_input_(self):
+        self._token('input')
+        self._quoted_string_()
+        self._token(':')
+        self._json_obj_()
+
+    @graken()
+    def _remember_executed_output_(self):
+        self._token('output')
+        self._token(':')
+        self._json_obj_()
+
+    @graken()
+    def _remember_executed_(self):
+        self._token('remember-executed')
+        self._token('transform')
+        self._token(':')
+        self._quoted_string_()
+
+        def block0():
+            self._remember_executed_input_()
+        self._closure(block0)
+
+        def block1():
+            self._remember_executed_output_()
+        self._closure(block1)
 
     @graken()
     def _exec_profile_(self):
@@ -344,6 +381,8 @@ class depfileParser(Parser):
                     self._type_def_()
                 with self._option():
                     self._exec_profile_()
+                with self._option():
+                    self._remember_executed_()
                 self._error('no available options')
         self._positive_closure(block0)
         self._check_eof()
@@ -429,6 +468,15 @@ class depfileSemantics(object):
         return ast
 
     def add_if_missing(self, ast):
+        return ast
+
+    def remember_executed_input(self, ast):
+        return ast
+
+    def remember_executed_output(self, ast):
+        return ast
+
+    def remember_executed(self, ast):
         return ast
 
     def exec_profile(self, ast):

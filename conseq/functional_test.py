@@ -199,6 +199,7 @@ def test_rule_executes_once(tmpdir):
     assert len(j.find_objs("public", {})) == 1
     assert len(j.get_all_executions()) == 1
 
+
 def test_regexp_queries(tmpdir):
     j = run_conseq(tmpdir, """
     rule a:
@@ -208,6 +209,7 @@ def test_regexp_queries(tmpdir):
         outputs: {"type": "otherthing"}
     """)
     assert len(j.get_all_executions()) == 2
+
 
 
 def test_rerun_same_result(tmpdir):

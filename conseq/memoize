@@ -1,0 +1,22 @@
+import hashlib
+import os
+
+def calc_sha256(fn):
+    h = hashlib.sha256()
+    with open(fn, "rb") as fd:
+        for chunk in iter(fd.read(10000), b""):
+            h.update(chunk)
+    return h
+
+def memoize(input_files, dest_file, staging_dir, command):
+    hashes = [calc_sha256(f) for f in input_files]
+    final = hashlib.sha256()
+    for h in hashes:
+        final.update(h.digest())
+    final_digest = final.hexdigest()
+    stage_fn = os.path.join(staging_dir, final_digest)
+    if os.path.exists(stage_fn):
+        os.link(stage_fn, dest_file)
+    else:
+        os.system(command)
+        os.link(dest_file, stage_fn)
