@@ -3,7 +3,7 @@
 from setuptools import setup
 
 setup(name='conseq',
-      version='0.2.3',
+      version='0.2.4',
       description='ConSeq dependency tracker',
       author='Philip Montgomery',
       author_email='pmontgom@broadinstitute.org',
