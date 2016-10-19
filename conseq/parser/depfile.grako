@@ -9,7 +9,8 @@ quoted_string = triple_dbl_quoted_string | dbl_quoted_string | squoted_string | 
 identifier = /[A-Za-z]+[A-Za-z0-9_+-]*/ ;
 url = /\S+/ ;
 
-json_value = quoted_string | json_obj ;
+json_value = quoted_string | json_obj | json_array ;
+json_array = "[" json_value {"," json_value} * "]" | "[" "]" ;
 json_name_value_pair = quoted_string ":" json_value ;
 json_obj = "{" json_name_value_pair { "," json_name_value_pair }* "}" ;
 
@@ -51,7 +52,7 @@ xref = "xref" url json_obj ;
 
 add_if_missing = "add-if-missing" json_obj ;
 
-remember_executed_input = "input" quoted_string ":" json_obj;
+remember_executed_input = "input" quoted_string ":" {json_obj | json_array};
 remember_executed_output = "output" ":" json_obj;
 remember_executed = "remember-executed" "transform" ":" quoted_string { remember_executed_input } * { remember_executed_output } * ;
 

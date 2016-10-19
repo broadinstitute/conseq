@@ -154,7 +154,7 @@ def upload_and_rewrite(remote, objs):
                     filenames.add(filename)
 
     # now push them all
-    name_mapping = helper.push_to_cas(remote, filenames)
+    name_mapping = helper.push_to_cas(remote, filenames, return_full_url=True)
 
     rewritten_objs = []
     for props in objs:

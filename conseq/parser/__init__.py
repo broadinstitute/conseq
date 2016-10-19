@@ -90,6 +90,11 @@ class Semantics(object):
     def json_name_value_pair(self, ast):
         return (ast[0], ast[2])
 
+    def json_array(self, ast):
+        if len(ast) == 2:
+            return []
+        return [ast[1]] + [x[1] for x in ast[2]]
+
     def json_obj(self, ast):
         pairs = [ast[1]]
         rest = ast[2]
@@ -118,7 +123,11 @@ class Semantics(object):
         return RememberExecutedStmt(transform=ast[3], inputs=ast[4], outputs=ast[5])
 
     def remember_executed_input(self, ast):
-        return (ast[1], ast[3])
+        value = ast[3][0]
+        assert isinstance(value, list) or isinstance(value, dict)
+        if isinstance(value, list):
+            assert isinstance(value[0], dict)
+        return (ast[1], value)
 
     def remember_executed_output(self, ast):
         return ast[2]

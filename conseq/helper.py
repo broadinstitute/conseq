@@ -183,7 +183,7 @@ def push_str_to_cas(remote, content, filename="<unknown>"):
         remote.upload_str(remote_name, content)
     return remote_name
 
-def push_to_cas(remote, filenames):
+def push_to_cas(remote, filenames, return_full_url=False):
     name_mapping = {}
 
     for filename in filenames:
@@ -194,6 +194,8 @@ def push_to_cas(remote, filenames):
             log.info("Skipping upload of %s because %s already exists", filename, remote_name)
         else:
             remote.upload(filename, remote_name, hash=hash)
+        if return_full_url:
+            remote_name = remote.remote_url + "/" + remote_name
         name_mapping[filename] = remote_name
 
     return name_mapping

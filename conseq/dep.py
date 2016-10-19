@@ -1073,16 +1073,18 @@ class Jobs:
         transform = exec_stmt.transform
 
         def resolve_obj(props):
+            assert isinstance(props, dict)
             objs = self.objects.find(space, props)
             if len(objs) != 1:
                 raise Exception("Expected to find a single object with properties: {}".format(props))
             return objs[0]
 
+        log.info("Remembering execution: %s, %s", transform, exec_stmt.inputs)
         # find inputs in repo.  Errors if no such object exists
         inputs_json = exec_stmt.inputs
         inputs = []
         for name, value_json in inputs_json:
-            if isinstance(value_json, list):
+            if isinstance(value_json, list) or isinstance(value_json, tuple):
                 value = tuple([resolve_obj(i) for i in value_json])
             else:
                 value = resolve_obj(value_json)

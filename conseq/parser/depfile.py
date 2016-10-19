@@ -17,7 +17,7 @@ from grako.parsing import graken, Parser
 from grako.util import re, RE_FLAGS, generic_main  # noqa
 
 
-__version__ = (2016, 10, 17, 13, 52, 12, 0)
+__version__ = (2016, 10, 17, 14, 0, 13, 0)
 
 __all__ = [
     'depfileParser',
@@ -93,7 +93,26 @@ class depfileParser(Parser):
                 self._quoted_string_()
             with self._option():
                 self._json_obj_()
+            with self._option():
+                self._json_array_()
             self._error('no available options')
+
+    @graken()
+    def _json_array_(self):
+        with self._choice():
+            with self._option():
+                self._token('[')
+                self._json_value_()
+
+                def block0():
+                    self._token(',')
+                    self._json_value_()
+                self._closure(block0)
+                self._token(']')
+            with self._option():
+                self._token('[')
+                self._token(']')
+            self._error('expecting one of: [')
 
     @graken()
     def _json_name_value_pair_(self):
@@ -321,7 +340,15 @@ class depfileParser(Parser):
         self._token('input')
         self._quoted_string_()
         self._token(':')
-        self._json_obj_()
+
+        def block0():
+            with self._choice():
+                with self._option():
+                    self._json_obj_()
+                with self._option():
+                    self._json_array_()
+                self._error('no available options')
+        self._closure(block0)
 
     @graken()
     def _remember_executed_output_(self):
@@ -411,6 +438,9 @@ class depfileSemantics(object):
         return ast
 
     def json_value(self, ast):
+        return ast
+
+    def json_array(self, ast):
         return ast
 
     def json_name_value_pair(self, ast):
