@@ -23,6 +23,9 @@ def count_unique_values_per_property(instances):
                     v = v["$file_url"]
                 else:
                     raise Exception("key: {} had dict: {}".format(k, v))
+            elif isinstance(v, list):
+                import json
+                v = json.dumps(v)
             per_prop[k].add(v)
     return [ (property, len(values)) for property, values in per_prop.items() ]
 

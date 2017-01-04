@@ -78,7 +78,7 @@ class ClusterUIClient:
         return execute_runs(self, template_str, repo, branch, parameters_for_runs, dest_archive, stable_props, poll_delay)
 
 def make_key(parameters, stable_props):
-    return tuple([parameters[x] for x in stable_props])
+    return json.dumps(tuple([parameters[x] for x in stable_props]))
 
 def make_run_config(_parameters, stable_props):
     parameters = dict(_parameters)

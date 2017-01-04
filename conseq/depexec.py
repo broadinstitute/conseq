@@ -625,11 +625,11 @@ def read_deps(filename, initial_vars={}):
 
 def print_history(state_dir):
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
-    for exec in j.get_all_executions():
+    for exec_ in j.get_all_executions():
 
         lines = []
         lines.append("  inputs:")
-        for name, value in exec.inputs:
+        for name, value in exec_.inputs:
             if isinstance(value, dep.Obj):
                 value = [value]
             lines.append("    {}:".format(name))
@@ -637,13 +637,13 @@ def print_history(state_dir):
                 for k, v in _value.props.items():
                     lines.append("      {}: {}".format(k, v))
 
-        if len(exec.outputs) > 0:
+        if len(exec_.outputs) > 0:
             lines.append("  outputs:")
-            for value in exec.outputs:
+            for value in exec_.outputs:
                 for k, v in value.props.items():
                     lines.append("    {}: {}".format(k, v))
 
-        print("rule {}: (execution id: {}, status: {})".format(exec.transform, exec.id, exec.status))
+        print("rule {}: (execution id: {}, status: {})".format(exec_.transform, exec_.id, exec_.status))
         for line in lines:
             print(line)
 
@@ -725,7 +725,7 @@ def rm_cmd(state_dir, dry_run, space, query, with_invalidate):
     if space is None:
         space = j.get_current_space()
     for o in j.find_objs(space, query):
-        print("rm", o)
+        log.warn("rm %s", o)
         if not dry_run:
             j.remove_obj(o.id, with_invalidate)
 

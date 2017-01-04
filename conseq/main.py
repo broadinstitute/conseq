@@ -3,6 +3,16 @@ import logging
 import colorlog
 from conseq import depexec, dep
 
+import re
+
+class RegExpMatch:
+    def __init__(self, pattern):
+        self.pattern = re.compile(pattern)
+
+    def match(self, v):
+        return self.pattern.match(v)
+
+
 def add_list(sub):
     parser = sub.add_parser("list", help="List all objects, executions, etc")
     parser.set_defaults(func=_list)
@@ -30,10 +40,9 @@ def add_ls(sub):
     parser.add_argument('--space')
     parser.set_defaults(func=ls)
 
+
 def ls(args):
-    key_value_pairs = [p.split("=", maxsplit=1) for p in args.predicates]
-    for pair in key_value_pairs:
-        assert len(pair) == 2
+    key_value_pairs = [_parse_predicate_expr(p) for p in args.predicates]
 
     depexec.ls_cmd(args.dir, args.space, key_value_pairs, args.groupby, args.columns)
 
@@ -52,12 +61,22 @@ def add_rm(sub):
     parser.add_argument('predicates', nargs='+', help="predicates to match in form 'key=value' ")
     parser.set_defaults(func=rm)
 
+def _parse_predicate_expr(txt):
+    m = re.match("^([^=~]+)(.)(.*)$", txt)
+    assert m != None
+    name = m.group(1)
+    op = m.group(2)
+    value = m.group(3)
+    if op == "=":
+        return (name, value)
+    else:
+        return (name, RegExpMatch(value))
+
 def _parse_query(predicates):
-    import re
     query = {}
     for pair in predicates:
-        m = re.match("^([^=]+)=(.*)$", pair)
-        query[m.group(1)] = m.group(2)
+        name, value = _parse_predicate_expr(pair)
+        query[name] = value
     return query
 
 def rm(args):

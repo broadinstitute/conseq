@@ -48,6 +48,15 @@ class SimpleSSH:
         tfile.close()
         return result
     
+    def file_exists(self, host, remote_path):
+        client = self._get_client(host)
+        sftp = client.open_sftp()
+        try: 
+            s = sftp.stat(remote_path)
+            return True
+        except FileNotFoundError:
+            return False
+
     def exec_cmd(self, host, command, echo=False, assert_success=True, logger=None):
         if logger is None:
             logger = log.info
