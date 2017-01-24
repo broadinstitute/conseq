@@ -53,6 +53,16 @@ class TaigaClient:
 
         return hash, previous_version_dsid, already_latest
 
+    def _get_dataset_id(self, response):
+        print(response.content.decode('utf8'))
+        assert not response.url.endswith("/upload/columnar")
+        assert not response.url.endswith("/upload/tabular")
+        # scrape off the dataset id
+        dataset_id = response.url.split("/")[-1]
+        assert "&" not in dataset_id
+        assert "=" not in dataset_id
+        return dataset_id
+
     def upload_columnar(self, name, description, is_published, is_public, filename):
         assert description is not None
 
@@ -71,10 +81,7 @@ class TaigaClient:
         print("uploading columnar", params)
         files = {'file': open(filename, 'rb')}
         r = requests.post(self.url+"/upload/columnar", files=files, data=params, headers=self.auth_headers)
-#        assert str(r.status_code)[0] == "3", "status code was {}".format(r.status_code)
-        assert not r.url.endswith("/upload/columnar")
-        # scrape off the dataset id
-        return r.url.split("/")[-1]
+        return self._get_dataset_id(r)        
 
     def upload_tabular(self, columns, rows, name, description, is_published, is_public, data_type, format, filename, print_response=False):
         assert description is not None
@@ -96,12 +103,7 @@ class TaigaClient:
         print("uploading tabular", params)
         files = {'file': open(filename, 'rb')}
         r = requests.post(self.url+"/upload/tabular", files=files, data=params, headers=self.auth_headers)
-        if print_response:
-            print(r.content)
-#        assert str(r.status_code)[0] == "3", "Status code was {}".format(r.status_code)
-        assert not r.url.endswith("/upload/tabular")
-        # scrape off the dataset id
-        return r.url.split("/")[-1]
+        return self._get_dataset_id(r)        
 
 #    def _get_metadata(self, dataset_id):
 #        r = requests.get(self.url+"/rest/v0/metadata/"+dataset_id)
