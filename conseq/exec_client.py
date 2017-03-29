@@ -17,6 +17,12 @@ else:
 
 log = logging.getLogger(__name__)
 
+def is_valid_value(v):
+    if isinstance(v, dict):
+      return len(v) == 1 and (("$filename" in v) or ("$value" in v))
+    return isinstance(v, str)
+       
+
 def _tail_file(filename, line_count=20):
     if not os.path.exists(filename):
         log.error("Cannot tail {} because no such file exists".format(filename))
@@ -184,6 +190,29 @@ class Execution:
 
             with open(self.results_path) as fd:
                 results = json.load(fd)
+                # quick verify that results is well formed
+                error = None
+                if not isinstance(results, dict):
+                  error = "results.json did not contain a valid object"
+                else:
+                  artifacts = results.get('outputs', None)
+                  if not isinstance(artifacts, list):
+                    error = "No outputs listed in artifacts"
+                  else:
+                    for artifact in artifacts:
+                      if not isinstance(artifact, dict):
+                        error = "artifacts must all be objects"
+                        break
+                      else:
+                        for k, v in artifact.items():
+                          if not (isinstance(k, str) and is_valid_value(v)):
+                            error = "artifact's key/values must both be strings"
+                            break
+                        if error is not None:
+                          break
+                if error:
+                  return (error, None)
+
 
         log.info("Rule {} completed ({}). Results: {}".format(self.transform, self.job_dir, results))
         outputs = [self._resolve_filenames(o) for o in results['outputs']]
@@ -425,7 +454,8 @@ def push_to_cas_with_pullmap(remote, source_and_dest, url_and_dest):
 
 
 class SgeExecClient:
-    def __init__(self, host, sge_prologue, local_workdir, remote_workdir, remote_url, cas_remote_url, helper_path, sge_cmd_prologue, resources, stage_dir):
+    def __init__(self, host, sge_prologue, local_workdir, remote_workdir, remote_url, cas_remote_url, helper_path,
+                 sge_cmd_prologue, resources, stage_dir, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY):
         assert "{{" not in cas_remote_url
         self.ssh_host = host
         self.sge_prologue = sge_prologue
@@ -435,6 +465,8 @@ class SgeExecClient:
         self.local_workdir = local_workdir
         self.helper_path = helper_path
         self.resources = resources
+        self.AWS_ACCESS_KEY_ID = AWS_ACCESS_KEY_ID
+        self.AWS_SECRET_ACCESS_KEY = AWS_SECRET_ACCESS_KEY
 
         self.ssh = SimpleSSH()
 
@@ -452,7 +484,7 @@ class SgeExecClient:
     def reattach(self, external_ref):
         d = json.loads(external_ref)
         remote_job_dir = d['remote_job_dir']
-        remote = helper.Remote(d['remote_url'], d['local_job_dir'])
+        remote = helper.Remote(d['remote_url'], d['local_job_dir'], self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
         sge_job_id = d['sge_job_id']
         self._saw_job_id(sge_job_id, SGE_STATUS_SUBMITTED)
         return SGEExecution(d['name'], d['id'], d['job_dir'], sge_job_id, d['desc_name'], self, remote, d, self._mk_file_fetcher(remote_job_dir))
@@ -596,8 +628,8 @@ class SgeExecClient:
                          "fd.write(json.dumps(results))\n"
                          "fd.close()\n".format(repr(dict(outputs=outputs))))
 
-        remote = helper.Remote(remote_url, local_job_dir)
-        cas_remote = helper.Remote(self.cas_remote_url, local_job_dir)
+        remote = helper.Remote(remote_url, local_job_dir, self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
+        cas_remote = helper.Remote(self.cas_remote_url, local_job_dir, self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
         for _, dest in source_and_dest:
             assert dest[0] != '/'
         pull_map = push_to_cas_with_pullmap(cas_remote, source_and_dest, resolver_state.files_to_download)
@@ -770,7 +802,7 @@ def assert_has_only_props(properties, names):
     assert set(properties.keys()) == set(names), "Expected properties: {}, but got {}".format(names, properties.keys())
 
 
-def create_client(name, config, properties, ):
+def create_client(name, config, properties):
     resources = {"slots": 1}
     for k, v in properties.get("resources", {}).items():
         resources[k] = float(v)
@@ -788,7 +820,9 @@ def create_client(name, config, properties, ):
                              properties["SGE_HELPER_PATH"],
                              properties["SGE_CMD_PROLOGUE"],
                              resources,
-                             properties["SGE_REMOTE_WORKDIR"] + "/CAS"
+                             properties["SGE_REMOTE_WORKDIR"] + "/CAS",
+                             config["AWS_ACCESS_KEY_ID"],
+                             config["AWS_SECRET_ACCESS_KEY"]
                              )
     elif type == "local":
         assert_has_only_props(properties, ["type", "resources"])
