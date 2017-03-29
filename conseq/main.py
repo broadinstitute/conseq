@@ -98,7 +98,13 @@ def run_cmd(args):
     concurrent = args.concurrent
     if args.nocapture:
         concurrent = 1
-    depexec.main(args.file, args.dir, args.targets, {}, concurrent, not args.nocapture, args.confirm, args.config,
+
+    import os
+    config_file = os.path.expanduser(args.config)
+    if not os.path.exists(config_file):
+        config_file = None
+
+    depexec.main(args.file, args.dir, args.targets, {}, concurrent, not args.nocapture, args.confirm, config_file,
                  refresh_xrefs=args.refresh_xrefs, maxfail=args.maxfail, maxstart=args.maxstart)
 
 def add_rules(sub):
