@@ -209,6 +209,9 @@ def export_conseq(state_dir, output_file, cas_remote_url):
                 continue
 
             execution_result = j.log.get( rule_execution.execution_id )
+            if execution_result is None:
+                print("Skipping {} because while we had an execution id {} but appeared to be missing from the db".format(rule_execution, rule_execution.execution_id))
+                continue
 
             transform, inputs, outputs = rule_execution_as_json(rule_execution, execution_result)
             fd.write("remember-executed\n")
