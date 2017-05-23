@@ -147,11 +147,8 @@ def upload_and_rewrite(remote, objs):
         for k, v in props.items():
             if isinstance(v, dict) and "$filename" in v:
                 filename = os.path.abspath(v["$filename"])
-                if os.path.isdir(filename):
-                    filenames_to_skip.add(filename)
-                    log.warn("Could not push %s because it is a directory.  Skipping...", filename)
-                else:
-                    filenames.add(filename)
+                assert not os.path.isdir(filename), "Cannot export artifacts which reference a directory: {}".format(filename)
+                filenames.add(filename)
 
     # now push them all
     name_mapping = helper.push_to_cas(remote, filenames, return_full_url=True)
