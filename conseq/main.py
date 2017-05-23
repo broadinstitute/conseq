@@ -90,6 +90,7 @@ def add_run(sub):
     parser.add_argument("--confirm", action="store_true")
     parser.add_argument("--maxfail", type=int, default=1)
     parser.add_argument("--maxstart", type=int, default=None)
+    parser.add_argument("--nothing", action="store_true", help="Don't run anything (useful when re-attaching existing jobs but you don't want to run downstream steps)")
     parser.add_argument('--refresh_xrefs', help='refresh xrefs', action="store_true")
     parser.add_argument('targets', nargs='*')
     parser.set_defaults(func=run_cmd)
@@ -105,7 +106,7 @@ def run_cmd(args):
         config_file = None
 
     depexec.main(args.file, args.dir, args.targets, {}, concurrent, not args.nocapture, args.confirm, config_file,
-                 refresh_xrefs=args.refresh_xrefs, maxfail=args.maxfail, maxstart=args.maxstart)
+                 refresh_xrefs=args.refresh_xrefs, maxfail=args.maxfail, maxstart=args.maxstart, force_no_targets=args.nothing)
 
 def add_rules(sub):
     parser = sub.add_parser("rules", help="Print the names all rules in the file")
@@ -114,6 +115,14 @@ def add_rules(sub):
 
 def rules(args):
     depexec.print_rules(args.file)
+
+def add_altdot(sub):
+    parser = sub.add_parser("altdot", help="Print the names all rules in the file")
+    parser.add_argument('file', metavar="FILE", help="the input file to parse")
+    parser.set_defaults(func=altdot)
+
+def altdot(args):
+    depexec.alt_dot(args.file)
 
 def add_debugrun(sub):
     parser = sub.add_parser("debugrun", help="perform query associated with a given target and report what matched (for debugging why rule doesn't run)")
@@ -198,6 +207,7 @@ def main():
     add_rules(sub)
     add_debugrun(sub)
     add_dot(sub)
+    add_altdot(sub)
     add_export(sub)
     add_import(sub)
     add_space(sub)

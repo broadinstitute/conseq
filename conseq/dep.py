@@ -277,6 +277,57 @@ def assertInputsValid(inputs):
         name, value = x
         assert isinstance(value, Obj) or (isinstance(value, tuple) and isinstance(value[0], Obj))
 
+    """
+    :return: a graphviz graph in dot syntax approximating the execution DAG
+    """
+    stmts = []
+    objs = {}
+    rule_nodes = {}
+
+    def add_obj(type):
+        if type in objs:
+            return objs[type]['id']
+        id = len(objs)
+        objs[type] = dict(id=id, type=type)
+        return id
+
+    def add_rule(rule_name, filename):
+        if rule_name in rule_nodes:
+            return rule_nodes[rule_name]['id']
+        id = len(rule_nodes)
+        rule_nodes[rule_name] = dict(id=id, name=rule_name, filename=filename)
+        return id
+
+    for rule in rules:
+
+        rule_id = add_rule(rule.name, rule.filename)
+        for input in rule.inputs:
+            #print(input)
+            obj_id = add_obj(input.json_obj.get("type", "unknown"))
+
+#            stmts.append("o{} -> r{} [label=\"{}\"]".format(obj_id, rule_id, input.variable))
+            stmts.append("o{} -> r{}".format(obj_id, rule_id))
+
+        if rule.outputs is not None:
+            for output in rule.outputs:
+                obj_id = add_obj(output.get("type", "unknown"))
+                stmts.append("r{} -> o{}".format(rule_id, obj_id))
+
+        #color=state_color[self.get_rule_state(rule.id)]
+#        color="gray"
+#        stmts.append("r{} [shape=box, label=\"{}\", style=\"filled\" fillcolor=\"{}\"]".format(rule_id, rule.name, color))
+
+    for node in rule_nodes.values():
+        stmts.append("r{} [shape=box, style=\"filled\", fillcolor=\"gray\", label=\"{}\n{}\"]".format(node['id'], node['name'], node['filename']))
+
+    for obj in objs.values():
+        prop_values = ["type="+obj['type']]
+        label = "\\n".join(prop_values)
+        stmts.append("o{} [label=\"{}\"]".format(obj['id'], label))
+
+    return "digraph { " + (";\n".join(set(stmts))) + " } "
+
+
 class RuleExecution:
     """
     Represents a statement describing what transform to run to generate a set of Objs (outputs) from a different set of Objs (inputs)
@@ -298,8 +349,6 @@ class RuleExecution:
 class RuleSet:
     """
         The all active rules
-
-        This prototype implementation does everything in memory but is intended to be replaced with one that read/writes to a persistent DB
     """
     def __init__(self, objects):
         self.remove_rule_listeners = []
