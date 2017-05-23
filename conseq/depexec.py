@@ -620,6 +620,7 @@ def read_deps(filename, initial_vars={}):
             rules.add_client(dec.name, dec.properties)
         else:
             assert isinstance(dec, parser.Rule)
+            dec.filename = filename
             rules.set_rule(dec.name, dec)
     return rules
 
@@ -857,6 +858,61 @@ def print_rules(depfile):
     for name in names:
         print(name)
 
+def _rules_to_dot(rules):
+    """
+    :return: a graphviz graph in dot syntax approximating the execution DAG
+    """
+    stmts = []
+    objs = {}
+    rule_nodes = {}
+
+    def add_obj(type):
+        if type in objs:
+            return objs[type]['id']
+        id = len(objs)
+        objs[type] = dict(id=id, type=type)
+        return id
+
+    def add_rule(rule_name, filename):
+        if rule_name in rule_nodes:
+            return rule_nodes[rule_name]['id']
+        id = len(rule_nodes)
+        rule_nodes[rule_name] = dict(id=id, name=rule_name, filename=filename)
+        return id
+
+    for rule in rules:
+
+        rule_id = add_rule(rule.name, rule.filename)
+        for input in rule.inputs:
+            #print(input)
+            obj_id = add_obj(input.json_obj.get("type", "unknown"))
+
+#            stmts.append("o{} -> r{} [label=\"{}\"]".format(obj_id, rule_id, input.variable))
+            stmts.append("o{} -> r{}".format(obj_id, rule_id))
+
+        if rule.outputs is not None:
+            for output in rule.outputs:
+                obj_id = add_obj(output.get("type", "unknown"))
+                stmts.append("r{} -> o{}".format(rule_id, obj_id))
+
+        #color=state_color[self.get_rule_state(rule.id)]
+#        color="gray"
+#        stmts.append("r{} [shape=box, label=\"{}\", style=\"filled\" fillcolor=\"{}\"]".format(rule_id, rule.name, color))
+
+    for node in rule_nodes.values():
+        stmts.append("r{} [shape=box, style=\"filled\", fillcolor=\"gray\", label=\"{}\n{}\"]".format(node['id'], node['name'], node['filename']))
+
+    for obj in objs.values():
+        prop_values = ["type="+obj['type']]
+        label = "\\n".join(prop_values)
+        stmts.append("o{} [label=\"{}\"]".format(obj['id'], label))
+
+    return "digraph { " + (";\n".join(set(stmts))) + " } "
+
+def alt_dot(depfile):
+    rules = read_deps(depfile)
+    print(_rules_to_dot(rules))
+
 def gc(state_dir):
     db_path = os.path.join(state_dir, "db.sqlite3")
     j = dep.open_job_db(db_path)
@@ -973,7 +1029,7 @@ def _load_initial_config(state_dir, depfile, config_file):
     return initial_config
 
 def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_executions, capture_output, req_confirm, config_file,
-         refresh_xrefs=False, maxfail=1, maxstart=None):
+         refresh_xrefs=False, maxfail=1, maxstart=None, force_no_targets=False):
     jinja2_env = create_jinja2_env()
 
     if not os.path.exists(state_dir):
@@ -983,7 +1039,7 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
     j = dep.open_job_db(db_path)
 
     # handle case where we explicitly state some templates to execute.  Make sure nothing else executes
-    if len(forced_targets) > 0:
+    if len(forced_targets) > 0 or force_no_targets:
         forced_rule_names = force_execution_of_rules(j, forced_targets)
     else:
         forced_rule_names = []

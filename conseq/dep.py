@@ -298,8 +298,6 @@ class RuleExecution:
 class RuleSet:
     """
         The all active rules
-
-        This prototype implementation does everything in memory but is intended to be replaced with one that read/writes to a persistent DB
     """
     def __init__(self, objects):
         self.remove_rule_listeners = []
