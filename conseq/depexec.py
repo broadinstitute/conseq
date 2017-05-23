@@ -620,7 +620,6 @@ def read_deps(filename, initial_vars={}):
             rules.add_client(dec.name, dec.properties)
         else:
             assert isinstance(dec, parser.Rule)
-            dec.filename = filename
             rules.set_rule(dec.name, dec)
     return rules
 
@@ -858,10 +857,6 @@ def print_rules(depfile):
     for name in names:
         print(name)
 
-def alt_dot(depfile):
-    rules = read_deps(depfile)
-    print(dep._rules_to_dot(rules))
-
 def gc(state_dir):
     db_path = os.path.join(state_dir, "db.sqlite3")
     j = dep.open_job_db(db_path)
@@ -978,7 +973,7 @@ def _load_initial_config(state_dir, depfile, config_file):
     return initial_config
 
 def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_executions, capture_output, req_confirm, config_file,
-         refresh_xrefs=False, maxfail=1, maxstart=None, force_no_targets=False):
+         refresh_xrefs=False, maxfail=1, maxstart=None):
     jinja2_env = create_jinja2_env()
 
     if not os.path.exists(state_dir):
@@ -988,7 +983,7 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
     j = dep.open_job_db(db_path)
 
     # handle case where we explicitly state some templates to execute.  Make sure nothing else executes
-    if len(forced_targets) > 0 or force_no_targets:
+    if len(forced_targets) > 0:
         forced_rule_names = force_execution_of_rules(j, forced_targets)
     else:
         forced_rule_names = []
