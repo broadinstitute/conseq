@@ -54,7 +54,11 @@ class ClusterUIClient:
         )
 
         r = requests.post(self.url+"/api/submit-job", headers=self.auth_header, json=job)
-        result =  r.json()
+        try:
+            result =  r.json()
+        except json.decoder.JSONDecodeError:
+            raise ExceptionDetails("Could not parse response from submit-job: {}".format(r.text))
+            
         success = result['success']
         if not success:
             raise ExceptionDetails("clusterui reports submittion failure", stderr=result['stderr'], stdout=result['stdout'])
