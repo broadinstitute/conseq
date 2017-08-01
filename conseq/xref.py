@@ -152,9 +152,7 @@ class Resolver:
             return dict(filename=os.path.abspath(url))
         elif url.startswith("taiga://"):
             from conseq import taiga_pull
-            permaname = url.replace("taiga://", "")
-            dataset_id = taiga_pull.get_id_by_name(self.config, permaname)
-            assert dataset_id != None, "Could not find dataset named: \"{}\"".format(permaname)
+            dataset_id = url.replace("taiga://", "")
             return dict(dataset_id = dataset_id)
         else:
             url_rec = self.cache.get(url)
@@ -164,6 +162,7 @@ class Resolver:
                 # double check the file still exists
                 if not os.path.exists(dest_filename):
                     dest_filename = None
+                    self.cache.evict(url)
 
             if dest_filename is None:
                 dest_filename = tempfile.NamedTemporaryFile(delete=False, dir=self.config["DL_CACHE_DIR"]).name
@@ -176,10 +175,7 @@ class Resolver:
         if os.path.exists(url):
             return False
         elif url.startswith("taiga://"):
-            from conseq import taiga_pull
-            permaname = url.replace("taiga://", "")
-            dataset_id = taiga_pull.get_id_by_name(self.config, permaname)
-            assert dataset_id != None, "Could not find dataset named: \"{}\"".format(permaname)
+            dataset_id = url.replace("taiga://", "")
             return obj["dataset_id"]["$value"] == dataset_id
         else:
             etag = self.puller.get_etag(url)

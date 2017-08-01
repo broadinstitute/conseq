@@ -1,3 +1,2 @@
 from cpdshelpers.remote_submit import ClusterUIClient
-from cpdshelpers.taiga_client import TaigaClient
 from cpdshelpers.ssh_wrapper import SimpleSSH

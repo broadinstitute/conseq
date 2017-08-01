@@ -57,7 +57,7 @@ class ClusterUIClient:
         try:
             result =  r.json()
         except json.decoder.JSONDecodeError:
-            raise ExceptionDetails("Could not parse response from submit-job: {}".format(r.text))
+            raise Exception("Could not parse response from submit-job: {}".format(r.text))
             
         success = result['success']
         if not success:
