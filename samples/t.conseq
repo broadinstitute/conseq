@@ -1,0 +1,8 @@
+# Objects with type ""
+add-if-missing {
+  "name": "foo"
+}
+add-if-missing {
+  "name": "foo2"
+}
+

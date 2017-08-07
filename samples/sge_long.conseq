@@ -1,0 +1,17 @@
+let SGE_HOST="datasci-dev"
+let SGE_PROLOGUE=""
+let SGE_REMOTE_WORKDIR="/home/unix/pmontgom/temp_conseq_work"
+let S3_STAGING_URL="s3://broad-datasci/conseq-test"
+let SGE_HELPER_PATH="python /home/unix/pmontgom/helper.py"
+
+rule sleep:
+    options: sge
+    run "bash" with """
+        echo "sleeping..."
+        sleep 60
+        echo "done sleeping"
+    """
+rule local_sleep:
+    run "bash" with """
+        sleep 70
+    """
