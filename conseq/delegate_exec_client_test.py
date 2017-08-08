@@ -37,7 +37,9 @@ def create_client_for(tmpdir, script, uid=None):
     c = exec_client.DelegateExecClient(TEST_RESOURCES, workdir, TEST_REMOTE_URL_ROOT, TEST_REMOTE_URL_ROOT+"/CAS", TEST_HELPER_PATH,
                                        "docker run --rm -e AWS_ACCESS_KEY_ID="+os.getenv("AWS_ACCESS_KEY_ID")+
                                        " -e AWS_SECRET_ACCESS_KEY="+os.getenv("AWS_SECRET_ACCESS_KEY")+
-                                       " conseq-del-test", AWS_ACCESS_KEY_ID=None, AWS_SECRET_ACCESS_KEY=None)
+                                       " conseq-del-test {COMMAND}",
+                                       "python",
+                                       AWS_ACCESS_KEY_ID=None, AWS_SECRET_ACCESS_KEY=None)
     resolver_state = exec_client.SGEResolveState(scripts_to_download,[])
     return job_dir, c, uid, resolver_state
 

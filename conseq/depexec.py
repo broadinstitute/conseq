@@ -1079,6 +1079,12 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
                     value = rules.get_vars()[key]
                     return render_template(jinja2_env, value, config)
 
+                def get(self, key, default=None):
+                    value = rules.get_vars().get(key, default)
+                    if value is None:
+                        return None
+                    return render_template(jinja2_env, value, config)
+
             client = exec_client.create_client(name, VirtualDict(), props)
             rules.add_client(name, client)
 

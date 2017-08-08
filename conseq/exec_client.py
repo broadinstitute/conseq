@@ -542,7 +542,7 @@ def process_inputs_for_remote_exec(inputs):
         return files_to_download, files_to_upload_and_download, result
 
 class DelegateExecClient:
-    def __init__(self, resources, local_workdir, remote_url, cas_remote_url, helper_path, command_template, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY):
+    def __init__(self, resources, local_workdir, remote_url, cas_remote_url, helper_path, command_template, python_path, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY):
         self.resources = resources
         self.helper_path = helper_path
         self.local_workdir = local_workdir
@@ -551,6 +551,7 @@ class DelegateExecClient:
         self.cas_remote_url = cas_remote_url
         self.AWS_ACCESS_KEY_ID = AWS_ACCESS_KEY_ID
         self.AWS_SECRET_ACCESS_KEY = AWS_SECRET_ACCESS_KEY
+        self.python_path = python_path
 
     def reattach(self, external_ref):
         d = json.loads(external_ref)
@@ -575,7 +576,7 @@ class DelegateExecClient:
         if outputs is not None:
             local_write_results_path = os.path.join(local_job_dir, 'write_results.py')
             source_and_dest += [ (local_write_results_path, "write_results.py") ]
-            run_stmts += ["python3 write_results.py"]
+            run_stmts += ["{} write_results.py".format(self.python_path)]
             with open(local_write_results_path, "wt") as fd:
                 fd.write("import json\n"
                          "results = {}\n"
@@ -958,7 +959,7 @@ def create_client(name, config, properties):
     elif type == "delegate":
         assert_has_only_props(properties, ["type", "resources", "HELPER_PATH", "COMMAND_TEMPLATE"])
         return DelegateExecClient(resources, config["WORKING_DIR"], config["S3_STAGING_URL"]+"/"+config["EXECUTION_ID"], config["S3_STAGING_URL"],
-                                  properties["HELPER_PATH"], properties["COMMAND_TEMPLATE"], config["AWS_ACCESS_KEY_ID"],
+                                  properties["HELPER_PATH"], properties["COMMAND_TEMPLATE"], config.get("PYTHON_PATH", "python"), config["AWS_ACCESS_KEY_ID"],
                              config["AWS_SECRET_ACCESS_KEY"])
     else:
         raise Exception("Unrecognized exec-profile 'type': {}".format(type))
