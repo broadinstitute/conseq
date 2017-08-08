@@ -37,6 +37,7 @@ def test_overwrite_obj(tmpdir):
     id1 = j.add_obj("public", 1, {"A":"a", "mut":{"$value": "1"}})
     objs = j.find_objs("public", {"A":"a"})
     assert len(objs) == 1
+    j.refresh_rules()
     assert len(j.get_pending()) == 1
     assert len(j.get_all_executions()) == 0
     rule_exec_id1 = j.get_pending()[0].id
@@ -45,6 +46,7 @@ def test_overwrite_obj(tmpdir):
     id2 = j.add_obj("public", 2, {"A":"a", "mut":{"$value": "2"}})
     objs = j.find_objs("public", {"A":"a"})
     assert len(objs) == 1
+    j.refresh_rules()
     assert len(j.get_pending()) == 1
     # there should still only be a single rule, but it should be a new rule with the new input
     rule_exec_id2 = j.get_pending()[0].id
@@ -79,8 +81,10 @@ def test_foreach(tmpdir):
         j.add_template(t)
 
     j.add_obj("public", 1, dict(type="contexts", name="a"))
+    j.refresh_rules()
     assert len(j.get_pending()) == 1
     j.add_obj("public", 1, dict(type="contexts", name="b"))
+    j.refresh_rules()
     assert len(j.get_pending()) == 2
 
 def test_input_changed(tmpdir):
@@ -96,15 +100,18 @@ def test_input_changed(tmpdir):
         j.add_template(t)
 
     j.add_obj("public", 1, dict(type="contexts", name="a"))
+    j.refresh_rules()
     pending = j.get_pending()
     assert len(pending) == 1
     exec_id = j.record_started(pending[0].id)
     j.record_completed(exec_id, pending[0].id, dep.STATUS_COMPLETED, [dict(name="a", type="context"), dict(name="b", type="context")])
 
+    j.refresh_rules()
     pending = j.get_pending()
     assert len(pending) == 0
 
     j.add_obj("public", 2, dict(type="contexts", name="a"))
+    j.refresh_rules()
     assert len(j.get_pending()) == 1
 
 def test_completion(tmpdir):
@@ -123,6 +130,7 @@ def test_completion(tmpdir):
         j.add_template(t)
 
     j.add_obj("public", 1, dict(type="contexts", name="a"))
+    j.refresh_rules()
     pending = (j.get_pending())
     assert len(pending) == 1
 
@@ -131,6 +139,7 @@ def test_completion(tmpdir):
     execution_id = j.record_started(rule_exec_id)
     j.record_completed(execution_id, pending[0].id, dep.STATUS_COMPLETED, [dict(name="a", type="context"), dict(name="b", type="context")])
 
+    j.refresh_rules()
     assert len(j.get_pending()) == 2
     for p in j.get_pending():
         assert p.transform == "PerContext"
@@ -176,6 +185,7 @@ def test_stuff(tmpdir):
     j.add_obj("public", 1, dict(type="crispr_dataset", library="Avana"))
     j.add_obj("public", 1, dict(type="crispr_dataset", library="Gecko"))
 
+    j.refresh_rules()
     for pending in j.get_pending():
         execute(pending.id, pending.transform, pending.inputs)
 
