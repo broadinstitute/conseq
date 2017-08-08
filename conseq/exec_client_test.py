@@ -24,12 +24,14 @@ TEST_RESOURCES = {"mem": 10}
 def create_client_for(tmpdir, script, uid=None):
     workdir = str(tmpdir)
 
-    job_dir = workdir+"/1"
+    job_dir = workdir+"/r1"
     if not os.path.exists(job_dir):
         os.mkdir(job_dir)
 
+    scripts_to_download = []
     if script is not None:
-        with open(workdir+"/1/script1", "wt") as fd:
+        scripts_to_download.append( (workdir+"/r1/script1", "script1"))
+        with open(workdir+"/r1/script1", "wt") as fd:
             fd.write(textwrap.dedent(script))
             fd.close()
 
@@ -40,8 +42,10 @@ def create_client_for(tmpdir, script, uid=None):
 
     print("remote_workdir=",remote_workdir)
 
-    c = exec_client.SgeExecClient(TEST_HOST, TEST_REMOTE_PROLOGUE, workdir, remote_workdir, remote_url, TEST_HELPER_PATH, TEST_SGE_CMD_PROLOGUE, TEST_RESOURCES)
-    resolver_state = exec_client.SGEResolveState([("script1", "script1")],[])
+
+    c = exec_client.SgeExecClient(TEST_HOST, TEST_REMOTE_PROLOGUE, workdir, remote_workdir, remote_url, TEST_REMOTE_URL_ROOT+"/CAS", TEST_HELPER_PATH, TEST_SGE_CMD_PROLOGUE, TEST_RESOURCES,
+                                  TEST_REMOTE_WORKDIR, AWS_ACCESS_KEY_ID=None, AWS_SECRET_ACCESS_KEY=None)
+    resolver_state = exec_client.SGEResolveState(scripts_to_download,[])
     return job_dir, c, uid, resolver_state
 
 def test_basic_sge_job_exec(tmpdir):
@@ -52,6 +56,7 @@ def test_basic_sge_job_exec(tmpdir):
     print("resolver_state", resolver_state.files_to_upload_and_download)
     e = c.exec_script("name", "ID", job_dir, ["python script1"], [{"name": "banana"}], True, "", "desc", resolver_state, {"mem": 10})
     while True:
+        print("HEREHEREHERE")
         failure, output = e.get_completion()
         assert failure is None
         if output is not None:

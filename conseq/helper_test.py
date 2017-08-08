@@ -24,7 +24,7 @@ def test_exec(tmpdir):
     k.set_contents_from_string("in")
 
     local_dir = str(tmpdir)
-    helper.main(["exec", "-o", "out.txt", "-e", "err.txt", "-d", ".", "-u", ".", "-r", "retcode",
+    helper.main(["exec", "-o", "out.txt", "-e", "err.txt", "-d", "./inputfile", "-u", ".", "-r", "retcode",
                  url, local_dir, "bash", "-c", "echo test"])
 
     assert os.path.exists(local_dir+"/inputfile")

@@ -101,23 +101,28 @@ class Remote:
 
     def upload(self, local, remote, ignoreMissing=False, force=False, hash=None):
         # maybe upload and download should use trailing slash to indicate directory should be uploaded instead of just a file
+        assert not remote.startswith("/")
+        #assert not local.startswith("/")
         remote_path = os.path.normpath(self.remote_path + "/" + remote)
         local_path = os.path.normpath(os.path.join(self.local_dir, local))
+        # cope when case where local was passed as an abs path
+        #local = os.path.relpath(local, self.local_dir)
+        #assert not local.startswith("."), "local={}, local_dir={}".format(local, self.local_dir)
         # local_path = local
         uploaded_url = None
         
         if os.path.exists(local_path):
             if os.path.isfile(local_path):
                 # if it's a file, upload it
+                uploaded_url = "s3://"+self.bucket.name+"/"+remote_path
                 if self.bucket.get_key(remote_path) is None or force:
                     key = Key(self.bucket)
                     key.name = remote_path
-                    log.info("Uploading file %s to %s", local, remote)
+                    log.info("Uploading file %s to %s", local, uploaded_url)
                     key.set_contents_from_filename(local_path)
                     if hash is None:
                         hash = calc_hash(local_path)
                     key.set_metadata("sha256", hash)
-                uploaded_url = "s3://"+self.bucket.name+"/"+remote_path
             else:
                 # upload everything in the dir
                 assert hash is None
@@ -146,6 +151,7 @@ class Remote:
             bucket = self.bucket
             remote_path = os.path.normpath(self.remote_path + "/" + remote)
 
+        print("downloading as string:", remote_path)
         key = bucket.get_key(remote_path)
         if key == None:
             return None
@@ -200,9 +206,23 @@ def push_to_cas(remote, filenames, return_full_url=False):
 
     return name_mapping
 
+def _get_files_from_dir(dirname):
+    files = []
+    for fn in os.listdir(dirname):
+        full = os.path.join(dirname, fn)
+        if not os.path.isdir(full):
+            files.append(full)
+    print("files", files)
+    return files
+
 def push(remote, filenames):
     for filename in filenames:
-        remote.upload(filename, filename)
+        filename = os.path.join(remote.local_dir, filename)
+        if os.path.isdir(filename):
+            for fn in _get_files_from_dir(filename):
+                remote.upload(fn, fn)
+        else:
+            remote.upload(filename, filename)
 
 def push_cmd(args, config):
     remote = Remote(args.remote_url, args.local_dir, config["AWS_ACCESS_KEY_ID"], config["AWS_SECRET_ACCESS_KEY"])
@@ -213,6 +233,7 @@ def push_cmd(args, config):
 
 def pull(remote, file_mappings, ignoreMissing=False, skipExisting=True, stage_dir=None):
     for remote_path, local_path in file_mappings:
+        print("remote_path", remote_path, "local_path", local_path)
         remote.download(remote_path, local_path, ignoreMissing=ignoreMissing, skipExisting=skipExisting, stage_dir=stage_dir)
 
 def pull_cmd(args, config):
@@ -268,6 +289,7 @@ def convert_json_mapping(d):
     return result
 
 def parse_mapping_str(file_mapping):
+    assert isinstance(file_mapping, str)
     if ":" in file_mapping:
         remote_path, local_path = file_mapping.split(":")
     else:
@@ -306,19 +328,25 @@ def exec_cmd(args, config):
     pull_map = []
     if args.download_pull_map is not None:
         dl_pull_map_str = remote.download_as_str(args.download_pull_map)
+        print("dl_pull_map_str", dl_pull_map_str)
         pull_map_dict = json.loads(dl_pull_map_str)
         pull_map.extend(convert_json_mapping(pull_map_dict))
 
-    for mapping_str in args.download:
-        pull_map.append(parse_mapping_str(mapping_str))
+    if args.download is not None:
+        print("args.download", args.download)
+        for mapping_str in args.download:
+            print("mapping_str", mapping_str)
+            pull_map.append(parse_mapping_str(mapping_str))
 
+    print("pull_map", pull_map)
     pull(remote, pull_map, ignoreMissing=True, skipExisting=not args.forcedl, stage_dir=args.stage_dir)
 
     exec_command_with_capture(args.command, args.stderr, args.stdout, args.retcode, args.local_dir)
 
     print("args.upload:", args.upload)
-    for upload in args.upload:
-        push(remote, upload)
+    if args.upload is not None:
+        push(remote, args.upload)
+
     if args.uploadresults:
         results_json_file = "./results.json"
         published_files_root = args.local_dir # drop_prefix(args.local_dir, os.path.abspath(os.path.dirname(results_json_file)))
@@ -367,8 +395,8 @@ def main(varg = None):
     exec_parser.add_argument("remote_url")
     exec_parser.add_argument("local_dir")
     exec_parser.add_argument("--download_pull_map", "-f")
-    exec_parser.add_argument("--download", "-d", nargs="*", default=[], action="append")
-    exec_parser.add_argument("--upload", "-u", nargs="*", default=[], action="append")
+    exec_parser.add_argument("--download", "-d", default=[], action="append")
+    exec_parser.add_argument("--upload", "-u", default=[], action="append")
     exec_parser.add_argument("--stdout", "-o")
     exec_parser.add_argument("--stderr", "-e")
     exec_parser.add_argument("--retcode", "-r")
@@ -389,6 +417,8 @@ def main(varg = None):
     pull_parser.add_argument("file_mappings", help="mappings of remote paths to local paths of the form 'remote:local'", nargs="+")
     pull_parser.set_defaults(func=pull_cmd)
 
+    print("varg", varg)
+    print("sys.argv", sys.argv)
     args = parser.parse_args(varg)
     config = {}
     if args.config is not None:
