@@ -575,7 +575,7 @@ class DelegateExecClient:
         if outputs is not None:
             local_write_results_path = os.path.join(local_job_dir, 'write_results.py')
             source_and_dest += [ (local_write_results_path, "write_results.py") ]
-            run_stmts += ["python write_results.py"]
+            run_stmts += ["python3 write_results.py"]
             with open(local_write_results_path, "wt") as fd:
                 fd.write("import json\n"
                          "results = {}\n"
