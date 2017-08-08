@@ -542,12 +542,12 @@ def process_inputs_for_remote_exec(inputs):
         return files_to_download, files_to_upload_and_download, result
 
 class DelegateExecClient:
-    def __init__(self, resources, local_workdir, remote_url, cas_remote_url, helper_path, command_prefix, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY):
+    def __init__(self, resources, local_workdir, remote_url, cas_remote_url, helper_path, command_template, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY):
         self.resources = resources
         self.helper_path = helper_path
         self.local_workdir = local_workdir
         self.remote_url = remote_url
-        self.command_prefix = command_prefix
+        self.command_template = command_template
         self.cas_remote_url = cas_remote_url
         self.AWS_ACCESS_KEY_ID = AWS_ACCESS_KEY_ID
         self.AWS_SECRET_ACCESS_KEY = AWS_SECRET_ACCESS_KEY
@@ -611,13 +611,13 @@ class DelegateExecClient:
         stdout_path = os.path.abspath(os.path.join(job_dir, "stdout.txt"))
         stderr_path = os.path.abspath(os.path.join(job_dir, "stderr.txt"))
 
-        command_prefix = self.command_prefix
+        full_command = self.command_template.format(COMMAND=command)
         if capture_output:
-            bash_cmd = "exec {command_prefix} {command} > {stdout_path} 2> {stderr_path}".format(**locals())
+            bash_cmd = "exec {full_command} {command} > {stdout_path} 2> {stderr_path}".format(**locals())
             captured_stdouts = (stdout_path, stderr_path)
             close_fds = True
         else:
-            bash_cmd = "exec {command_prefix} {command}".format(**locals())
+            bash_cmd = "exec {full_command} {command}".format(**locals())
             captured_stdouts = None
             close_fds = False
 
@@ -956,9 +956,9 @@ def create_client(name, config, properties):
         assert_has_only_props(properties, ["type", "resources"])
         return LocalExecClient(resources)
     elif type == "delegate":
-        assert_has_only_props(properties, ["type", "resources", "HELPER_PATH", "COMMAND_PREFIX"])
+        assert_has_only_props(properties, ["type", "resources", "HELPER_PATH", "COMMAND_TEMPLATE"])
         return DelegateExecClient(resources, config["WORKING_DIR"], config["S3_STAGING_URL"]+"/"+config["EXECUTION_ID"], config["S3_STAGING_URL"],
-                                  properties["HELPER_PATH"], properties["COMMAND_PREFIX"], config["AWS_ACCESS_KEY_ID"],
+                                  properties["HELPER_PATH"], properties["COMMAND_TEMPLATE"], config["AWS_ACCESS_KEY_ID"],
                              config["AWS_SECRET_ACCESS_KEY"])
     else:
         raise Exception("Unrecognized exec-profile 'type': {}".format(type))

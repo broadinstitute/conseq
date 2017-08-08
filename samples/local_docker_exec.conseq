@@ -4,7 +4,7 @@ exec-profile docker {
   "type": "delegate",
   "resources": { "slots": "5" },
   "HELPER_PATH": "python /helper.py",
-  "COMMAND_PREFIX": "docker run --rm -e AWS_ACCESS_KEY_ID={{config.AWS_ACCESS_KEY_ID}} -e AWS_SECRET_ACCESS_KEY={{config.AWS_SECRET_ACCESS_KEY}} conseq-del-test"
+  "COMMAND_TEMPLATE": "docker run --rm -e AWS_ACCESS_KEY_ID={{config.AWS_ACCESS_KEY_ID}} -e AWS_SECRET_ACCESS_KEY={{config.AWS_SECRET_ACCESS_KEY}} conseq-del-test {COMMAND}"
 }
 
 rule make_local:
