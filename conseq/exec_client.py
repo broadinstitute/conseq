@@ -116,6 +116,7 @@ def validate_result_json_obj(obj, types):
 
     return None
 
+
 class Execution:
     def __init__(self, transform, id, job_dir, proc, outputs, captured_stdouts, desc_name):
         self.transform = transform
@@ -228,11 +229,50 @@ class Execution:
 
         return None, outputs
 
+class DelegateExecution(Execution):
+    def __init__(self, transform, id, job_dir, proc, outputs, captured_stdouts, desc_name, remote):
+        super(DelegateExecution, self).__init__(transform, id, job_dir, proc, outputs, captured_stdouts, desc_name)
+        self.remote = remote
+
+    def _get_completion(self):
+        retcode = self.proc.poll()
+
+        if retcode == None:
+            return None, None
+
+        if retcode != 0:
+            return("shell command failed with {}".format(retcode), None)
+
+        print("About to download retcode.json")
+
+        retcode_content = self.remote.download_as_str("retcode.json")
+        if retcode_content is not None:
+            retcode = json.loads(retcode_content)['retcode']
+        else:
+            print("got no retcode")
+            retcode = None
+
+        if retcode != 0:
+            return("inner shell command failed with {}".format(repr(retcode)), None)
+
+        results_str = self.remote.download_as_str("results.json")
+        if results_str is None:
+            return("script reported success but results.json is missing!", None)
+
+        results = json.loads(results_str)
+
+        log.info("Rule {} completed ({}). Results: {}".format(self.desc_name, self.job_dir, results))
+        assert type(results['outputs']) == list
+        outputs = [_resolve_filenames(self.remote, o) for o in results['outputs']]
+
+        return None, outputs
+
 def write_wrapper_script(wrapper_path, job_dir, prologue, run_stmts, retcode_path):
-    job_dir = os.path.abspath(job_dir)
     with open(wrapper_path, "wt") as fd:
         fd.write("set -ex\n")
-        fd.write("cd {job_dir}\n".format(**locals()))
+        if job_dir is not None:
+            job_dir = os.path.abspath(job_dir)
+            fd.write("cd {job_dir}\n".format(**locals()))
 
         fd.write(prologue+"\n")
 
@@ -451,6 +491,145 @@ def push_to_cas_with_pullmap(remote, source_and_dest, url_and_dest):
 
     return "{}/{}".format(remote.remote_url, map_name)
 
+def process_inputs_for_remote_exec(inputs):
+        log.debug("preprocess_inputs, before inputs: %s", inputs)
+        files_to_upload_and_download = []
+        files_to_download = []
+
+        def next_file_index():
+            return len(files_to_upload_and_download) + len(files_to_download)
+
+        # need to find all files that will be downloaded and update with $filename of what eventual local location will be.
+        def resolve(obj_):
+            assert isinstance(obj_, dep.Obj)
+            obj = obj_.props
+            assert isinstance(obj, dict)
+
+            new_obj = {}
+            for k, v in obj.items():
+                if type(v) == dict and "$filename" in v:
+                    cur_name = v["$filename"]
+                    # Need to do something to avoid collisions.  Store under working dir?  maybe temp/filename-v
+                    new_name = "temp/{}.{}".format(os.path.basename(cur_name), next_file_index())
+                    files_to_upload_and_download.append((cur_name, new_name))
+                    v = new_name
+                elif isinstance(v, dict) and "$file_url" in v:
+                    cur_name = v["$file_url"]
+                    new_name = "temp/{}.{}".format(os.path.basename(cur_name), next_file_index())
+                    files_to_download.append((cur_name, new_name))
+                    v = new_name
+                elif isinstance(v, dict) and len(v) == 1 and "$value" in v:
+                    v = v["$value"]
+                else:
+                    assert isinstance(v, str), "Expected value for {} ({}) to be a string but was {}".format(k, repr(v),
+                                                                                                             type(v))
+
+                new_obj[k] = v
+
+            return new_obj
+
+        result = {}
+        for bound_name, obj_or_list in inputs:
+            if isinstance(obj_or_list, list) or isinstance(obj_or_list, tuple):
+                list_ = obj_or_list
+                result[bound_name] = [resolve(obj_) for obj_ in list_]
+            else:
+                obj_ = obj_or_list
+                result[bound_name] = resolve(obj_)
+        log.debug("preprocess_inputs, after inputs: %s", result)
+        log.debug("files_to_upload_and_download: %s", files_to_upload_and_download)
+        log.debug("files_to_download: %s", files_to_download)
+        return files_to_download, files_to_upload_and_download, result
+
+class DelegateExecClient:
+    def __init__(self, resources, local_workdir, remote_url, cas_remote_url, helper_path, command_prefix, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY):
+        self.resources = resources
+        self.helper_path = helper_path
+        self.local_workdir = local_workdir
+        self.remote_url = remote_url
+        self.command_prefix = command_prefix
+        self.cas_remote_url = cas_remote_url
+        self.AWS_ACCESS_KEY_ID = AWS_ACCESS_KEY_ID
+        self.AWS_SECRET_ACCESS_KEY = AWS_SECRET_ACCESS_KEY
+
+    def reattach(self, external_ref):
+        d = json.loads(external_ref)
+        return Execution(d['transform'], d['id'], d['job_dir'], PidProcStub(d['pid']), d['outputs'], d['captured_stdouts'], d['desc_name'])
+
+    def preprocess_inputs(self, resolver, inputs):
+        files_to_download, files_to_upload_and_download, result = process_inputs_for_remote_exec(inputs)
+        return result, SGEResolveState(files_to_upload_and_download, files_to_download)
+
+    def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name, resolver_state, resources):
+        mem_in_mb = resources.get("mem", 1000)
+        assert job_dir[:len(self.local_workdir)] == self.local_workdir
+        rel_job_dir = job_dir[len(self.local_workdir)+1:]
+
+        remote_url = "{}/{}".format(self.remote_url, rel_job_dir)
+        local_job_dir = "{}/{}".format(self.local_workdir, rel_job_dir)
+        local_wrapper_path = os.path.join(local_job_dir, "wrapper.sh")
+
+        source_and_dest = list(resolver_state.files_to_upload_and_download)
+        source_and_dest.append( (local_wrapper_path, "wrapper.sh") )
+
+        if outputs is not None:
+            local_write_results_path = os.path.join(local_job_dir, 'write_results.py')
+            source_and_dest += [ (local_write_results_path, "write_results.py") ]
+            run_stmts += ["python write_results.py"]
+            with open(local_write_results_path, "wt") as fd:
+                fd.write("import json\n"
+                         "results = {}\n"
+                         "fd = open('results.json', 'wt')\n"
+                         "fd.write(json.dumps(results))\n"
+                         "fd.close()\n".format(repr(dict(outputs=outputs))))
+
+        write_wrapper_script(local_wrapper_path, None, prologue, run_stmts, None)
+
+        remote = helper.Remote(remote_url, local_job_dir, self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
+        cas_remote = helper.Remote(self.cas_remote_url, local_job_dir, self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
+        for _, dest in source_and_dest:
+            assert dest[0] != '/'
+
+        pull_map = push_to_cas_with_pullmap(cas_remote, source_and_dest, resolver_state.files_to_download)
+
+        command = "{helper_path} exec --uploadresults " \
+                        "-u retcode.json " \
+                        "-u stdout.txt " \
+                        "-u stderr.txt " \
+                        "-o stdout.txt " \
+                        "-e stderr.txt " \
+                        "-r retcode.json " \
+                        "-f {pull_map} " \
+                        "--stage {stage_dir} " \
+                        "{remote_url} . " \
+                        "bash wrapper.sh\n".format(helper_path=self.helper_path,
+                                                     remote_url = remote_url,
+                                                     pull_map = pull_map,
+                                                     stage_dir=".")
+
+        #### start of local execution of delegate
+        stdout_path = os.path.abspath(os.path.join(job_dir, "stdout.txt"))
+        stderr_path = os.path.abspath(os.path.join(job_dir, "stderr.txt"))
+
+        command_prefix = self.command_prefix
+        if capture_output:
+            bash_cmd = "exec {command_prefix} {command} > {stdout_path} 2> {stderr_path}".format(**locals())
+            captured_stdouts = (stdout_path, stderr_path)
+            close_fds = True
+        else:
+            bash_cmd = "exec {command_prefix} {command}".format(**locals())
+            captured_stdouts = None
+            close_fds = False
+
+        print("executing: %s", bash_cmd)
+
+        # create child in new process group so ctrl-c doesn't kill child process
+        proc = subprocess.Popen(['bash', '-c', bash_cmd], close_fds=close_fds, preexec_fn=os.setsid)
+
+        with open(os.path.join(job_dir, "description.txt"), "w") as fd:
+            fd.write(desc_name)
+
+        return DelegateExecution(name, id, job_dir, proc, outputs, captured_stdouts, desc_name, remote)
 
 
 class SgeExecClient:
@@ -530,53 +709,7 @@ class SgeExecClient:
         return status_obj.status
 
     def preprocess_inputs(self, resolver, inputs):
-        log.debug("preprocess_inputs, before inputs: %s", inputs)
-        files_to_upload_and_download = []
-        files_to_download = []
-
-        def next_file_index():
-            return len(files_to_upload_and_download) + len(files_to_download)
-
-        #need to find all files that will be downloaded and update with $filename of what eventual local location will be.
-        def resolve(obj_):
-            assert isinstance(obj_, dep.Obj)
-            obj = obj_.props
-            assert isinstance(obj, dict)
-
-            new_obj = {}
-            for k, v in obj.items():
-                if type(v) == dict and "$filename" in v:
-                    cur_name = v["$filename"]
-                    #Need to do something to avoid collisions.  Store under working dir?  maybe temp/filename-v
-                    new_name = "temp/{}.{}".format(os.path.basename(cur_name), next_file_index())
-                    files_to_upload_and_download.append((cur_name, new_name))
-                    v = new_name
-                elif isinstance(v, dict) and "$file_url" in v:
-                    cur_name = v["$file_url"]
-                    new_name = "temp/{}.{}".format(os.path.basename(cur_name), next_file_index())
-                    files_to_download.append((cur_name, new_name))
-                    v = new_name
-                elif isinstance(v, dict) and len(v) == 1 and "$value" in v:
-                    v = v["$value"]
-                else:
-                    assert isinstance(v, str), "Expected value for {} ({}) to be a string but was {}".format(k, repr(v), type(v))
-
-                new_obj[k] = v
-
-            return new_obj
-
-        result = {}
-        for bound_name, obj_or_list in inputs:
-            if isinstance(obj_or_list, list) or isinstance(obj_or_list, tuple):
-                list_ = obj_or_list
-                result[bound_name] = [resolve(obj_) for obj_ in list_]
-            else:
-                obj_ = obj_or_list
-                result[bound_name] = resolve(obj_)
-
-        log.debug("preprocess_inputs, after inputs: %s", result)
-        log.debug("files_to_upload_and_download: %s",files_to_upload_and_download)
-        log.debug("files_to_download: %s", files_to_download)
+        files_to_download, files_to_upload_and_download, result = process_inputs_for_remote_exec(inputs)
         return result, SGEResolveState(files_to_upload_and_download, files_to_download)
 
     def add_script(self, resolver_state, filename):
@@ -702,6 +835,18 @@ class SGEResolveState:
     def add_script(self, filename):
         self.files_to_upload_and_download.append( (filename, os.path.basename(filename)) )
 
+def _resolve_filenames(remote, artifact):
+    new_artifact = dict()
+    for k, v in artifact.items():
+        if type(v) == dict and "$filename" in v:
+            v = {"$file_url": remote.remote_url+"/"+v["$filename"]}
+        new_artifact[k] = v
+
+    log.debug("translated %r -> %r", artifact, new_artifact)
+
+    return new_artifact
+
+
 class SGEExecution:
     def __init__(self, transform, id, job_dir, sge_job_id, desc_name, client, remote, extern_ref, file_fetch):
         self.transform = transform
@@ -750,27 +895,20 @@ class SGEExecution:
             self._log_failure(failure)
         return failure, outputs
 
-    def _resolve_filenames(self, artifact):
-        new_artifact = dict()
-        for k, v in artifact.items():
-            if type(v) == dict and "$filename" in v:
-                v = {"$file_url": self.remote.remote_url+"/"+v["$filename"]}
-            new_artifact[k] = v
-
-        log.debug("translated %r -> %r", artifact, new_artifact)
-
-        return new_artifact
-
     def _get_completion(self):
         status = self.client.get_status(self.sge_job_id)
 
         if status != SGE_STATUS_COMPLETE:
             return None, None
 
+        print("status", status)
+        print("About to download retcode.json")
+
         retcode_content = self.remote.download_as_str("retcode.json")
         if retcode_content is not None:
             retcode = json.loads(retcode_content)['retcode']
         else:
+            print("got no retcode")
             retcode = None
 
         if retcode != 0:
@@ -784,17 +922,7 @@ class SGEExecution:
 
         log.info("Rule {} completed ({}). Results: {}".format(self.desc_name, self.job_dir, results))
         assert type(results['outputs']) == list
-        outputs = [self._resolve_filenames(o) for o in results['outputs']]
-
-        # # print summary of output files with full paths
-        # files_written = []
-        # for output in outputs:
-        #     for value in output.values():
-        #         if isinstance(value, dict) and "$filename" in value:
-        #             files_written.append(value["$filename"])
-        #
-        # if len(files_written):
-        #     log.warn("Rule %s wrote the following files:\n%s", self.transform, "\n".join(["\t"+x for x in files_written]))
+        outputs = [_resolve_filenames(self.remote, o) for o in results['outputs']]
 
         return None, outputs
 
@@ -827,6 +955,11 @@ def create_client(name, config, properties):
     elif type == "local":
         assert_has_only_props(properties, ["type", "resources"])
         return LocalExecClient(resources)
+    elif type == "delegate":
+        assert_has_only_props(properties, ["type", "resources", "HELPER_PATH", "COMMAND_PREFIX"])
+        return DelegateExecClient(resources, config["WORKING_DIR"], config["S3_STAGING_URL"]+"/"+config["EXECUTION_ID"], config["S3_STAGING_URL"],
+                                  properties["HELPER_PATH"], properties["COMMAND_PREFIX"], config["AWS_ACCESS_KEY_ID"],
+                             config["AWS_SECRET_ACCESS_KEY"])
     else:
         raise Exception("Unrecognized exec-profile 'type': {}".format(type))
 

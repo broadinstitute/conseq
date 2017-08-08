@@ -271,7 +271,7 @@ def publish_results(results_json_file, remote, published_files_root):
         outputs_to_publish.append(rewritten_output)
 
     results["outputs"] = outputs_to_publish
-    new_results_json = json.dumps(results, fd)
+    new_results_json = json.dumps(results)
     remote.upload_str(os.path.normpath(os.path.join(published_files_root, "results.json")), new_results_json)
 
 def publish_cmd(args, config):
