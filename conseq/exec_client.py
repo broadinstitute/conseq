@@ -230,9 +230,13 @@ class Execution:
         return None, outputs
 
 class DelegateExecution(Execution):
-    def __init__(self, transform, id, job_dir, proc, outputs, captured_stdouts, desc_name, remote):
+    def __init__(self, transform, id, job_dir, proc, outputs, captured_stdouts, desc_name, remote, file_fetcher):
         super(DelegateExecution, self).__init__(transform, id, job_dir, proc, outputs, captured_stdouts, desc_name)
         self.remote = remote
+        self.file_fetcher = file_fetcher
+
+    def _log_failure(self, msg):
+        _log_remote_failure(self.file_fetcher, msg)
 
     def _get_completion(self):
         retcode = self.proc.poll()
@@ -612,7 +616,7 @@ class DelegateExecClient:
         stdout_path = os.path.abspath(os.path.join(job_dir, "stdout.txt"))
         stderr_path = os.path.abspath(os.path.join(job_dir, "stderr.txt"))
 
-        full_command = self.command_template.format(COMMAND=command)
+        full_command = self.command_template.format(COMMAND=command, JOB=rel_job_dir)
         if capture_output:
             bash_cmd = "exec {full_command} {command} > {stdout_path} 2> {stderr_path}".format(**locals())
             captured_stdouts = (stdout_path, stderr_path)
@@ -630,8 +634,10 @@ class DelegateExecClient:
         with open(os.path.join(job_dir, "description.txt"), "w") as fd:
             fd.write(desc_name)
 
-        return DelegateExecution(name, id, job_dir, proc, outputs, captured_stdouts, desc_name, remote)
+        def file_fetcher(name, destination):
+            remote.download(name, destination, ignoreMissing=True, skipExisting=False)
 
+        return DelegateExecution(name, id, job_dir, proc, outputs, captured_stdouts, desc_name, remote, file_fetcher)
 
 class SgeExecClient:
     def __init__(self, host, sge_prologue, local_workdir, remote_workdir, remote_url, cas_remote_url, helper_path,
@@ -816,7 +822,7 @@ class SgeExecClient:
                 self.ssh.get(self.ssh_host, path, destination)
                 return "{}:{}".format(self.ssh_host, path)
             except FileNotFoundError:
-                log.warn("No file at {}:{}".format(self.ssh_host, path))
+                log.warning("No file at {}:{}".format(self.ssh_host, path))
         return fetch
 
     def cancel(self, sge_job_id):
@@ -847,6 +853,25 @@ def _resolve_filenames(remote, artifact):
 
     return new_artifact
 
+def _log_remote_failure(file_fetch, msg):
+    log.error(msg)
+
+    with tempfile.NamedTemporaryFile() as tmpstderr:
+        with tempfile.NamedTemporaryFile() as tmpstdout:
+            log.info("Fetching error and output logs for failed job's 'helper'")
+            helper_stderr_path = file_fetch("helper_stderr.txt", tmpstderr.name)
+            helper_stdout_path = file_fetch("helper_stdout.txt", tmpstdout.name)
+            log_job_output(tmpstdout.name, tmpstderr.name, stdout_path_to_print=helper_stderr_path,
+                           stderr_path_to_print=helper_stdout_path)
+
+    with tempfile.NamedTemporaryFile() as tmpstderr:
+        with tempfile.NamedTemporaryFile() as tmpstdout:
+            log.info("Fetching error and output logs for failed job")
+            stderr_path = file_fetch("stderr.txt", tmpstderr.name)
+            stdout_path = file_fetch("stdout.txt", tmpstdout.name)
+            log_job_output(tmpstdout.name, tmpstderr.name, stdout_path_to_print=stdout_path,
+                           stderr_path_to_print=stderr_path)
+
 
 class SGEExecution:
     def __init__(self, transform, id, job_dir, sge_job_id, desc_name, client, remote, extern_ref, file_fetch):
@@ -871,23 +896,7 @@ class SGEExecution:
         return json.dumps(self.extern_ref)
 
     def _log_failure(self, msg):
-        log.error(msg)
-
-        with tempfile.NamedTemporaryFile() as tmpstderr:
-            with tempfile.NamedTemporaryFile() as tmpstdout:
-                log.info("Fetching error and output logs for failed job's 'helper'")
-                helper_stderr_path = self.file_fetch("helper_stderr.txt", tmpstderr.name)
-                helper_stdout_path = self.file_fetch("helper_stdout.txt", tmpstdout.name)
-                log_job_output(tmpstdout.name, tmpstderr.name, stdout_path_to_print=helper_stderr_path, stderr_path_to_print=helper_stdout_path)
-
-        with tempfile.NamedTemporaryFile() as tmpstderr:
-            with tempfile.NamedTemporaryFile() as tmpstdout:
-                log.info("Fetching error and output logs for failed job")
-                stderr_path = self.file_fetch("stderr.txt", tmpstderr.name)
-                stdout_path = self.file_fetch("stdout.txt", tmpstdout.name)
-                log_job_output(tmpstdout.name, tmpstderr.name, stdout_path_to_print=stdout_path, stderr_path_to_print=stderr_path)
-
-        # TODO: Add dumping of stderr,stdout
+        _log_remote_failure(self.file_fetch, msg)
 
     def get_completion(self):
         failure, outputs = self._get_completion()
