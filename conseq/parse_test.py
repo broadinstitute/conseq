@@ -84,3 +84,18 @@ def test_forall_query():
     assert not rule.inputs[1].for_all
 
 
+rule_with_expected_outputs = """
+rule dynamic_outputs:
+    outputs-expected: {"type": "literal", "hasprop"}, {"type": "other"}
+    run "command"
+"""
+
+def test_expected_outputs():
+    decs = parser.parse_str(rule_with_expected_outputs)
+    assert len(decs) == 1
+    rule = decs[0]
+    assert rule.output_matches_expectation({"type": "literal", "hasprop": "a"})
+    assert rule.output_matches_expectation({"type": "other"})
+    assert not rule.output_matches_expectation({"type": "bad", "hasprop": "a"})
+    assert not rule.output_matches_expectation({"type": "literal"})
+    assert not rule.output_matches_expectation({"type": "literal", "hasprop": "a", "extra": "bad"})

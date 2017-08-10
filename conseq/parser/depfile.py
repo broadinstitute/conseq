@@ -13,31 +13,55 @@
 
 from __future__ import print_function, division, absolute_import, unicode_literals
 
+from grako.buffering import Buffer
 from grako.parsing import graken, Parser
 from grako.util import re, RE_FLAGS, generic_main  # noqa
 
 
-__version__ = (2016, 10, 17, 14, 0, 13, 0)
+KEYWORDS = {}
 
-__all__ = [
-    'depfileParser',
-    'depfileSemantics',
-    'main'
-]
 
-KEYWORDS = set([])
+class depfileBuffer(Buffer):
+    def __init__(
+        self,
+        text,
+        whitespace=None,
+        nameguard=None,
+        comments_re=None,
+        eol_comments_re='#.*?$',
+        ignorecase=None,
+        namechars='',
+        **kwargs
+    ):
+        super(depfileBuffer, self).__init__(
+            text,
+            whitespace=whitespace,
+            nameguard=nameguard,
+            comments_re=comments_re,
+            eol_comments_re=eol_comments_re,
+            ignorecase=ignorecase,
+            namechars=namechars,
+            **kwargs
+        )
 
 
 class depfileParser(Parser):
-    def __init__(self,
-                 whitespace=None,
-                 nameguard=None,
-                 comments_re=None,
-                 eol_comments_re='#.*?$',
-                 ignorecase=None,
-                 left_recursion=True,
-                 keywords=KEYWORDS,
-                 **kwargs):
+    def __init__(
+        self,
+        whitespace=None,
+        nameguard=None,
+        comments_re=None,
+        eol_comments_re='#.*?$',
+        ignorecase=None,
+        left_recursion=False,
+        parseinfo=True,
+        keywords=None,
+        namechars='',
+        buffer_class=depfileBuffer,
+        **kwargs
+    ):
+        if keywords is None:
+            keywords = KEYWORDS
         super(depfileParser, self).__init__(
             whitespace=whitespace,
             nameguard=nameguard,
@@ -45,7 +69,10 @@ class depfileParser(Parser):
             eol_comments_re=eol_comments_re,
             ignorecase=ignorecase,
             left_recursion=left_recursion,
+            parseinfo=parseinfo,
             keywords=keywords,
+            namechars=namechars,
+            buffer_class=buffer_class,
             **kwargs
         )
 
@@ -206,44 +233,6 @@ class depfileParser(Parser):
         self._closure(block0)
 
     @graken()
-    def _type_def_(self):
-        self._token('type')
-        self._identifier_()
-        self._token('has')
-        self._token('{')
-        self._identifier_()
-
-        def block0():
-            self._token(',')
-            self._identifier_()
-        self._closure(block0)
-        self._token('}')
-
-    @graken()
-    def _expected_output_type_(self):
-        self._identifier_()
-
-        def block0():
-            with self._choice():
-                with self._option():
-                    self._token('?')
-                with self._option():
-                    self._token('+')
-                with self._option():
-                    self._empty_closure()
-                self._error('expecting one of: + ?')
-        self._closure(block0)
-
-    @graken()
-    def _expected_output_types_(self):
-        self._expected_output_type_()
-
-        def block0():
-            self._token(',')
-            self._expected_output_type_()
-        self._closure(block0)
-
-    @graken()
     def _run_statement_(self):
         self._token('run')
         self._quoted_string_()
@@ -256,6 +245,43 @@ class depfileParser(Parser):
         self._identifier_()
         self._token('=')
         self._pattern(r'[0-9]+')
+
+    @graken()
+    def _output_expected_key_value_(self):
+        self._quoted_string_()
+
+        def block0():
+            with self._choice():
+                with self._option():
+
+                    def block1():
+                        self._token(':')
+                        self._quoted_string_()
+                    self._closure(block1)
+                with self._option():
+                    self._empty_closure()
+                self._error('no available options')
+        self._closure(block0)
+
+    @graken()
+    def _output_expected_def_(self):
+        self._token('{')
+        self._output_expected_key_value_()
+
+        def block0():
+            self._token(',')
+            self._output_expected_key_value_()
+        self._closure(block0)
+        self._token('}')
+
+    @graken()
+    def _outputs_expected_defs_(self):
+        self._output_expected_def_()
+
+        def block0():
+            self._token(',')
+            self._output_expected_def_()
+        self._closure(block0)
 
     @graken()
     def _rule_parameters_(self):
@@ -279,9 +305,9 @@ class depfileParser(Parser):
                     self._token(':')
                     self._output_specs_()
                 with self._option():
-                    self._token('expect-outputs')
+                    self._token('outputs-expected')
                     self._token(':')
-                    self._expected_output_types_()
+                    self._outputs_expected_defs_()
                 with self._option():
                     self._token('options')
                     self._token(':')
@@ -405,8 +431,6 @@ class depfileParser(Parser):
                 with self._option():
                     self._add_if_missing_()
                 with self._option():
-                    self._type_def_()
-                with self._option():
                     self._exec_profile_()
                 with self._option():
                     self._remember_executed_()
@@ -473,19 +497,19 @@ class depfileSemantics(object):
     def output_specs(self, ast):
         return ast
 
-    def type_def(self, ast):
-        return ast
-
-    def expected_output_type(self, ast):
-        return ast
-
-    def expected_output_types(self, ast):
-        return ast
-
     def run_statement(self, ast):
         return ast
 
     def requirement_def(self, ast):
+        return ast
+
+    def output_expected_key_value(self, ast):
+        return ast
+
+    def output_expected_def(self, ast):
+        return ast
+
+    def outputs_expected_defs(self, ast):
         return ast
 
     def rule_parameters(self, ast):
@@ -522,38 +546,21 @@ class depfileSemantics(object):
         return ast
 
 
-def main(
-        filename,
-        startrule,
-        trace=False,
-        whitespace=None,
-        nameguard=None,
-        comments_re=None,
-        eol_comments_re='#.*?$',
-        ignorecase=None,
-        left_recursion=True,
-        **kwargs):
-
+def main(filename, startrule, **kwargs):
     with open(filename) as f:
         text = f.read()
-    parser = depfileParser(parseinfo=False)
-    ast = parser.parse(
-        text,
-        startrule,
-        filename=filename,
-        trace=trace,
-        whitespace=whitespace,
-        nameguard=nameguard,
-        ignorecase=ignorecase,
-        **kwargs)
-    return ast
+    parser = depfileParser()
+    return parser.parse(text, startrule, filename=filename, **kwargs)
+
 
 if __name__ == '__main__':
     import json
+    from grako.util import asjson
+
     ast = generic_main(main, depfileParser, name='depfile')
     print('AST:')
     print(ast)
     print()
     print('JSON:')
-    print(json.dumps(ast, indent=2))
+    print(json.dumps(asjson(ast), indent=2))
     print()

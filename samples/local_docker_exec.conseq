@@ -20,3 +20,9 @@ rule example:
         with open("out.txt", "wt") as fd:
             fd.write(body.upper())
     """
+
+rule willfail:
+    executor: docker
+    inputs: in={"name":"lowercase"}
+    run "badcommand"
+

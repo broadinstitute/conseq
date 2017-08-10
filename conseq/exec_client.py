@@ -247,13 +247,13 @@ class DelegateExecution(Execution):
         if retcode != 0:
             return("shell command failed with {}".format(retcode), None)
 
-        print("About to download retcode.json")
+        log.debug("About to download retcode.json")
 
         retcode_content = self.remote.download_as_str("retcode.json")
         if retcode_content is not None:
             retcode = json.loads(retcode_content)['retcode']
         else:
-            print("got no retcode")
+            log.debug("got no retcode")
             retcode = None
 
         if retcode != 0:
@@ -626,7 +626,7 @@ class DelegateExecClient:
             captured_stdouts = None
             close_fds = False
 
-        print("executing: %s", bash_cmd)
+        log.debug("executing: %s", bash_cmd)
 
         # create child in new process group so ctrl-c doesn't kill child process
         proc = subprocess.Popen(['bash', '-c', bash_cmd], close_fds=close_fds, preexec_fn=os.setsid)
@@ -911,14 +911,13 @@ class SGEExecution:
         if status != SGE_STATUS_COMPLETE:
             return None, None
 
-        print("status", status)
-        print("About to download retcode.json")
+        log.debug("About to download retcode.json")
 
         retcode_content = self.remote.download_as_str("retcode.json")
         if retcode_content is not None:
             retcode = json.loads(retcode_content)['retcode']
         else:
-            print("got no retcode")
+            log.debug("got no retcode")
             retcode = None
 
         if retcode != 0:

@@ -10,6 +10,9 @@ FlockStmt = namedtuple("FlockStmt", ["language", "fn_prefix", "scripts"])
 TypeDefStmt = namedtuple("TypeDefStmt", "name properties")
 ExecProfileStmt = namedtuple("ExecProfileStmt", "name properties")
 RememberExecutedStmt = namedtuple("RememberExecutedStmt", "transform inputs outputs")
+ExpectKeyIs = namedtuple("ExpectKeyIs", "key value")
+ExpectKey = namedtuple("ExpectKey", "key")
+ExpectedTemplate = namedtuple("ExpectedTemplate", "predicates")
 
 class XRef:
     def __init__(self, url, obj):
@@ -27,6 +30,32 @@ class Rule:
         assert self.name != "" and self.name != " "
         self.resources = {"slots": 1}
         self.if_defined = []
+        self.output_expectations = []
+
+    def output_matches_expectation(self, key_values):
+        # if outputs were defined, then not checks needed
+        if self.outputs is not None:
+            return True
+
+        for e in self.output_expectations:
+            matched_all = True
+            unchecked_keys = set(key_values.keys())
+            for predicate in e.predicates:
+                if isinstance(predicate, ExpectKey):
+                    if predicate.key not in key_values:
+                        matched_all = False
+                        break
+                else:
+                    assert isinstance(predicate, ExpectKeyIs)
+                    if predicate.key not in key_values or key_values[predicate.key] != predicate.value:
+                        matched_all = False
+                        break
+                unchecked_keys.remove(predicate.key)
+
+            if matched_all and len(unchecked_keys) == 0:
+                return True
+
+        return False
 
     @property
     def language(self):
@@ -136,6 +165,31 @@ class Semantics(object):
         assert isinstance(ast, six.string_types)
         return QueryVariable(ast)
 
+    def output_expected_key_value(self, ast):
+        #print("output_expected_key_value", ast)
+        assert len(ast) == 2
+        if len(ast[1][0]) != 0:
+            value = ast[1][0][0][1]
+            #print("key", ast[0], "value", value)
+            assert isinstance(value, str)
+            return ExpectKeyIs(ast[0], value)
+        else:
+            return ExpectKey(ast[0])
+
+    def output_expected_def(self, ast):
+        #print("outputs_expected_def", ast)
+        predicates = [ast[1]]
+        for x in ast[2]:
+            predicates.append(x[1])
+        #print("predicates", predicates)
+        return ExpectedTemplate(predicates)
+
+    def outputs_expected_defs(self, ast):
+        expectations = [ast[0]]
+        for x in ast[1]:
+            expectations.append(x[1])
+        return expectations
+
     def rule(self, ast):
         #print("rule", repr(ast))
         rule_name = ast[1]
@@ -162,6 +216,8 @@ class Semantics(object):
                     rule.resources["slots"] = 1
             elif statement[0] == "if-defined":
                 rule.if_defined.extend ( [statement[2]] + [x[1] for x in statement[3]] )
+            elif statement[0] == "outputs-expected":
+                rule.output_expectations = statement[2]
             else:
                 raise Exception("unknown {}".format(statement[0]))
         rule.run_stmts.extend(runs)

@@ -1,3 +1,4 @@
+@@grammar :: depfile
 @@eol_comments :: /#.*?$/
 
 triple_dbl_quoted_string = /"""(?:[^"]|"{1,2}(?!"))+"""/ ;
@@ -26,19 +27,18 @@ input_specs = input_spec { "," input_spec }* ;
 
 output_specs = json_obj { "," json_obj } ;
 
-type_def = "type" identifier "has" "{" identifier { "," identifier }* "}" ;
-
-expected_output_type = identifier { "?" | "+" | {} } ;
-expected_output_types = expected_output_type { "," expected_output_type }* ;
-
 run_statement = "run" quoted_string [ "with" quoted_string ] ;
 
 requirement_def = identifier "=" /[0-9]+/ ;
 
+output_expected_key_value = quoted_string { { ":" quoted_string } | {} } ;
+output_expected_def = "{" output_expected_key_value { "," output_expected_key_value }* "}";
+outputs_expected_defs = output_expected_def { "," output_expected_def }* ;
+
 rule_parameters = ("inputs" ":" input_specs |
   "if-defined" ":" identifier { "," identifier }* |
   "outputs" ":" output_specs |
-  "expect-outputs" ":" expected_output_types |
+  "outputs-expected" ":" outputs_expected_defs |
   "options" ":" identifier { "," identifier }* |
   "executor" ":" identifier |
   "resources" ":" json_obj |
@@ -62,5 +62,5 @@ var_stmt = "let" identifier "=" quoted_string ;
 
 include_stmt = "include" quoted_string ;
 
-declarations =  { rule | xref | include_stmt | var_stmt | add_if_missing | type_def | exec_profile | remember_executed }+  $ ;
+declarations =  { rule | xref | include_stmt | var_stmt | add_if_missing | exec_profile | remember_executed }+  $ ;
 

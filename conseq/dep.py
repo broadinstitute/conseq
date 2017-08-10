@@ -458,7 +458,7 @@ class RuleSet:
         c.execute("update rule_execution set state = ?, execution_id = ? where id = ?", (RE_STATUS_STARTED, execution_id, rule_id))
 
     def get_space_by_execution_id(self, execution_id):
-        rule = self._get_by_execution_id(execution_id)
+        rule = self.get_by_execution_id(execution_id)
         if rule == None:
             return None
         return rule.space
@@ -483,7 +483,7 @@ class RuleSet:
         else:
             return rule_exec_id[0]
 
-    def _get_by_execution_id(self, execution_id):
+    def get_by_execution_id(self, execution_id):
         rules = self._find_rule_execs("execution_id = ?", (execution_id,))
         if len(rules) == 0:
             return None
@@ -724,7 +724,7 @@ class PropsMatch:
 from conseq.timeit import timeblock
 
 class Template:
-    def __init__(self, queries, predicates, transform, expected=None):
+    def __init__(self, queries, predicates, transform, output_matches_expectation=lambda x: True):
         self.foreach_queries = []
         self.forall_queries = []
         for q in queries:
@@ -736,6 +736,7 @@ class Template:
                 raise Exception("Bad query type: {}".format(q))
         self.predicates = predicates
         self.transform = transform
+        self.output_matches_expectation = output_matches_expectation
 
     def is_interested_in(self, obj):
         assert isinstance(obj, Obj), "obj is of type {}".format(type(obj))
@@ -1053,6 +1054,15 @@ class Jobs:
                         return obj["$space"], o
                     else:
                         return default_space, obj
+
+                rule_exec = self.rule_set.get_by_execution_id(execution_id)
+                if rule_exec is None:
+                    log.warning("Could not find rule for execution id %s", execution_id)
+                else:
+                    rule_def = self.rule_template_by_name[rule_exec.transform]
+                    for output in outputs:
+                        if not rule_def.output_matches_expectation(output):
+                            log.warning("Output %s did not match any of the expected outputs on rule \"%s\"", output, rule_exec.transform)
 
                 interned_outputs = []
                 for output in outputs:

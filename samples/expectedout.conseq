@@ -1,0 +1,28 @@
+rule a:
+    run "python" with """
+    from conseq import publish
+    publish({"type": "a-out"})
+"""
+rule b:
+    outputs-expected: {"type": "b-out"}
+    run "python" with """
+    from conseq import publish
+    publish({"type": "b-out"})
+"""
+
+rule b2:
+    inputs: in={"type": "b-out"}
+    outputs: {"type": "done"}
+    run "echo done"
+
+rule a2:
+    inputs: in={"type": "a-out"}
+    outputs: {"type": "done"}
+    run "echo done"
+
+rule c:
+    outputs-expected: {"type": "c-out"}
+    run "python" with """
+    from conseq import publish
+    publish({"type": "b-out"})
+"""

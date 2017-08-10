@@ -837,7 +837,7 @@ def convert_input_spec_to_queries(jinja2_env, rule, config):
 
 def to_template(jinja2_env, rule, config):
     queries, predicates = convert_input_spec_to_queries(jinja2_env, rule, config)
-    return dep.Template(queries, predicates, rule.name)
+    return dep.Template(queries, predicates, rule.name, output_matches_expectation=rule.output_matches_expectation)
 
 def quote_str(x):
     if isinstance(x, jinja2.StrictUndefined):
@@ -890,10 +890,20 @@ def _rules_to_dot(rules):
 #            stmts.append("o{} -> r{} [label=\"{}\"]".format(obj_id, rule_id, input.variable))
             stmts.append("o{} -> r{}".format(obj_id, rule_id))
 
+        outputs = []
         if rule.outputs is not None:
-            for output in rule.outputs:
-                obj_id = add_obj(output.get("type", "unknown"))
-                stmts.append("r{} -> o{}".format(rule_id, obj_id))
+            outputs.extend(rule.outputs)
+
+        for expectation in rule.output_expectations:
+            const_key_vals = {}
+            for predicate in expectation.predicates:
+                if isinstance(predicate, parser.ExpectKeyIs):
+                    const_key_vals[predicate.key] = predicate.value
+            outputs.append(const_key_vals)
+
+        for output in outputs:
+            obj_id = add_obj(output.get("type", "unknown"))
+            stmts.append("r{} -> o{}".format(rule_id, obj_id))
 
         #color=state_color[self.get_rule_state(rule.id)]
 #        color="gray"
