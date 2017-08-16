@@ -629,7 +629,7 @@ class DelegateExecClient:
         log.debug("executing: %s", bash_cmd)
 
         # create child in new process group so ctrl-c doesn't kill child process
-        proc = subprocess.Popen(['bash', '-c', bash_cmd], close_fds=close_fds, preexec_fn=os.setsid)
+        proc = subprocess.Popen(['bash', '-c', bash_cmd], close_fds=close_fds, preexec_fn=os.setsid, cwd=job_dir)
 
         with open(os.path.join(job_dir, "description.txt"), "w") as fd:
             fd.write(desc_name)
