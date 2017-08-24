@@ -235,12 +235,22 @@ class DelegateExecution(Execution):
         self.remote = remote
         self.file_fetcher = file_fetcher
 
+    def get_external_id(self):
+        d = dict(transform = self.transform, id = self.id,
+                 pid = self.proc.pid,
+                 outputs = self.outputs,
+                 captured_stdouts=self.captured_stdouts,
+                 desc_name = self.desc_name,
+                 remote_url=self.remote.remote_url,
+                 job_dir = self.job_dir,
+                 local_job_dir = self.job_dir)
+        return json.dumps(d)
+
     def _log_failure(self, msg):
         _log_remote_failure(self.file_fetcher, msg)
 
     def _get_completion(self):
         retcode = self.proc.poll()
-
         if retcode == None:
             return None, None
 
@@ -405,7 +415,17 @@ class PidProcStub:
     def __init__(self, pid):
         self.pid = pid
 
+    def __repr__(self):
+        return "<PidProcStub pid:{}>".format(self.pid)
+
     def poll(self):
+        # this is really just to cope with testing, normally the process was created by a different process
+        try:
+            os.waitpid(self.pid, os.WNOHANG)
+        except OSError:
+            pass
+
+        # now do the actual test to see if the process exists
         try:
             os.kill(self.pid, 0)
             return None
@@ -559,7 +579,9 @@ class DelegateExecClient:
 
     def reattach(self, external_ref):
         d = json.loads(external_ref)
-        return Execution(d['transform'], d['id'], d['job_dir'], PidProcStub(d['pid']), d['outputs'], d['captured_stdouts'], d['desc_name'])
+        remote = helper.Remote(d['remote_url'], d['local_job_dir'], self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
+        file_fetcher = self._mk_file_fetcher(remote)
+        return DelegateExecution(d['transform'], d['id'], d['job_dir'], PidProcStub(d['pid']), d['outputs'], d['captured_stdouts'], d['desc_name'], remote, file_fetcher)
 
     def preprocess_inputs(self, resolver, inputs):
         files_to_download, files_to_upload_and_download, result = process_inputs_for_remote_exec(inputs)
@@ -634,10 +656,13 @@ class DelegateExecClient:
         with open(os.path.join(job_dir, "description.txt"), "w") as fd:
             fd.write(desc_name)
 
+        file_fetcher = self._mk_file_fetcher(remote)
+        return DelegateExecution(name, id, job_dir, proc, outputs, captured_stdouts, desc_name, remote, file_fetcher)
+
+    def _mk_file_fetcher(self, remote):
         def file_fetcher(name, destination):
             remote.download(name, destination, ignoreMissing=True, skipExisting=False)
-
-        return DelegateExecution(name, id, job_dir, proc, outputs, captured_stdouts, desc_name, remote, file_fetcher)
+        return file_fetcher
 
 class SgeExecClient:
     def __init__(self, host, sge_prologue, local_workdir, remote_workdir, remote_url, cas_remote_url, helper_path,

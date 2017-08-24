@@ -59,3 +59,25 @@ def test_basic_docker_exec(tmpdir):
 
     assert output == [{"name": "banana"}]
 
+
+def test_delegate_reattach(tmpdir):
+    job_dir, c, uid, resolver_state = create_client_for(tmpdir, """
+        print("run")
+        """)
+
+    e = c.exec_script("name", "ID", job_dir, ["python script1"], [{"name": "test_delegate_reattach"}], True, "", "desc", resolver_state, {"mem": 10})
+    extern_id = e.get_external_id()
+
+    print("external_id=", extern_id)
+
+    _, c2, _, resolver_state = create_client_for(tmpdir, None, uid)
+    e2 = c2.reattach(extern_id)
+
+    while True:
+        failure, output = e2.get_completion()
+        assert failure is None
+        if output is not None:
+            break
+        time.sleep(1)
+
+    assert output == [{"name": "test_delegate_reattach"}]
