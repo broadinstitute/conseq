@@ -21,5 +21,5 @@ setup(name='conseq',
       entry_points={   'console_scripts': ['conseq=conseq.main:main']
       },
 #      install_requires=[ "colorlog", "grako", "jinja2", "paramiko", "requests", "boto", "tabulate", "six" ]
-      install_requires=[ "paramiko==2.1.2", "grako==3.99.9", "colorlog" ]
+      install_requires=[ "paramiko==2.1.2", "grako==3.99.9", "colorlog>=3.0.1", "requests>=2.18.1", "boto>=2.48.0", "tabulate>=0.7.7", "six>=1.10.0" ]
      )
