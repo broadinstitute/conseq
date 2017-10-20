@@ -185,6 +185,10 @@ def _import(args):
 def history_cmd(args):
     depexec.print_history(args.dir)
 
+def version_cmd(args):
+    import conseq
+    print(conseq.__version__)
+
 def add_history_cmd(sub):
     parser = sub.add_parser("history", help="Print the history of all executions")
     parser.set_defaults(func=history_cmd)
@@ -198,6 +202,10 @@ def add_localize(sub):
     parser.add_argument('file', metavar="FILE", help="the input file to parse")
     parser.add_argument('predicates', nargs='+', help="predicates to match in form 'key=value' ")
     parser.set_defaults(func=localize_cmd)
+
+def add_version(sub):
+    parser = sub.add_parser("version", help="prints version")
+    parser.set_defaults(func=version_cmd)
 
 def main():
     from conseq import trace_on_demand
@@ -226,6 +234,7 @@ def main():
     add_history_cmd(sub)
     add_localize(sub)
     add_publish(sub)
+    add_version(sub)
 
     args = parser.parse_args()
     if args.verbose:
