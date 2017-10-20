@@ -1,5 +1,7 @@
 import json
 
+__version__ = '0.3.0'
+
 def Local(name):
     return {"$filename": name}
 

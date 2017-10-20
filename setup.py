@@ -2,8 +2,18 @@
 
 from setuptools import setup
 
+import ast
+import re
+from setuptools import setup, find_packages
+
+_version_re = re.compile(r'__version__\s*=\s*(.*)')
+
+with open('conseq/__init__.py', 'rt') as f:
+    version = str(ast.literal_eval(_version_re.search(
+        f.read()).group(1)))
+
 setup(name='conseq',
-      version='0.2.4',
+      version=version,
       description='ConSeq dependency tracker',
       author='Philip Montgomery',
       author_email='pmontgom@broadinstitute.org',
