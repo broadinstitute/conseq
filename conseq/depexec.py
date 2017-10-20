@@ -110,6 +110,7 @@ def format_inputs(inputs):
 def publish(jinja2_env, location_template, config, inputs):
     location = render_template(jinja2_env, location_template, config, inputs=inputs)
     from conseq.export_cmd import publish_manifest
+    log.info("publishing artifacts to %s", location)
     publish_manifest(location, inputs, config)
 
 def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, capture_output, resolver_state, client):
