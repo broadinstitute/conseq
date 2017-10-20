@@ -221,3 +221,34 @@ def export_conseq(state_dir, output_file, cas_remote_url):
 
     if output_file is not None:
         fd.close()
+
+def publish_artifacts(state_dir, cas_remote_url, queries, dest_url, config_file):
+    config = depexec.load_config(config_file)
+    accesskey = config['AWS_ACCESS_KEY_ID']
+    secretaccesskey = config['AWS_SECRET_ACCESS_KEY']
+
+    by_group = collections.defaultdict(lambda: [])
+    j = dep.open_state_dir(state_dir)
+
+    objs = set()
+    for query in queries:
+        objs.update(j.find_objs(dep.DEFAULT_SPACE, query))
+    objs = list(objs)
+    obj_props = [o.props for o in objs]
+
+    if cas_remote_url:
+        cas_remote = helper.Remote(cas_remote_url, ".", accesskey=accesskey, secretaccesskey=secretaccesskey)
+        obj_props = upload_and_rewrite(cas_remote, obj_props)
+
+    for i, props in enumerate(obj_props):
+        by_group[props.get("type", "")].append( (objs[i], obj_props) )
+
+    # order by type to make things easier to read through by eye
+    artifacts = []
+    for group, obj_tuples in by_group.items():
+        for obj, obj_props in obj_tuples:
+            # extend by adding provenance?
+            artifacts.append(dict(properties=obj_props))
+
+    remote = helper.Remote(os.path.dirname(dest_url), ".", accesskey=accesskey, secretaccesskey=secretaccesskey)
+    remote.upload_str(os.path.basename(dest_url), json.dumps(dict(artifacts=artifacts), indent=2))

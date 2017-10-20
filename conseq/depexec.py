@@ -166,8 +166,8 @@ def get_job_dir(state_dir, job_id):
 
 def confirm_execution(transform, inputs):
     while True:
-        answer = input("Proceed to run {} on {}? (y)es, (a)lways or (q)uit: ".format(transform, inputs))
-        if not (answer in ["y", "a", "q"]):
+        answer = input("Proceed to run {} on {}? (y)es, (s)kip, (S)kip all, (a)lways or (q)uit: ".format(transform, inputs))
+        if not (answer in ["y", "a", "q", "S", "s"]):
             print("Invalid input")
         return answer
 
@@ -340,6 +340,8 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
     success_count = 0
     failure_count = 0
     start_count = 0
+    job_ids_to_ignore = set()
+    skip_remaining = False
     with capture_sigint() as was_interrupted_fn:
         while not abort:
             interrupted = was_interrupted_fn()
@@ -355,9 +357,16 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
                     break
 
             pending_jobs = j.get_pending()
+            if skip_remaining:
+                pending_jobs = []
+                job_ids_to_ignore.update([pj.id for pj in pending_jobs])
+            else:
+                pending_jobs = [ pj for pj in pending_jobs if pj.id not in job_ids_to_ignore]
+
+
             summary = get_execution_summary(executing)
 
-            msg = "%d processes running (%s), %d executions pending" % ( len(executing), summary, len(pending_jobs) )
+            msg = "%d processes running (%s), %d executions pending, %d skipped" % ( len(executing), summary, len(pending_jobs), len(job_ids_to_ignore) )
             if prev_msg != msg:
                 log.info(msg)
                 if len(pending_jobs) + len(executing) > 0:
@@ -365,7 +374,7 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
                     log.info("Summary of queue:\n%s\n", long_summary)
 
             prev_msg = msg
-            cannot_start_more = (maxstart is not None and start_count >= maxstart)
+            cannot_start_more = (maxstart is not None and start_count >= maxstart) or skip_remaining
             if len(executing) == 0 and (cannot_start_more or len(pending_jobs) == 0):
                 # now that we've completed everything, check for deferred jobs by marking them as ready.  If we have any, loop again
                 j.enable_deferred()
@@ -433,6 +442,12 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
                         req_confirm = False
                     elif answer == "q":
                         abort = True
+                        break
+                    elif answer == "s":
+                        job_ids_to_ignore.add(job.id)
+                        continue
+                    elif answer == "S":
+                        skip_remaining = True
                         break
 
                 # maybe record_started and update_exec_xref should be merged so anything started

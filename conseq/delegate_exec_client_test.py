@@ -34,7 +34,7 @@ def create_client_for(tmpdir, script, uid=None):
         uid = uuid.uuid4().hex
     #remote_url = TEST_REMOTE_URL_ROOT + "/" + uid
 
-    c = exec_client.DelegateExecClient(TEST_RESOURCES, workdir, TEST_REMOTE_URL_ROOT, TEST_REMOTE_URL_ROOT+"/CAS", TEST_HELPER_PATH,
+    c = exec_client.DelegateExecClient(TEST_RESOURCES, "delegate", workdir, TEST_REMOTE_URL_ROOT, TEST_REMOTE_URL_ROOT+"/CAS", TEST_HELPER_PATH,
                                        "docker run --rm -e AWS_ACCESS_KEY_ID="+os.getenv("AWS_ACCESS_KEY_ID")+
                                        " -e AWS_SECRET_ACCESS_KEY="+os.getenv("AWS_SECRET_ACCESS_KEY")+
                                        " conseq-del-test {COMMAND}",

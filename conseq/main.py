@@ -63,7 +63,7 @@ def add_rm(sub):
 
 def _parse_predicate_expr(txt):
     m = re.match("^([^=~]+)(.)(.*)$", txt)
-    assert m != None
+    assert m != None, "expect an object filter, but got %s" % repr(txt)
     name = m.group(1)
     op = m.group(2)
     value = m.group(3)
@@ -162,6 +162,17 @@ def export(args):
     from conseq import export_cmd
     export_cmd.export_artifacts(args.dir, args.url, args.config)
 
+def publish_cmd(args):
+    from conseq.export_cmd import publish_artifacts
+    publish_artifacts(args.dir, args.upload, [_parse_query(p.split(",")) for p in args.predicates], args.manifest, args.config)
+
+def add_publish(sub):
+    parser = sub.add_parser("publish", help="write artifacts and metadata to S3")
+    parser.add_argument("--upload", help="Path to upload files so that they will be accessible on a different machine.  Should be of the form s3://bucket/prefix/CAS")
+    parser.add_argument("--manifest", help="Path to upload the manifest of artifacts (example: s3://bucket/prefix/manifest.json)")
+    parser.add_argument('predicates', nargs='+', help="predicates to match in form 'key=value' ")
+    parser.set_defaults(func=publish_cmd)
+
 def add_import(sub):
     parser = sub.add_parser("import", help="import artifacts from S3")
     parser.add_argument("url", help="should be of the form s3://bucket/path")
@@ -214,6 +225,7 @@ def main():
     add_export_conseq(sub)
     add_history_cmd(sub)
     add_localize(sub)
+    add_publish(sub)
 
     args = parser.parse_args()
     if args.verbose:

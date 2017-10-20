@@ -151,7 +151,7 @@ class Remote:
             bucket = self.bucket
             remote_path = os.path.normpath(self.remote_path + "/" + remote)
 
-        log.debug("downloading as string:", remote_path)
+        print("downloading as string:", remote_path)
         key = bucket.get_key(remote_path)
         if key == None:
             return None
@@ -163,7 +163,7 @@ class Remote:
         remote_path = self.remote_path+"/"+remote
         k = Key(self.bucket)
         k.key = remote_path
-        log.info("Uploading s3://%s/%s from memory", self.bucket.name, remote_path)
+        log.info("Uploading %s from memory", remote_path)
         k.set_contents_from_string(text)
 
 def drop_prefix(prefix, value):
@@ -212,6 +212,7 @@ def _get_files_from_dir(dirname):
         full = os.path.join(dirname, fn)
         if not os.path.isdir(full):
             files.append(full)
+    print("files", files)
     return files
 
 def push(remote, filenames):
@@ -232,7 +233,7 @@ def push_cmd(args, config):
 
 def pull(remote, file_mappings, ignoreMissing=False, skipExisting=True, stage_dir=None):
     for remote_path, local_path in file_mappings:
-        log.debug("pull remote_path=%s local_path=%s", remote_path, local_path)
+        print("remote_path", remote_path, "local_path", local_path)
         remote.download(remote_path, local_path, ignoreMissing=ignoreMissing, skipExisting=skipExisting, stage_dir=stage_dir)
 
 def pull_cmd(args, config):
@@ -272,6 +273,11 @@ def publish_results(results_json_file, remote, published_files_root):
     results["outputs"] = outputs_to_publish
     new_results_json = json.dumps(results)
     remote.upload_str(os.path.normpath(os.path.join(published_files_root, "results.json")), new_results_json)
+
+def publish_cmd(args, config):
+    remote = Remote(args.remote_url, args.local_dir, config["AWS_ACCESS_KEY_ID"], config["AWS_SECRET_ACCESS_KEY"])
+    published_files_root = drop_prefix(args.local_dir, os.path.abspath(os.path.dirname(args.results_json)))
+    publish_results(results_json_file, remote, published_files_root)
 
 def convert_json_mapping(d):
     result = []
@@ -322,17 +328,22 @@ def exec_cmd(args, config):
     pull_map = []
     if args.download_pull_map is not None:
         dl_pull_map_str = remote.download_as_str(args.download_pull_map)
+        print("dl_pull_map_str", dl_pull_map_str)
         pull_map_dict = json.loads(dl_pull_map_str)
         pull_map.extend(convert_json_mapping(pull_map_dict))
 
     if args.download is not None:
+        print("args.download", args.download)
         for mapping_str in args.download:
+            print("mapping_str", mapping_str)
             pull_map.append(parse_mapping_str(mapping_str))
 
+    print("pull_map", pull_map)
     pull(remote, pull_map, ignoreMissing=True, skipExisting=not args.forcedl, stage_dir=args.stage_dir)
 
     exec_command_with_capture(args.command, args.stderr, args.stdout, args.retcode, args.local_dir)
 
+    print("args.upload:", args.upload)
     if args.upload is not None:
         push(remote, args.upload)
 
@@ -350,6 +361,7 @@ def exec_command_with_capture(command, stderr_path, stdout_path, retcode_path, l
     if stdout_path is not None:
         stdout_fd = os.open(os.path.join(local_dir, stdout_path), os.O_WRONLY|os.O_APPEND|os.O_CREAT)
 
+#    command = ['/usr/bin/time','-v'] + command
     log.info("executing {}".format(command))
     retcode = subprocess.call(command, stdout=stdout_fd, stderr=stderr_fd, cwd=local_dir)
     log.info("Command returned {}".format(retcode))
@@ -372,6 +384,12 @@ def main(varg = None):
     push_parser.add_argument("local_dir")
     push_parser.add_argument("filenames", nargs="+")
     push_parser.set_defaults(func=push_cmd)
+
+    publish_parser = subparsers.add_parser("publish")
+    publish_parser.add_argument("remote_url")
+    publish_parser.add_argument("local_dir")
+    publish_parser.add_argument("publish_json")
+    publish_parser.set_defaults(func=publish_cmd)
 
     exec_parser = subparsers.add_parser("exec")
     exec_parser.add_argument("remote_url")
@@ -399,8 +417,8 @@ def main(varg = None):
     pull_parser.add_argument("file_mappings", help="mappings of remote paths to local paths of the form 'remote:local'", nargs="+")
     pull_parser.set_defaults(func=pull_cmd)
 
-    log.info("helper.main parameters: %s", varg)
-
+    print("varg", varg)
+    print("sys.argv", sys.argv)
     args = parser.parse_args(varg)
     config = {}
     if args.config is not None:

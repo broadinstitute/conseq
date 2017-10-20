@@ -156,8 +156,7 @@ class Execution:
 
     def _log_failure(self, failure):
         log.error("Task failed %s: %s", self.desc_name, failure)
-        if self.captured_stdouts != None:
-            log_job_output(self.captured_stdouts[0], self.captured_stdouts[1])
+        _log_local_failure(self.captured_stdouts)
 
     def get_completion(self):
         failure, outputs = self._get_completion()
@@ -230,10 +229,14 @@ class Execution:
         return None, outputs
 
 class DelegateExecution(Execution):
-    def __init__(self, transform, id, job_dir, proc, outputs, captured_stdouts, desc_name, remote, file_fetcher):
+    def __init__(self, transform, id, job_dir, proc, outputs, captured_stdouts, desc_name, remote, file_fetcher, label):
         super(DelegateExecution, self).__init__(transform, id, job_dir, proc, outputs, captured_stdouts, desc_name)
         self.remote = remote
         self.file_fetcher = file_fetcher
+        self.label = label
+
+    def get_state_label(self):
+        return self.label
 
     def get_external_id(self):
         d = dict(transform = self.transform, id = self.id,
@@ -243,11 +246,13 @@ class DelegateExecution(Execution):
                  desc_name = self.desc_name,
                  remote_url=self.remote.remote_url,
                  job_dir = self.job_dir,
-                 local_job_dir = self.job_dir)
+                 local_job_dir = self.job_dir,
+                 label=self.label)
         return json.dumps(d)
 
     def _log_failure(self, msg):
         _log_remote_failure(self.file_fetcher, msg)
+        _log_local_failure(self.captured_stdouts)
 
     def _get_completion(self):
         retcode = self.proc.poll()
@@ -566,7 +571,7 @@ def process_inputs_for_remote_exec(inputs):
         return files_to_download, files_to_upload_and_download, result
 
 class DelegateExecClient:
-    def __init__(self, resources, local_workdir, remote_url, cas_remote_url, helper_path, command_template, python_path, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY):
+    def __init__(self, resources, label, local_workdir, remote_url, cas_remote_url, helper_path, command_template, python_path, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY):
         self.resources = resources
         self.helper_path = helper_path
         self.local_workdir = local_workdir
@@ -576,12 +581,13 @@ class DelegateExecClient:
         self.AWS_ACCESS_KEY_ID = AWS_ACCESS_KEY_ID
         self.AWS_SECRET_ACCESS_KEY = AWS_SECRET_ACCESS_KEY
         self.python_path = python_path
+        self.label = label
 
     def reattach(self, external_ref):
         d = json.loads(external_ref)
         remote = helper.Remote(d['remote_url'], d['local_job_dir'], self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
         file_fetcher = self._mk_file_fetcher(remote)
-        return DelegateExecution(d['transform'], d['id'], d['job_dir'], PidProcStub(d['pid']), d['outputs'], d['captured_stdouts'], d['desc_name'], remote, file_fetcher)
+        return DelegateExecution(d['transform'], d['id'], d['job_dir'], PidProcStub(d['pid']), d['outputs'], d['captured_stdouts'], d['desc_name'], remote, file_fetcher, d['label'])
 
     def preprocess_inputs(self, resolver, inputs):
         files_to_download, files_to_upload_and_download, result = process_inputs_for_remote_exec(inputs)
@@ -629,26 +635,26 @@ class DelegateExecClient:
                         "-f {pull_map} " \
                         "--stage {stage_dir} " \
                         "{remote_url} . " \
-                        "bash wrapper.sh\n".format(helper_path=self.helper_path,
+                        "bash wrapper.sh".format(helper_path=self.helper_path,
                                                      remote_url = remote_url,
                                                      pull_map = pull_map,
                                                      stage_dir=".")
 
         #### start of local execution of delegate
-        stdout_path = os.path.abspath(os.path.join(job_dir, "stdout.txt"))
-        stderr_path = os.path.abspath(os.path.join(job_dir, "stderr.txt"))
+        stdout_path = os.path.abspath(os.path.join(job_dir, "delegate-stdout.txt"))
+        stderr_path = os.path.abspath(os.path.join(job_dir, "delegate-stderr.txt"))
 
-        full_command = self.command_template.format(COMMAND=command, JOB=rel_job_dir)
+        full_command = self.command_template.format(COMMAND=command, JOB=rel_job_dir).strip()
         if capture_output:
-            bash_cmd = "exec {full_command} {command} > {stdout_path} 2> {stderr_path}".format(**locals())
+            bash_cmd = "exec {full_command} > {stdout_path} 2> {stderr_path}".format(**locals())
             captured_stdouts = (stdout_path, stderr_path)
             close_fds = True
         else:
-            bash_cmd = "exec {full_command} {command}".format(**locals())
+            bash_cmd = "exec {full_command}".format(**locals())
             captured_stdouts = None
             close_fds = False
 
-        log.debug("executing: %s", bash_cmd)
+        log.warning("executing: %s", bash_cmd)
 
         # create child in new process group so ctrl-c doesn't kill child process
         proc = subprocess.Popen(['bash', '-c', bash_cmd], close_fds=close_fds, preexec_fn=os.setsid, cwd=job_dir)
@@ -657,7 +663,7 @@ class DelegateExecClient:
             fd.write(desc_name)
 
         file_fetcher = self._mk_file_fetcher(remote)
-        return DelegateExecution(name, id, job_dir, proc, outputs, captured_stdouts, desc_name, remote, file_fetcher)
+        return DelegateExecution(name, id, job_dir, proc, outputs, captured_stdouts, desc_name, remote, file_fetcher, self.label)
 
     def _mk_file_fetcher(self, remote):
         def file_fetcher(name, destination):
@@ -878,6 +884,12 @@ def _resolve_filenames(remote, artifact):
 
     return new_artifact
 
+
+def _log_local_failure(captured_stdouts):
+    if captured_stdouts != None:
+        log_job_output(captured_stdouts[0], captured_stdouts[1])
+
+
 def _log_remote_failure(file_fetch, msg):
     log.error(msg)
 
@@ -990,8 +1002,8 @@ def create_client(name, config, properties):
         assert_has_only_props(properties, ["type", "resources"])
         return LocalExecClient(resources)
     elif type == "delegate":
-        assert_has_only_props(properties, ["type", "resources", "HELPER_PATH", "COMMAND_TEMPLATE"])
-        return DelegateExecClient(resources, config["WORKING_DIR"], config["S3_STAGING_URL"]+"/"+config["EXECUTION_ID"], config["S3_STAGING_URL"],
+        assert_has_only_props(properties, ["type", "resources", "HELPER_PATH", "COMMAND_TEMPLATE", "label"])
+        return DelegateExecClient(resources, properties['label'], config["WORKING_DIR"], config["S3_STAGING_URL"]+"/"+config["EXECUTION_ID"], config["S3_STAGING_URL"],
                                   properties["HELPER_PATH"], properties["COMMAND_TEMPLATE"], config.get("PYTHON_PATH", "python"), config["AWS_ACCESS_KEY_ID"],
                              config["AWS_SECRET_ACCESS_KEY"])
     else:
