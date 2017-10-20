@@ -245,3 +245,24 @@ def test_rerun_same_result(tmpdir):
     assert len(j2.get_all_executions()) == 5
     # however, we should only have one instance of "thing"
     assert len(j.find_objs("public", dict(type="thing"))) == 1
+
+def test_publish(tmpdir, monkeypatch):
+    publish_called = [False]
+    def mock_publish_manifest(location, dictionary, config):
+        assert config is not None
+        assert dictionary=={"in": {"finished": "true", "name": "bongo"}}
+        assert location == "manifest-bongo.json"
+        publish_called[0] = True
+
+    import conseq.export_cmd
+    monkeypatch.setattr(conseq.export_cmd, 'publish_manifest', mock_publish_manifest)
+
+    j = run_conseq(tmpdir, """
+    rule a:
+        outputs: {"finished": "true", "name": "bongo"}
+    rule pub:
+        inputs: in={"finished": "true"}
+        publish: "manifest-{{ inputs.in.name }}.json"
+    """)
+
+    assert publish_called[0]

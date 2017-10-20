@@ -252,3 +252,9 @@ def publish_artifacts(state_dir, cas_remote_url, queries, dest_url, config_file)
 
     remote = helper.Remote(os.path.dirname(dest_url), ".", accesskey=accesskey, secretaccesskey=secretaccesskey)
     remote.upload_str(os.path.basename(dest_url), json.dumps(dict(artifacts=artifacts), indent=2))
+
+def publish_manifest(location, dictionary, config):
+    accesskey = config['AWS_ACCESS_KEY_ID']
+    secretaccesskey = config['AWS_SECRET_ACCESS_KEY']
+    remote = helper.Remote(os.path.dirname(location), ".", accesskey=accesskey, secretaccesskey=secretaccesskey)
+    remote.upload_str(os.path.basename(location), json.dumps(dictionary, indent=2))

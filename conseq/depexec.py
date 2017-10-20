@@ -107,6 +107,11 @@ def format_inputs(inputs):
 
     return "".join(lines)
 
+def publish(jinja2_env, location_template, config, inputs):
+    location = render_template(jinja2_env, location_template, config, inputs=inputs)
+    from conseq.export_cmd import publish_manifest
+    publish_manifest(location, inputs, config)
+
 def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, capture_output, resolver_state, client):
     try:
         prologue = render_template(jinja2_env, config["PROLOGUE"], config)
@@ -137,10 +142,12 @@ def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, captu
                                                desc_name,
                                                resolver_state,
                                                rule.resources)
-        else:
+        elif outputs != None:
             # fast path when there's no need to spawn an external process.  (mostly used by tests)
-            assert outputs != None, "No body, nor outputs specified.  This rule does nothing"
             execution = exec_client.SuccessfulExecutionStub(id, outputs)
+        else:
+            assert rule.is_publish_rule, "No body, nor outputs specified and not a publish rule.  This rule does nothing."
+            execution = exec_client.SuccessfulExecutionStub(id, [])
 
         return execution
 
@@ -449,6 +456,9 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
                     elif answer == "S":
                         skip_remaining = True
                         break
+
+                if rule.is_publish_rule:
+                    publish(jinja2_env, rule.publish_location, rules.get_vars(), inputs)
 
                 # maybe record_started and update_exec_xref should be merged so anything started
                 # always has an xref

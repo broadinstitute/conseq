@@ -82,6 +82,7 @@ def test_forall_query():
     assert rule.inputs[0].for_all
     assert rule.inputs[1].variable == "b"
     assert not rule.inputs[1].for_all
+    assert not rule.is_publish_rule
 
 
 rule_with_expected_outputs = """
@@ -99,3 +100,18 @@ def test_expected_outputs():
     assert not rule.output_matches_expectation({"type": "bad", "hasprop": "a"})
     assert not rule.output_matches_expectation({"type": "literal"})
     assert not rule.output_matches_expectation({"type": "literal", "hasprop": "a", "extra": "bad"})
+
+
+publish_rule = """
+rule pub:
+    inputs: a = {"type": "foo"}
+    publish: "sample{{inputs.a.other}}"
+"""
+
+def test_publish_rule(monkeypatch):
+
+    decs = parser.parse_str(publish_rule)
+    assert len(decs) == 1
+    rule = decs[0]
+    assert rule.is_publish_rule
+    assert rule.publish_location == "sample{{inputs.a.other}}"

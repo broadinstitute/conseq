@@ -31,6 +31,11 @@ class Rule:
         self.resources = {"slots": 1}
         self.if_defined = []
         self.output_expectations = []
+        self.publish_location = None
+
+    @property
+    def is_publish_rule(self):
+        return self.publish_location != None
 
     def output_matches_expectation(self, key_values):
         # if outputs were defined, then not checks needed
@@ -56,15 +61,6 @@ class Rule:
                 return True
 
         return False
-
-    @property
-    def language(self):
-        if "exec-python" in self.options:
-            return "python"
-        elif "exec-R" in self.options:
-            return "R"
-        else:
-            return "shell"
 
     def __repr__(self):
         return "<Rule {} inputs={} options={}>".format(self.name, self.inputs, self.options)
@@ -218,6 +214,9 @@ class Semantics(object):
                 rule.if_defined.extend ( [statement[2]] + [x[1] for x in statement[3]] )
             elif statement[0] == "outputs-expected":
                 rule.output_expectations = statement[2]
+            elif statement[0] == "publish":
+                rule.publish_location = statement[2]
+                assert rule.is_publish_rule
             else:
                 raise Exception("unknown {}".format(statement[0]))
         rule.run_stmts.extend(runs)

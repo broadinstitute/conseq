@@ -322,6 +322,10 @@ class depfileParser(Parser):
                     self._token(':')
                     self._identifier_()
                 with self._option():
+                    self._token('publish')
+                    self._token(':')
+                    self._quoted_string_()
+                with self._option():
                     self._token('resources')
                     self._token(':')
                     self._json_obj_()

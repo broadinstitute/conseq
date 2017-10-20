@@ -41,11 +41,12 @@ rule_parameters = ("inputs" ":" input_specs |
   "outputs-expected" ":" outputs_expected_defs |
   "options" ":" identifier { "," identifier }* |
   "executor" ":" identifier |
+  "publish" ":" quoted_string |
   "resources" ":" json_obj |
   "requires" ":" requirement_def { "," requirement_def }* )
   ;
 
-rule = "rule" identifier ":" { rule_parameters } * { run_statement } * 
+rule = "rule" identifier ":" { rule_parameters } * { run_statement } *
 ;
 
 xref = "xref" url json_obj ;
