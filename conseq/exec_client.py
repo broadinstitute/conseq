@@ -520,6 +520,44 @@ def push_to_cas_with_pullmap(remote, source_and_dest, url_and_dest):
 
     return "{}/{}".format(remote.remote_url, map_name)
 
+def process_inputs_for_publishing(cas_remote, inputs):
+
+    def resolve(obj_):
+        assert isinstance(obj_, dep.Obj)
+        obj = obj_.props
+        assert isinstance(obj, dict)
+
+        new_obj = {}
+        for k, v in obj.items():
+            if type(v) == dict and "$filename" in v:
+                cur_name = v["$filename"]
+                new_url = cas_remote.remote_url + "/" + helper.push_to_cas(cas_remote, [cur_name])[cur_name]
+                v = new_url
+            elif isinstance(v, dict) and "$file_url" in v:
+                v = v["$file_url"]
+            elif isinstance(v, dict) and len(v) == 1 and "$value" in v:
+                v = v["$value"]
+            else:
+                assert isinstance(v, str), "Expected value for {} ({}) to be a string but was {}".format(k, repr(v),
+                                                                                                         type(v))
+
+            new_obj[k] = v
+
+        return new_obj
+
+    result = {}
+    for bound_name, obj_or_list in inputs:
+        if isinstance(obj_or_list, list) or isinstance(obj_or_list, tuple):
+            list_ = obj_or_list
+            result[bound_name] = [resolve(obj_) for obj_ in list_]
+        else:
+            obj_ = obj_or_list
+            result[bound_name] = resolve(obj_)
+    log.debug("preprocess_inputs, after inputs: %s", result)
+
+    return result
+
+
 def process_inputs_for_remote_exec(inputs):
         log.debug("preprocess_inputs, before inputs: %s", inputs)
         files_to_upload_and_download = []
@@ -569,6 +607,20 @@ def process_inputs_for_remote_exec(inputs):
         log.debug("files_to_upload_and_download: %s", files_to_upload_and_download)
         log.debug("files_to_download: %s", files_to_download)
         return files_to_download, files_to_upload_and_download, result
+
+def create_publish_exec_client(config):
+    return PublishExecClient(config["S3_STAGING_URL"]+"/"+config["EXECUTION_ID"], config['AWS_ACCESS_KEY_ID'], config['AWS_SECRET_ACCESS_KEY'])
+
+class PublishExecClient:
+    def __init__(self, cas_remote_url, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY):
+        self.cas_remote = helper.Remote(cas_remote_url, ".", AWS_ACCESS_KEY_ID,
+                                   AWS_SECRET_ACCESS_KEY)
+        print("cas_remote", self.cas_remote)
+
+    def preprocess_inputs(self, resolver, inputs):
+        print("cas_remote", self.cas_remote)
+        result = process_inputs_for_publishing(self.cas_remote, inputs)
+        return result, None
 
 class DelegateExecClient:
     def __init__(self, resources, label, local_workdir, remote_url, cas_remote_url, helper_path, command_template, python_path, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY):

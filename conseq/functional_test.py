@@ -249,17 +249,40 @@ def test_rerun_same_result(tmpdir):
 def test_publish(tmpdir, monkeypatch):
     publish_called = [False]
     def mock_publish_manifest(location, dictionary, config):
+        print("dictionary", dictionary)
         assert config is not None
-        assert dictionary=={"in": {"finished": "true", "name": "bongo"}}
+        dictionary = dictionary['in']
+        assert dictionary["finished"] == "true"
+        assert dictionary["name"] == "bongo"
+        assert "$file_url" in dictionary["file"]
+        assert "$file_url" in dictionary["url"]
         assert location == "manifest-bongo.json"
         publish_called[0] = True
 
+    class MockRemote:
+        def __init__(self, remote_url, local_dir, accesskey=None, secretaccesskey=None):
+            print("Invoked!!!!")
+            self.local_dir = local_dir
+            self.remote_url = remote_url
+
+        def exists(self, filename):
+            return True
+            # print("XXXXXXXX")
+            # assert filenames == ["testfile"]
+            # return {"testfile": "s3://foo/testfile"}
+
     import conseq.export_cmd
     monkeypatch.setattr(conseq.export_cmd, 'publish_manifest', mock_publish_manifest)
+    import conseq.helper
+    monkeypatch.setattr(conseq.helper, 'Remote', MockRemote)
 
     j = run_conseq(tmpdir, """
+    let AWS_ACCESS_KEY_ID="x"
+    let AWS_SECRET_ACCESS_KEY="y"
+    let S3_STAGING_URL="s3://buckey/root"
     rule a:
-        outputs: {"finished": "true", "name": "bongo"}
+        outputs: {"finished": "true", "name": "bongo", "file": {"$filename": "testfile"}, "url": {"$file_url": "s3://foo/key"}}
+        run "bash" with "echo test > testfile"
     rule pub:
         inputs: in={"finished": "true"}
         publish: "manifest-{{ inputs.in.name }}.json"

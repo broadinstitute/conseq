@@ -336,6 +336,9 @@ class TimelineLog:
 
 from conseq import xref
 def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, capture_output, req_confirm, maxfail, maxstart):
+    from conseq.exec_client import create_publish_exec_client
+    _client_for_publishing = create_publish_exec_client(rules.get_vars())
+
     resources_per_client = dict([ (name, client.resources) for name, client in rules.exec_clients.items()])
     timings = TimelineLog(state_dir+"/timeline.log")
     active_job_ids = set([e.id for e in executing])
@@ -439,8 +442,11 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
                     continue
 
                 timings.log(job.id, "preprocess_inputs")
-                # localize paths that will be used in scripts
-                client = rules.get_client(rule.executor)
+                if rule.is_publish_rule:
+                    client = _client_for_publishing
+                else:
+                    # localize paths that will be used in scripts
+                    client = rules.get_client(rule.executor)
                 inputs, resolver_state = client.preprocess_inputs(resolver, job.inputs)
 
                 # if we're required confirmation from the user, do this before we continue
