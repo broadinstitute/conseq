@@ -353,6 +353,17 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
     start_count = 0
     job_ids_to_ignore = set()
     skip_remaining = False
+
+    def get_pending():
+        pending_jobs = j.get_pending()
+        if skip_remaining:
+            pending_jobs = []
+            job_ids_to_ignore.update([pj.id for pj in pending_jobs])
+        else:
+            pending_jobs = [pj for pj in pending_jobs if pj.id not in job_ids_to_ignore]
+
+        return pending_jobs
+
     with capture_sigint() as was_interrupted_fn:
         while not abort:
             interrupted = was_interrupted_fn()
@@ -367,13 +378,7 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
                 if we_should_stop:
                     break
 
-            pending_jobs = j.get_pending()
-            if skip_remaining:
-                pending_jobs = []
-                job_ids_to_ignore.update([pj.id for pj in pending_jobs])
-            else:
-                pending_jobs = [ pj for pj in pending_jobs if pj.id not in job_ids_to_ignore]
-
+            pending_jobs = get_pending()
 
             summary = get_execution_summary(executing)
 
@@ -389,7 +394,7 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
             if len(executing) == 0 and (cannot_start_more or len(pending_jobs) == 0):
                 # now that we've completed everything, check for deferred jobs by marking them as ready.  If we have any, loop again
                 j.enable_deferred()
-                deferred_jobs = len(j.get_pending())
+                deferred_jobs = len(get_pending())
                 if deferred_jobs > 0 and not cannot_start_more:
                     log.info("Marked deferred %d executions as ready", deferred_jobs)
                     continue
