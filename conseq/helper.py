@@ -151,7 +151,7 @@ class Remote:
             bucket = self.bucket
             remote_path = os.path.normpath(self.remote_path + "/" + remote)
 
-        log.debug("downloading as string:", remote_path)
+        log.debug("downloading as string: %s", remote_path)
         key = bucket.get_key(remote_path)
         if key == None:
             return None

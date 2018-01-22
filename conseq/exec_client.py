@@ -43,10 +43,13 @@ def log_job_output(stdout_path, stderr_path, line_count=20, stdout_path_to_print
     if stderr_path_to_print is None:
         stderr_path_to_print = stderr_path
 
-    log.error("Dumping last {} lines of stdout ({})".format(line_count, stdout_path_to_print))
-    _tail_file(stdout_path)
-    log.error("Dumping last {} lines of stderr ({})".format(line_count, stderr_path_to_print))
-    _tail_file(stderr_path)
+    if stdout_path is not None:
+        log.error("Dumping last {} lines of stdout ({})".format(line_count, stdout_path_to_print))
+        _tail_file(stdout_path)
+
+    if stderr_path is not None:
+        log.error("Dumping last {} lines of stderr ({})".format(line_count, stderr_path_to_print))
+        _tail_file(stderr_path)
 
 class FailedExecutionStub:
     def __init__(self, id, message):
@@ -240,7 +243,6 @@ class DelegateExecution(Execution):
 
     def get_external_id(self):
         d = dict(transform = self.transform, id = self.id,
-                 pid = self.proc.pid,
                  outputs = self.outputs,
                  captured_stdouts=self.captured_stdouts,
                  desc_name = self.desc_name,
@@ -248,6 +250,11 @@ class DelegateExecution(Execution):
                  job_dir = self.job_dir,
                  local_job_dir = self.job_dir,
                  label=self.label)
+        if hasattr(self.proc, 'pid'):
+            d['pid'] = self.proc.pid
+        else:
+            d['x_job_id'] = self.proc.job_id
+
         return json.dumps(d)
 
     def _log_failure(self, msg):
@@ -256,6 +263,7 @@ class DelegateExecution(Execution):
 
     def _get_completion(self):
         retcode = self.proc.poll()
+        #print("_get_completion -> {}".format(retcode))
         if retcode == None:
             return None, None
 
@@ -415,6 +423,29 @@ def preprocess_xref_inputs(j, resolver, inputs):
 class NullResolveState:
     def add_script(self, script):
         pass
+
+class ExternProc:
+    def __init__(self, job_id, check_cmd_template, is_running_pattern, terminate_cmd_template):
+        self.job_id = job_id
+        self.check_cmd_template = check_cmd_template
+        self.is_running_pattern = is_running_pattern
+        self.terminate_cmd_template = terminate_cmd_template
+
+    def poll(self):
+        check_cmd = self.check_cmd_template.format(job_id=self.job_id)
+        output = subprocess.check_output(check_cmd, shell=True)
+        output = output.decode("utf8")
+        #print("Check_cmd: {}".format(check_cmd))
+        m = re.search(self.is_running_pattern, output)
+        #print("output={} is_running_pattern={}, m={}".format(repr(output), self.is_running_pattern, m))
+        if m is None:
+            return 0
+        return None
+
+    def terminate(self):
+        terminate_cmd = self.terminate_cmd_template.format(job_id=self.job_id)
+        log.warning("Executing: %s", terminate_cmd)
+        subprocess.check_call(terminate_cmd, shell=True)
 
 class PidProcStub:
     def __init__(self, pid):
@@ -621,6 +652,116 @@ class PublishExecClient:
         print("cas_remote", self.cas_remote)
         result = process_inputs_for_publishing(self.cas_remote, inputs)
         return result, None
+
+class AsyncDelegateExecClient:
+    def __init__(self, resources, label, local_workdir, remote_url, cas_remote_url, helper_path, run_command_template, python_path, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, check_cmd_template, is_running_pattern, terminate_cmd_template, x_job_id_pattern):
+        self.resources = resources
+        self.helper_path = helper_path
+        self.local_workdir = local_workdir
+        self.remote_url = remote_url
+        self.run_command_template = run_command_template
+        self.cas_remote_url = cas_remote_url
+        self.AWS_ACCESS_KEY_ID = AWS_ACCESS_KEY_ID
+        self.AWS_SECRET_ACCESS_KEY = AWS_SECRET_ACCESS_KEY
+        self.python_path = python_path
+        self.label = label
+        self.check_cmd_template = check_cmd_template
+        self.is_running_pattern = is_running_pattern
+        self.terminate_cmd_template = terminate_cmd_template
+        self.x_job_id_pattern = x_job_id_pattern
+
+    def _extract_job_id(self, output):
+        m = re.match(self.x_job_id_pattern, output)
+        if m is None:
+            raise Exception("Pattern {} could not be found in {}".format(self.x_job_id_pattern, output))
+        return m.group(1)
+
+    def reattach(self, external_ref):
+        d = json.loads(external_ref)
+        remote = helper.Remote(d['remote_url'], d['local_job_dir'], self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
+        file_fetcher = self._mk_file_fetcher(remote)
+        proc = ExternProc(d['x_job_id'], self.check_cmd_template, self.is_running_pattern, self.terminate_cmd_template)
+        return DelegateExecution(d['transform'], d['id'], d['job_dir'], proc, d['outputs'], d['captured_stdouts'], d['desc_name'], remote, file_fetcher, d['label'])
+
+    def preprocess_inputs(self, resolver, inputs):
+        files_to_download, files_to_upload_and_download, result = process_inputs_for_remote_exec(inputs)
+        return result, SGEResolveState(files_to_upload_and_download, files_to_download)
+
+    def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name, resolver_state, resources):
+        mem_in_mb = resources.get("mem", 1000)
+        assert job_dir[:len(self.local_workdir)] == self.local_workdir
+        rel_job_dir = job_dir[len(self.local_workdir)+1:]
+
+        remote_url = "{}/{}".format(self.remote_url, rel_job_dir)
+        local_job_dir = "{}/{}".format(self.local_workdir, rel_job_dir)
+        local_wrapper_path = os.path.join(local_job_dir, "wrapper.sh")
+
+        source_and_dest = list(resolver_state.files_to_upload_and_download)
+        source_and_dest.append( (local_wrapper_path, "wrapper.sh") )
+
+        if outputs is not None:
+            local_write_results_path = os.path.join(local_job_dir, 'write_results.py')
+            source_and_dest += [ (local_write_results_path, "write_results.py") ]
+            run_stmts += ["{} write_results.py".format(self.python_path)]
+            with open(local_write_results_path, "wt") as fd:
+                fd.write("import json\n"
+                         "results = {}\n"
+                         "fd = open('results.json', 'wt')\n"
+                         "fd.write(json.dumps(results))\n"
+                         "fd.close()\n".format(repr(dict(outputs=outputs))))
+
+        write_wrapper_script(local_wrapper_path, None, prologue, run_stmts, None)
+
+        remote = helper.Remote(remote_url, local_job_dir, self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
+        cas_remote = helper.Remote(self.cas_remote_url, local_job_dir, self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
+        for _, dest in source_and_dest:
+            assert dest[0] != '/'
+
+        pull_map = push_to_cas_with_pullmap(cas_remote, source_and_dest, resolver_state.files_to_download)
+
+        command = "{helper_path} exec --uploadresults " \
+                        "-u retcode.json " \
+                        "-u stdout.txt " \
+                        "-u stderr.txt " \
+                        "-o stdout.txt " \
+                        "-e stderr.txt " \
+                        "-r retcode.json " \
+                        "-f {pull_map} " \
+                        "--stage {stage_dir} " \
+                        "{remote_url} . " \
+                        "bash wrapper.sh".format(helper_path=self.helper_path,
+                                                     remote_url = remote_url,
+                                                     pull_map = pull_map,
+                                                     stage_dir=".")
+
+        #### start of local execution of delegate
+        stdout_path = os.path.abspath(os.path.join(job_dir, "delegate.log"))
+
+        full_command = self.run_command_template.format(COMMAND=command, JOB=rel_job_dir).strip()
+        bash_cmd = "exec {full_command} > {stdout_path} 2>&1".format(full_command=full_command, stdout_path=stdout_path)
+        close_fds = True
+
+        log.warning("executing: %s", bash_cmd)
+
+        # create child in new process group so ctrl-c doesn't kill child process
+        subprocess.check_call(['bash', '-c', bash_cmd], close_fds=close_fds, preexec_fn=os.setsid, cwd=job_dir)
+
+        with open(stdout_path, "rt") as fd:
+            output = fd.read()
+
+        x_job_id = self._extract_job_id(output)
+
+        with open(os.path.join(job_dir, "description.txt"), "w") as fd:
+            fd.write(desc_name)
+
+        file_fetcher = self._mk_file_fetcher(remote)
+        proc = ExternProc(x_job_id, self.check_cmd_template, self.is_running_pattern, self.terminate_cmd_template)
+        return DelegateExecution(name, id, job_dir, proc, outputs, (stdout_path, None), desc_name, remote, file_fetcher, self.label)
+
+    def _mk_file_fetcher(self, remote):
+        def file_fetcher(name, destination):
+            remote.download(name, destination, ignoreMissing=True, skipExisting=False)
+        return file_fetcher
 
 class DelegateExecClient:
     def __init__(self, resources, label, local_workdir, remote_url, cas_remote_url, helper_path, command_template, python_path, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY):
@@ -1058,6 +1199,11 @@ def create_client(name, config, properties):
         return DelegateExecClient(resources, properties['label'], config["WORKING_DIR"], config["S3_STAGING_URL"]+"/"+config["EXECUTION_ID"], config["S3_STAGING_URL"],
                                   properties["HELPER_PATH"], properties["COMMAND_TEMPLATE"], config.get("PYTHON_PATH", "python"), config["AWS_ACCESS_KEY_ID"],
                              config["AWS_SECRET_ACCESS_KEY"])
+    elif type == "async-delegate":
+        assert_has_only_props(properties, ["type", "resources", "HELPER_PATH", "COMMAND_TEMPLATE", "CHECK_COMMAND_TEMPLATE", "IS_RUNNING_PATTERN", "label", "TERMINATE_CMD_TEMPLATE", "JOB_ID_PATTERN"])
+        return AsyncDelegateExecClient(resources, properties['label'], config["WORKING_DIR"], config["S3_STAGING_URL"]+"/"+config["EXECUTION_ID"], config["S3_STAGING_URL"],
+                                  properties["HELPER_PATH"], properties["COMMAND_TEMPLATE"], config.get("PYTHON_PATH", "python"), config["AWS_ACCESS_KEY_ID"],
+                             config["AWS_SECRET_ACCESS_KEY"], properties["CHECK_COMMAND_TEMPLATE"], properties["IS_RUNNING_PATTERN"], properties["TERMINATE_CMD_TEMPLATE"], properties["JOB_ID_PATTERN"])
     else:
         raise Exception("Unrecognized exec-profile 'type': {}".format(type))
 
