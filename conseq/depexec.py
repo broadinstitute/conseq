@@ -348,7 +348,7 @@ class Lazy:
 from conseq import xref
 def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, capture_output, req_confirm, maxfail, maxstart):
     from conseq.exec_client import create_publish_exec_client
-    _client_for_publishing = Lazy(create_publish_exec_client(rules.get_vars()))
+    _client_for_publishing = Lazy(lambda: create_publish_exec_client(rules.get_vars()))
 
     resources_per_client = dict([ (name, client.resources) for name, client in rules.exec_clients.items()])
     timings = TimelineLog(state_dir+"/timeline.log")
