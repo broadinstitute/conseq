@@ -334,10 +334,21 @@ class TimelineLog:
         self.fd = None
         self.w = None
 
+class Lazy:
+    def __init__(self, fn):
+        self.evaled = False
+        self.fn = fn
+
+    def __call__(self, *args, **kwargs):
+        if not self.evaled:
+            self.result = self.fn(*args, **kwargs)
+            self.evaled = True
+        return self.result
+
 from conseq import xref
 def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, capture_output, req_confirm, maxfail, maxstart):
     from conseq.exec_client import create_publish_exec_client
-    _client_for_publishing = create_publish_exec_client(rules.get_vars())
+    _client_for_publishing = Lazy(create_publish_exec_client(rules.get_vars()))
 
     resources_per_client = dict([ (name, client.resources) for name, client in rules.exec_clients.items()])
     timings = TimelineLog(state_dir+"/timeline.log")
@@ -448,7 +459,7 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
 
                 timings.log(job.id, "preprocess_inputs")
                 if rule.is_publish_rule:
-                    client = _client_for_publishing
+                    client = _client_for_publishing()
                 else:
                     # localize paths that will be used in scripts
                     client = rules.get_client(rule.executor)
