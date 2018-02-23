@@ -1044,7 +1044,7 @@ class Jobs:
         with transaction(self.db):
             default_space = self.rule_set.get_space_by_execution_id(execution_id)
             if default_space == None:
-                log.warn("No associated rule execution.  Dropping outputs: %s", outputs)
+                log.warning("No associated rule execution for execution_id %s.  Dropping outputs: %s", repr(execution_id), outputs)
                 self.log.record_completed(execution_id, new_status, [])
             else:
                 def get_space(obj):

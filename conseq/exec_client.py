@@ -150,7 +150,7 @@ class Execution:
         return json.dumps(d)
 
     def cancel(self):
-        log.warn("Killing pid %s (%s)", self.proc.pid, self.desc_name)
+        log.warning("Killing %s (%s)", self.desc_name, repr(self.proc))
         self.proc.terminate()
 
     @property
