@@ -232,11 +232,12 @@ class Execution:
         return None, outputs
 
 class DelegateExecution(Execution):
-    def __init__(self, transform, id, job_dir, proc, outputs, captured_stdouts, desc_name, remote, file_fetcher, label):
+    def __init__(self, transform, id, job_dir, proc, outputs, captured_stdouts, desc_name, remote, file_fetcher, label, results_path):
         super(DelegateExecution, self).__init__(transform, id, job_dir, proc, outputs, captured_stdouts, desc_name)
         self.remote = remote
         self.file_fetcher = file_fetcher
         self.label = label
+        self._results_path = results_path
 
     def get_state_label(self):
         return self.label
@@ -249,7 +250,8 @@ class DelegateExecution(Execution):
                  remote_url=self.remote.remote_url,
                  job_dir = self.job_dir,
                  local_job_dir = self.job_dir,
-                 label=self.label)
+                 label=self.label,
+                 results_path=self._results_path)
         if hasattr(self.proc, 'pid'):
             d['pid'] = self.proc.pid
         else:
@@ -282,7 +284,7 @@ class DelegateExecution(Execution):
         if retcode != 0:
             return("inner shell command failed with {}".format(repr(retcode)), None)
 
-        results_str = self.remote.download_as_str("results.json")
+        results_str = self.remote.download_as_str(self._results_path)
         if results_str is None:
             return("script reported success but results.json is missing!", None)
 
@@ -535,13 +537,13 @@ def push_to_cas_with_pullmap(remote, source_and_dest, url_and_dest):
     mapping += [dict(remote=src_url, local=dest)
                 for src_url, dest in url_and_dest ]
 
-    log.warn("name_mapping: %s", name_mapping)
-    log.warn("mapping: %s", mapping)
+    log.debug("name_mapping: %s", name_mapping)
+    log.debug("mapping: %s", mapping)
     for rec in mapping:
         if rec["local"].startswith("/"):
             rec['local'] = os.path.relpath(rec['local'], remote.local_dir)
 
-    mapping_str = json.dumps(dict(mapping=mapping))
+    mapping_str = json.dumps(dict(mapping=mapping), sort_keys=True)
     log.debug("Mapping str: %s", mapping_str)
     fd = tempfile.NamedTemporaryFile(mode="wt")
     fd.write(mapping_str)
@@ -642,6 +644,17 @@ def process_inputs_for_remote_exec(inputs):
 def create_publish_exec_client(config):
     return PublishExecClient(config["S3_STAGING_URL"]+"/"+config["EXECUTION_ID"], config['AWS_ACCESS_KEY_ID'], config['AWS_SECRET_ACCESS_KEY'])
 
+def make_results_path(cas_remote_url, pull_map_url):
+    import hashlib
+    hash = hashlib.sha256(pull_map_url.encode("utf-8")).hexdigest()
+    return os.path.join(cas_remote_url, "results", hash)
+
+def load_existing_results(id, remote, results_path):
+    log.warning("Job appears to have already been run, taking results from %s", results_path)
+    results_str = remote.download_as_str(results_path)
+    results = json.loads(results_str)
+    return SuccessfulExecutionStub(id, outputs=results['outputs'])
+
 class PublishExecClient:
     def __init__(self, cas_remote_url, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY):
         self.cas_remote = helper.Remote(cas_remote_url, ".", AWS_ACCESS_KEY_ID,
@@ -681,7 +694,7 @@ class AsyncDelegateExecClient:
         remote = helper.Remote(d['remote_url'], d['local_job_dir'], self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
         file_fetcher = self._mk_file_fetcher(remote)
         proc = ExternProc(d['x_job_id'], self.check_cmd_template, self.is_running_pattern, self.terminate_cmd_template)
-        return DelegateExecution(d['transform'], d['id'], d['job_dir'], proc, d['outputs'], d['captured_stdouts'], d['desc_name'], remote, file_fetcher, d['label'])
+        return DelegateExecution(d['transform'], d['id'], d['job_dir'], proc, d['outputs'], d['captured_stdouts'], d['desc_name'], remote, file_fetcher, d['label'], d['results_path'])
 
     def preprocess_inputs(self, resolver, inputs):
         files_to_download, files_to_upload_and_download, result = process_inputs_for_remote_exec(inputs)
@@ -718,8 +731,11 @@ class AsyncDelegateExecClient:
             assert dest[0] != '/'
 
         pull_map = push_to_cas_with_pullmap(cas_remote, source_and_dest, resolver_state.files_to_download)
+        results_path = make_results_path(self.cas_remote_url, pull_map)
+        if remote.exists(results_path):
+            return load_existing_results(id, remote, results_path)
 
-        command = "{helper_path} exec --uploadresults " \
+        command = "{helper_path} exec --uploadresults {results_path}" \
                         "-u retcode.json " \
                         "-u stdout.txt " \
                         "-u stderr.txt " \
@@ -729,7 +745,8 @@ class AsyncDelegateExecClient:
                         "-f {pull_map} " \
                         "--stage {stage_dir} " \
                         "{remote_url} . " \
-                        "bash wrapper.sh".format(helper_path=self.helper_path,
+                        "bash wrapper.sh".format(results_path=results_path,
+                                                helper_path=self.helper_path,
                                                      remote_url = remote_url,
                                                      pull_map = pull_map,
                                                      stage_dir=".")
@@ -756,7 +773,7 @@ class AsyncDelegateExecClient:
 
         file_fetcher = self._mk_file_fetcher(remote)
         proc = ExternProc(x_job_id, self.check_cmd_template, self.is_running_pattern, self.terminate_cmd_template)
-        return DelegateExecution(name, id, job_dir, proc, outputs, (stdout_path, None), desc_name, remote, file_fetcher, self.label)
+        return DelegateExecution(name, id, job_dir, proc, outputs, (stdout_path, None), desc_name, remote, file_fetcher, self.label, results_path)
 
     def _mk_file_fetcher(self, remote):
         def file_fetcher(name, destination):
@@ -780,7 +797,7 @@ class DelegateExecClient:
         d = json.loads(external_ref)
         remote = helper.Remote(d['remote_url'], d['local_job_dir'], self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
         file_fetcher = self._mk_file_fetcher(remote)
-        return DelegateExecution(d['transform'], d['id'], d['job_dir'], PidProcStub(d['pid']), d['outputs'], d['captured_stdouts'], d['desc_name'], remote, file_fetcher, d['label'])
+        return DelegateExecution(d['transform'], d['id'], d['job_dir'], PidProcStub(d['pid']), d['outputs'], d['captured_stdouts'], d['desc_name'], remote, file_fetcher, d['label'], d['results_path'])
 
     def preprocess_inputs(self, resolver, inputs):
         files_to_download, files_to_upload_and_download, result = process_inputs_for_remote_exec(inputs)
@@ -817,8 +834,11 @@ class DelegateExecClient:
             assert dest[0] != '/'
 
         pull_map = push_to_cas_with_pullmap(cas_remote, source_and_dest, resolver_state.files_to_download)
+        results_path = make_results_path(self.cas_remote_url, pull_map)
+        if remote.exists(results_path):
+            return load_existing_results(id, remote, results_path)
 
-        command = "{helper_path} exec --uploadresults " \
+        command = "{helper_path} exec --uploadresults {results_path} " \
                         "-u retcode.json " \
                         "-u stdout.txt " \
                         "-u stderr.txt " \
@@ -828,7 +848,8 @@ class DelegateExecClient:
                         "-f {pull_map} " \
                         "--stage {stage_dir} " \
                         "{remote_url} . " \
-                        "bash wrapper.sh".format(helper_path=self.helper_path,
+                        "bash wrapper.sh".format(results_path=results_path,
+                                                 helper_path=self.helper_path,
                                                      remote_url = remote_url,
                                                      pull_map = pull_map,
                                                      stage_dir=".")
@@ -856,7 +877,7 @@ class DelegateExecClient:
             fd.write(desc_name)
 
         file_fetcher = self._mk_file_fetcher(remote)
-        return DelegateExecution(name, id, job_dir, proc, outputs, captured_stdouts, desc_name, remote, file_fetcher, self.label)
+        return DelegateExecution(name, id, job_dir, proc, outputs, captured_stdouts, desc_name, remote, file_fetcher, self.label, results_path)
 
     def _mk_file_fetcher(self, remote):
         def file_fetcher(name, destination):
@@ -996,11 +1017,15 @@ class SgeExecClient:
         cas_remote = helper.Remote(self.cas_remote_url, local_job_dir, self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
         for _, dest in source_and_dest:
             assert dest[0] != '/'
+
         pull_map = push_to_cas_with_pullmap(cas_remote, source_and_dest, resolver_state.files_to_download)
+        results_path = make_results_path(self.cas_remote_url, pull_map)
+        if remote.exists(results_path):
+            return load_existing_results(id, remote, results_path)
 
         self.ssh.exec_cmd(self.ssh_host, "mkdir -p {}".format(remote_job_dir))
         helper_script = "cd {remote_job_dir}\n" \
-                        "{helper_path} exec --uploadresults " \
+                        "{helper_path} exec --uploadresults {results_path} " \
                         "-u retcode.json " \
                         "-u stdout.txt " \
                         "-u stderr.txt " \
@@ -1010,7 +1035,8 @@ class SgeExecClient:
                         "-f {pull_map} " \
                         "--stage {stage_dir} " \
                         "{remote_url} . " \
-                        "bash wrapper.sh\n".format(helper_path=self.helper_path,
+                        "bash wrapper.sh\n".format(results_path,
+                                                   helper_path=self.helper_path,
                                                      remote_url = remote_url,
                                                      remote_job_dir = remote_job_dir,
                                                      pull_map = pull_map,

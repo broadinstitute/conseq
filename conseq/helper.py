@@ -41,8 +41,13 @@ class Remote:
         self.bucket, self.remote_path = parse_remote(remote_url, accesskey, secretaccesskey)
 
     def exists(self, remote):
-        remote_path = self.remote_path + "/" + remote
-        key = self.bucket.get_key(remote_path)
+        if remote.startswith("s3:"):
+            bucket, remote_path = parse_remote(remote)
+        else:
+            bucket = self.bucket
+            remote_path =  os.path.normpath(self.remote_path + "/" + remote)
+
+        key = bucket.get_key(remote_path)
         return key != None
 
     # TODO: make download atomic by dl and rename (assuming get_contents_to_filename doesn't already)
@@ -160,8 +165,13 @@ class Remote:
         return value.decode("utf-8")
 
     def upload_str(self, remote, text):
-        remote_path = self.remote_path+"/"+remote
-        k = Key(self.bucket)
+        if remote.startswith("s3:"):
+            bucket, remote_path = parse_remote(remote)
+        else:
+            bucket = self.bucket
+            remote_path = os.path.normpath(self.remote_path + "/" + remote)
+
+        k = Key(bucket)
         k.key = remote_path
         log.info("Uploading s3://%s/%s from memory", self.bucket.name, remote_path)
         k.set_contents_from_string(text)
@@ -248,7 +258,7 @@ def read_config(filename):
             config[m.group(1)] = m.group(2)
     return config
 
-def publish_results(results_json_file, remote, published_files_root):
+def publish_results(results_json_file, remote, published_files_root, results_json_dest):
     if not os.path.exists(results_json_file):
         log.info("Skipping publishing results back. %s does not exist", results_json_file)
         return 
@@ -270,8 +280,8 @@ def publish_results(results_json_file, remote, published_files_root):
         outputs_to_publish.append(rewritten_output)
 
     results["outputs"] = outputs_to_publish
-    new_results_json = json.dumps(results)
-    remote.upload_str(os.path.normpath(os.path.join(published_files_root, "results.json")), new_results_json)
+    new_results_json = json.dumps(results, sort_keys=True)
+    remote.upload_str(results_json_dest, new_results_json)
 
 def convert_json_mapping(d):
     result = []
@@ -336,10 +346,10 @@ def exec_cmd(args, config):
     if args.upload is not None:
         push(remote, args.upload)
 
-    if args.uploadresults:
+    if args.uploadresults is not None:
         results_json_file = "./results.json"
-        published_files_root = args.local_dir # drop_prefix(args.local_dir, os.path.abspath(os.path.dirname(results_json_file)))
-        publish_results(results_json_file, remote, published_files_root)
+        published_files_root = args.local_dir
+        publish_results(results_json_file, remote, published_files_root, args.uploadresults)
 
 def exec_command_with_capture(command, stderr_path, stdout_path, retcode_path, local_dir):
     stderr_fd = None
@@ -384,7 +394,7 @@ def main(varg = None):
     exec_parser.add_argument("--retcode", "-r")
     exec_parser.add_argument("--forcedl", help="Force download of files even if the destination already exists")
     exec_parser.add_argument("--stage", help="directory to use for staging in local CAS", dest="stage_dir")
-    exec_parser.add_argument("--uploadresults", action="store_true")
+    exec_parser.add_argument("--uploadresults", help="If set, upload results.json to this location and all other associated files to CAS")
     exec_parser.add_argument("command", nargs=argparse.REMAINDER)
     exec_parser.set_defaults(func=exec_cmd)
 
