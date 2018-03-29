@@ -735,7 +735,7 @@ class AsyncDelegateExecClient:
         if remote.exists(results_path):
             return load_existing_results(id, remote, results_path)
 
-        command = "{helper_path} exec --uploadresults {results_path}" \
+        command = "{helper_path} exec --uploadresults {results_path} " \
                         "-u retcode.json " \
                         "-u stdout.txt " \
                         "-u stderr.txt " \

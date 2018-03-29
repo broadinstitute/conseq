@@ -30,7 +30,10 @@ class LazyConfig:
 
     def __getitem__(self, name):
         v = self._config_dict[name]
-        return self._render_template(v)
+        if isinstance(v, str):
+            return self._render_template(v)
+        else:
+            return v
 
 class MissingTemplateVar(Exception):
     def __init__(self, message, variables, template):
@@ -1079,7 +1082,8 @@ def _load_initial_config(state_dir, depfile, config_file):
                           SCRIPT_DIR=script_dir,
                           PROLOGUE="",
                           WORKING_DIR=state_dir,
-                          EXECUTION_ID=make_uuid())
+                          EXECUTION_ID=make_uuid(),
+                          ENV=dict(os.environ))
 
     if config_file is not None:
         initial_config.update(load_config(config_file))
@@ -1150,7 +1154,7 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
     executing = []
     pending_jobs = j.get_started_executions()
     if len(pending_jobs) > 0:
-        log.warn("Reattaching jobs that were started in a previous invocation of conseq, but had not terminated before conseq exited: %s", pending_jobs)
+        log.warning("Reattaching jobs that were started in a previous invocation of conseq, but had not terminated before conseq exited: %s", pending_jobs)
 
         reattach_existing = user_wants_reattach()
 
