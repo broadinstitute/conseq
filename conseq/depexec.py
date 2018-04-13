@@ -11,6 +11,7 @@ import shutil
 
 from conseq import dep
 from conseq import parser
+from conseq import debug_log
 import six
 
 from conseq import exec_client
@@ -136,6 +137,7 @@ def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, captu
             else:
                 run_stmts = generate_run_stmts(job_dir, rule.run_stmts, jinja2_env, config, inputs, resolver_state)
 
+                debug_log.log_execute(name, id, job_dir, inputs, run_stmts)
                 execution = client.exec_script(name,
                                                id,
                                                job_dir,
@@ -467,6 +469,7 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
                     # localize paths that will be used in scripts
                     client = rules.get_client(rule.executor)
                 inputs, resolver_state = client.preprocess_inputs(resolver, job.inputs)
+                debug_log.log_input_preprocess(job.id, job.inputs, inputs)
 
                 # if we're required confirmation from the user, do this before we continue
                 if req_confirm:
@@ -514,9 +517,11 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
                 if failure != None:
                     job_id = j.record_completed(timestamp, e.id, dep.STATUS_FAILED, {})
                     failure_count += 1
+                    debug_log.log_completed(job_id,  dep.STATUS_FAILED, completion)
                     timings.log(job_id, "fail")
                 elif completion != None:
                     job_id = j.record_completed(timestamp, e.id, dep.STATUS_COMPLETED, completion)
+                    debug_log.log_completed(job_id,  dep.STATUS_COMPLETED, completion)
                     success_count += 1
                     new_completions = True
                     timings.log(job_id, "complete")
@@ -777,7 +782,7 @@ def rm_cmd(state_dir, dry_run, space, query, with_invalidate):
     if space is None:
         space = j.get_current_space()
     for o in j.find_objs(space, query):
-        log.warn("rm %s", o)
+        log.warning("rm %s", o)
         if not dry_run:
             j.remove_obj(o.id, with_invalidate)
 

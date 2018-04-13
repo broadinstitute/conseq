@@ -659,10 +659,8 @@ class PublishExecClient:
     def __init__(self, cas_remote_url, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY):
         self.cas_remote = helper.Remote(cas_remote_url, ".", AWS_ACCESS_KEY_ID,
                                    AWS_SECRET_ACCESS_KEY)
-        print("cas_remote", self.cas_remote)
 
     def preprocess_inputs(self, resolver, inputs):
-        print("cas_remote", self.cas_remote)
         result = process_inputs_for_publishing(self.cas_remote, inputs)
         return result, None
 

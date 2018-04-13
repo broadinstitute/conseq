@@ -104,6 +104,13 @@ class Remote:
             if transferred == 0 and not ignoreMissing:
                 raise Exception("Could not find {}".format(local))
 
+    def upload_to_cas(self, filename):
+        "upload a single file to CAS"
+        mapping = push_to_cas(self, [filename], return_full_url=True)
+        paths = list(mapping.values())
+        assert len(paths) == 1
+        return paths[0]
+
     def upload(self, local, remote, ignoreMissing=False, force=False, hash=None):
         # maybe upload and download should use trailing slash to indicate directory should be uploaded instead of just a file
         assert not remote.startswith("/")
@@ -200,6 +207,7 @@ def push_str_to_cas(remote, content, filename="<unknown>"):
     return remote_name
 
 def push_to_cas(remote, filenames, return_full_url=False):
+    "upload multiple files to CAS and return mapping of filename to url"
     name_mapping = {}
 
     for filename in filenames:
@@ -215,6 +223,7 @@ def push_to_cas(remote, filenames, return_full_url=False):
         name_mapping[filename] = remote_name
 
     return name_mapping
+
 
 def _get_files_from_dir(dirname):
     files = []
@@ -272,7 +281,7 @@ def publish_results(results_json_file, remote, published_files_root, results_jso
             if isinstance(v, dict) and "$filename" in v:
                 filename = os.path.join(published_files_root, v["$filename"])
                 log.info("Uploading artifact from %s to %s", filename, filename)
-                file_url = remote.upload(filename, filename)
+                file_url = remote.upload_to_cas(filename)
                 assert file_url is not None
                 rewritten_output[k] = {"$file_url": file_url}
             else:
