@@ -630,6 +630,29 @@ class ExecutionLog:
                 if input_obj_id in objs_reached:
                     continue
                 objs_to_explore.append(input_obj_id)
+
+        return objs_reached
+
+
+    def find_all_reachable_downstream_objs(self, root_obj_ids):
+        c = get_cursor()
+        objs_to_explore = list(root_obj_ids)
+        objs_reached = set()
+
+        while len(objs_to_explore) > 0:
+            obj_id = objs_to_explore[-1]
+            del objs_to_explore[-1]
+
+            objs_reached.add(obj_id)
+
+            c.execute("select eo.obj_id from execution_input ei join execution e on ei.execution_id = e.id join execution_output eo on e.id = eo.execution_id where ei.obj_id = ?", [obj_id])
+            output_obj_ids = [x[0] for x in c.fetchall()]
+
+            for output_obj_id in output_obj_ids:
+                if output_obj_id in objs_reached:
+                    continue
+                objs_to_explore.append(output_obj_id)
+
         return objs_reached
 
     def to_dot(self, detailed):
@@ -1000,8 +1023,21 @@ class Jobs:
             obj = self.objects.get(obj_id)
             if with_invalidate:
                 for x in self.log.get_by_output(obj):
-                    self.rule_set.remove_rule(x.rule_id)
+                    rule = self.rule_set.get_by_execution_id(x.id)
+                    if rule is not None:
+                        self.rule_set.remove_rule(rule.id)
+                    self.log.delete(x.id)
             self.objects.remove(obj_id)
+
+    def find_all_reachable_downstream_objs(self, obj_id):
+        with transaction(self.db):
+            obj_ids = self.log.find_all_reachable_downstream_objs(obj_id)
+            return [self.objects.get(obj_id) for obj_id in obj_ids]
+
+    def remove_objects(self, obj_ids):
+        with transaction(self.db):
+            for obj_id in obj_ids:
+                self.remove_obj(obj_id, True)
 
     def find_objs(self, space, query):
         with transaction(self.db):

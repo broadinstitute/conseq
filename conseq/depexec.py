@@ -777,14 +777,19 @@ def ls_cmd(state_dir, space, predicates, groupby, columns):
             print_table(rows, 2)
             print()
 
-def rm_cmd(state_dir, dry_run, space, query, with_invalidate):
+def rm_cmd(state_dir, dry_run, space, query):
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
     if space is None:
         space = j.get_current_space()
-    for o in j.find_objs(space, query):
-        log.warning("rm %s", o)
-        if not dry_run:
-            j.remove_obj(o.id, with_invalidate)
+
+    root_objs = j.find_objs(space, query)
+    root_obj_ids = [o.id for o in root_objs]
+    all_objs = j.find_all_reachable_downstream_objs(root_obj_ids)
+    for obj in all_objs:
+        log.warning("rm %s", obj)
+
+    if not dry_run:
+        j.remove_objects([obj.id for obj in all_objs])
 
 def dot_cmd(state_dir, detailed):
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))

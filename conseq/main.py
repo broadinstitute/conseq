@@ -57,7 +57,6 @@ def add_rm(sub):
     parser = sub.add_parser("rm", help="Remove objects that satisfy given query")
     parser.add_argument('--space')
     parser.add_argument('--dry-run', action="store_true", dest="dry_run")
-    parser.add_argument('--no-invalidate', action="store_false", dest="with_invalidate")
     parser.add_argument('predicates', nargs='+', help="predicates to match in form 'key=value' ")
     parser.set_defaults(func=rm)
 
@@ -80,7 +79,7 @@ def _parse_query(predicates):
     return query
 
 def rm(args):
-    depexec.rm_cmd(args.dir, args.dry_run, args.space, _parse_query(args.predicates), False)
+    depexec.rm_cmd(args.dir, args.dry_run, args.space, _parse_query(args.predicates))
 
 def add_run(sub):
     parser = sub.add_parser("run", help="Run rules in the specified file")
