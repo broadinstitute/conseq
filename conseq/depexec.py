@@ -1,28 +1,30 @@
-import json
-import datetime
-import subprocess
-import jinja2
-import os
-import time
-import textwrap
-import logging
 import collections
+import datetime
+import json
+import logging
+import os
 import shutil
+import textwrap
+import time
 
-from conseq import dep
-from conseq import parser
-from conseq import debug_log
+import jinja2
 import six
 
+from conseq import debug_log
+from conseq import dep
 from conseq import exec_client
+from conseq import parser
 
 log = logging.getLogger(__name__)
+
 
 class FatalUserError(Exception):
     pass
 
+
 class JobFailedError(FatalUserError):
     pass
+
 
 class LazyConfig:
     def __init__(self, render_template, config_dict):
@@ -35,6 +37,7 @@ class LazyConfig:
             return self._render_template(v)
         else:
             return v
+
 
 class MissingTemplateVar(Exception):
     def __init__(self, message, variables, template):
@@ -53,11 +56,14 @@ class MissingTemplateVar(Exception):
             else:
                 var_defs.append("  {}: {}".format(repr(k), repr(v)))
 
-        var_block = "".join(x+"\n" for x in var_defs)
-        return ("Template error: {}, applying vars:\n{}\n to template:\n{}".format(self.message, var_block, self.template))
+        var_block = "".join(x + "\n" for x in var_defs)
+        return (
+            "Template error: {}, applying vars:\n{}\n to template:\n{}".format(self.message, var_block, self.template))
+
 
 def render_template(jinja2_env, template_text, config, **kwargs):
-    assert isinstance(template_text, six.string_types), "Expected string for template but got {}".format(repr(template_text))
+    assert isinstance(template_text, six.string_types), "Expected string for template but got {}".format(
+        repr(template_text))
     kwargs = dict(kwargs)
 
     def render_template_callback(text):
@@ -76,6 +82,7 @@ def indent_str(s, depth):
     pad = " " * depth
     return "\n".join([pad + x for x in s.split("\n")])
 
+
 def generate_run_stmts(job_dir, command_and_bodies, jinja2_env, config, inputs, resolver_state):
     run_stmts = []
     for i, x in enumerate(command_and_bodies):
@@ -84,14 +91,15 @@ def generate_run_stmts(job_dir, command_and_bodies, jinja2_env, config, inputs, 
         command, script_body = expand_run(jinja2_env, command, script_body, config, inputs)
         if script_body != None:
             formatted_script_body = textwrap.dedent(script_body)
-            script_name = os.path.abspath(os.path.join(job_dir, "script_%d"%i))
+            script_name = os.path.abspath(os.path.join(job_dir, "script_%d" % i))
             with open(script_name, "w") as fd:
                 fd.write(formatted_script_body)
-            command += " "+os.path.relpath(script_name, job_dir)
+            command += " " + os.path.relpath(script_name, job_dir)
             resolver_state.add_script(script_name)
 
         run_stmts.append(command)
     return run_stmts
+
 
 def format_inputs(inputs):
     lines = []
@@ -111,11 +119,13 @@ def format_inputs(inputs):
 
     return "".join(lines)
 
+
 def publish(jinja2_env, location_template, config, inputs):
     location = render_template(jinja2_env, location_template, config, inputs=inputs)
     from conseq.export_cmd import publish_manifest
     log.info("publishing artifacts to %s", location)
     publish_manifest(location, inputs, config)
+
 
 def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, capture_output, resolver_state, client):
     try:
@@ -160,6 +170,7 @@ def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, captu
     except MissingTemplateVar as ex:
         return exec_client.FailedExecutionStub(id, ex.get_error())
 
+
 def reattach(j, rules, pending_jobs):
     executing = []
     for e in pending_jobs:
@@ -174,15 +185,19 @@ def reattach(j, rules, pending_jobs):
             j.cancel_execution(e.id)
     return executing
 
+
 def get_job_dir(state_dir, job_id):
     return os.path.join(state_dir, "r" + str(job_id))
 
+
 def confirm_execution(transform, inputs):
     while True:
-        answer = input("Proceed to run {} on {}? (y)es, (s)kip, (S)kip all, (a)lways or (q)uit: ".format(transform, inputs))
+        answer = input(
+            "Proceed to run {} on {}? (y)es, (s)kip, (S)kip all, (a)lways or (q)uit: ".format(transform, inputs))
         if not (answer in ["y", "a", "q", "S", "s"]):
             print("Invalid input")
         return answer
+
 
 def get_long_execution_summary(executing, pending):
     from tabulate import tabulate
@@ -201,9 +216,9 @@ def get_long_execution_summary(executing, pending):
     rows = []
     for k, rec in counts.items():
         state, transform = k
-        dirs=" ".join(rec['dirs'])
+        dirs = " ".join(rec['dirs'])
         if len(dirs) > 30:
-            dirs = dirs[:30-4]+" ..."
+            dirs = dirs[:30 - 4] + " ..."
         rows.append([state, transform, rec['count'], dirs])
     return indent_str(tabulate(rows, ["state", "transform", "count", "dirs"], tablefmt="simple"), 4)
 
@@ -214,10 +229,13 @@ def get_execution_summary(executing):
         counts[e.get_state_label()] += 1
     keys = list(counts.keys())
     keys.sort()
-    return ", ".join(["%s:%d"%(k, counts[k]) for k in keys])
+    return ", ".join(["%s:%d" % (k, counts[k]) for k in keys])
+
 
 import contextlib
 import signal
+
+
 @contextlib.contextmanager
 def capture_sigint():
     interrupted = [False]
@@ -235,11 +253,12 @@ def capture_sigint():
 
     signal.signal(signal.SIGINT, original_sigint)
 
+
 def ask_user(message, options, default=None):
-    formatted_options=[]
+    formatted_options = []
     for option in options:
         if option == default:
-            option = "["+default+"]"
+            option = "[" + default + "]"
         formatted_options.append(option)
     formatted_options = "/".join(formatted_options)
 
@@ -257,6 +276,7 @@ def ask_user(message, options, default=None):
 def user_wants_reattach():
     return ask_user("Would you like to reattach existing jobs", ["y", "n"], "y") == 'y'
 
+
 def ask_user_to_cancel(j, executing):
     answer = ask_user("Terminate {} running before exiting".format(len(executing)), ["y", "n"])
 
@@ -264,8 +284,12 @@ def ask_user_to_cancel(j, executing):
         for e in executing:
             e.cancel()
 
+
 def user_says_we_should_stop(failure_count, executing):
-    answer = ask_user("Aborting due to failures {}, but there are {} jobs still running.  Terminate now".format(failure_count, len(executing)), ["y", "n", "never"])
+    answer = ask_user(
+        "Aborting due to failures {}, but there are {} jobs still running.  Terminate now".format(failure_count,
+                                                                                                  len(executing)),
+        ["y", "n", "never"])
     if answer == "y":
         return True, failure_count
     elif answer == "n":
@@ -273,13 +297,15 @@ def user_says_we_should_stop(failure_count, executing):
     else:
         return False, 1e10
 
+
 def get_satisfiable_jobs(rules, resources_per_client, pending_jobs, executions):
-    #print("get_satisfiable_jobs", len(pending_jobs), executions)
+    # print("get_satisfiable_jobs", len(pending_jobs), executions)
     ready = []
 
     # copy resources_per_client to a version we'll decrement as we consume
-    resources_remaining_per_client = dict([ (name, dict(resources)) for name, resources in resources_per_client.items()])
-    #print("max resources", resources_remaining_per_client)
+    resources_remaining_per_client = dict([(name, dict(resources)) for name, resources in resources_per_client.items()])
+
+    # print("max resources", resources_remaining_per_client)
 
     def get_remaining(job):  # returns the remaining resources for the client used by a given job
         rule = rules.get_rule(job.transform)
@@ -288,19 +314,18 @@ def get_satisfiable_jobs(rules, resources_per_client, pending_jobs, executions):
     for job in executions:
         rule = rules.get_rule(job.transform)
         resources = rule.resources
-        #print("job.id={}, active_job_ids={}".format(repr(job.id), repr(active_job_ids)))
+        # print("job.id={}, active_job_ids={}".format(repr(job.id), repr(active_job_ids)))
         resources_remaining = get_remaining(job)
-        #print("decrementing ", job.transform, rules.get_rule(job.transform).executor, resources_remaining, " by ", resources)
+        # print("decrementing ", job.transform, rules.get_rule(job.transform).executor, resources_remaining, " by ", resources)
         for resource, amount in resources.items():
             resources_remaining[resource] -= amount
-
 
     for job in pending_jobs:
         satisfiable = True
         rule = rules.get_rule(job.transform)
         resources = rule.resources
         resources_remaining = get_remaining(job)
-        #print("for ", job.transform, rules.get_rule(job.transform).executor, resources_remaining)
+        # print("for ", job.transform, rules.get_rule(job.transform).executor, resources_remaining)
         for resource, amount in resources.items():
             if resources_remaining[resource] < amount:
                 satisfiable = False
@@ -314,6 +339,7 @@ def get_satisfiable_jobs(rules, resources_per_client, pending_jobs, executions):
 
     return ready
 
+
 class TimelineLog:
     def __init__(self, filename):
         if filename is not None:
@@ -322,7 +348,7 @@ class TimelineLog:
             self.fd = open(filename, "at")
             self.w = csv.writer(self.fd)
             if is_new:
-                self.w.writerow(["timestamp","jobid","status"])
+                self.w.writerow(["timestamp", "jobid", "status"])
 
         else:
             self.fd = None
@@ -339,6 +365,7 @@ class TimelineLog:
         self.fd = None
         self.w = None
 
+
 class Lazy:
     def __init__(self, fn):
         self.evaled = False
@@ -350,13 +377,17 @@ class Lazy:
             self.evaled = True
         return self.result
 
+
 from conseq import xref
-def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, capture_output, req_confirm, maxfail, maxstart):
+
+
+def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, capture_output, req_confirm, maxfail,
+              maxstart):
     from conseq.exec_client import create_publish_exec_client
     _client_for_publishing = Lazy(lambda: create_publish_exec_client(rules.get_vars()))
 
-    resources_per_client = dict([ (name, client.resources) for name, client in rules.exec_clients.items()])
-    timings = TimelineLog(state_dir+"/timeline.log")
+    resources_per_client = dict([(name, client.resources) for name, client in rules.exec_clients.items()])
+    timings = TimelineLog(state_dir + "/timeline.log")
     active_job_ids = set([e.id for e in executing])
 
     resolver = xref.Resolver(state_dir, rules.vars)
@@ -398,7 +429,8 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
 
             summary = get_execution_summary(executing)
 
-            msg = "%d processes running (%s), %d executions pending, %d skipped" % ( len(executing), summary, len(pending_jobs), len(job_ids_to_ignore) )
+            msg = "%d processes running (%s), %d executions pending, %d skipped" % (
+                len(executing), summary, len(pending_jobs), len(job_ids_to_ignore))
             if prev_msg != msg:
                 log.info(msg)
                 if len(pending_jobs) + len(executing) > 0:
@@ -498,7 +530,8 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
                 if not os.path.exists(job_dir):
                     os.makedirs(job_dir)
 
-                e = execute(job.transform, resolver, jinja2_env, exec_id, job_dir, inputs, rule, rules.get_vars(), capture_output, resolver_state, client)
+                e = execute(job.transform, resolver, jinja2_env, exec_id, job_dir, inputs, rule, rules.get_vars(),
+                            capture_output, resolver_state, client)
                 executing.append(e)
                 j.update_exec_xref(e.id, e.get_external_id(), job_dir)
                 start_count += 1
@@ -517,18 +550,18 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
                 if failure != None:
                     job_id = j.record_completed(timestamp, e.id, dep.STATUS_FAILED, {})
                     failure_count += 1
-                    debug_log.log_completed(job_id,  dep.STATUS_FAILED, completion)
+                    debug_log.log_completed(job_id, dep.STATUS_FAILED, completion)
                     timings.log(job_id, "fail")
                 elif completion != None:
                     job_id = j.record_completed(timestamp, e.id, dep.STATUS_COMPLETED, completion)
-                    debug_log.log_completed(job_id,  dep.STATUS_COMPLETED, completion)
+                    debug_log.log_completed(job_id, dep.STATUS_COMPLETED, completion)
                     success_count += 1
                     new_completions = True
                     timings.log(job_id, "complete")
 
                 did_useful_work = True
 
-            #if dep.DISABLE_AUTO_CREATE_RULES and new_completions:
+            # if dep.DISABLE_AUTO_CREATE_RULES and new_completions:
             j.refresh_rules()
 
             if not did_useful_work:
@@ -542,13 +575,16 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
         # maybe also show summary of which jobs failed?
         log.warn("%d jobs failed", failure_count)
 
+
 def _datetimefromiso(isostr):
-    return datetime.datetime.strptime(isostr,"%Y-%m-%dT%H:%M:%S.%f")
+    return datetime.datetime.strptime(isostr, "%Y-%m-%dT%H:%M:%S.%f")
+
 
 def add_artifact_if_missing(j, obj):
     timestamp = datetime.datetime.now()
     d = dict(obj)
     return j.add_obj(dep.DEFAULT_SPACE, timestamp.isoformat(), d, overwrite=False)
+
 
 def add_xref(j, xref, refresh):
     timestamp = datetime.datetime.now()
@@ -569,6 +605,7 @@ def add_xref(j, xref, refresh):
                     overwrite = True
 
     return j.add_obj(dep.DEFAULT_SPACE, timestamp.isoformat(), d, overwrite=overwrite)
+
 
 class Rules:
     def __init__(self):
@@ -636,6 +673,7 @@ class Rules:
     def __repr__(self):
         return "<Rules vars:{}, rules:{}>".format(self.vars, list(self))
 
+
 def get_flock_statement(rule):
     "Returns None if this rule has no flock statements.  Otherwise returns reference to it"
     flock_stmts = [x for x in rule.run_stmts if type(x) == parser.FlockStmt]
@@ -643,6 +681,7 @@ def get_flock_statement(rule):
         assert len(flock_stmts) == 1, "If a flock job is specified, no other run statments can be given"
         return flock_stmts[0]
     return None
+
 
 def read_deps(filename, initial_vars={}):
     rules = Rules()
@@ -680,6 +719,7 @@ def read_deps(filename, initial_vars={}):
             rules.set_rule(dec.name, dec)
     return rules
 
+
 def print_history(state_dir):
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
     for exec_ in j.get_all_executions():
@@ -705,7 +745,9 @@ def print_history(state_dir):
             print(line)
 
         print("")
-#        print(exec)
+
+
+# print(exec)
 
 def localize_cmd(state_dir, space, predicates, depfile, config_file):
     initial_config = _load_initial_config(state_dir, depfile, config_file)
@@ -741,10 +783,10 @@ def ls_cmd(state_dir, space, predicates, groupby, columns):
         if len(subset) > 1 and columns == None:
             counts = depquery.count_unique_values_per_property(subset)
             common_keys, variable_keys = depquery.split_props_by_counts(counts)
-            common_table = [ [subset[0][k] for k in common_keys] ]
+            common_table = [[subset[0][k] for k in common_keys]]
             if len(common_keys) > 0:
                 print(indent_str("Properties shared by all {} rows:".format(len(subset)), indent))
-                print(indent_str(tabulate(common_table, common_keys, tablefmt="simple"), indent+2))
+                print(indent_str(tabulate(common_table, common_keys, tablefmt="simple"), indent + 2))
 
         elif columns != None:
             variable_keys = columns
@@ -762,7 +804,7 @@ def ls_cmd(state_dir, space, predicates, groupby, columns):
                     if cache_rec is not None:
                         v = {"$filename": cache_rec[0]}
                 full_row.append(str(v))
-            variable_table.append( full_row )
+            variable_table.append(full_row)
         print(indent_str(tabulate(variable_table, variable_keys, tablefmt="simple"), indent))
 
     if groupby == None:
@@ -776,6 +818,7 @@ def ls_cmd(state_dir, space, predicates, groupby, columns):
             print("For {}={}:".format(groupby, group))
             print_table(rows, 2)
             print()
+
 
 def rm_cmd(state_dir, dry_run, space, query):
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
@@ -791,13 +834,16 @@ def rm_cmd(state_dir, dry_run, space, query):
     if not dry_run:
         j.remove_objects([obj.id for obj in all_objs])
 
+
 def dot_cmd(state_dir, detailed):
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
     print(j.to_dot(detailed))
 
+
 def list_cmd(state_dir):
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
     j.dump()
+
 
 def debugrun(state_dir, depfile, target, override_vars, config_file):
     jinja2_env = create_jinja2_env()
@@ -822,11 +868,13 @@ def debugrun(state_dir, depfile, target, override_vars, config_file):
     applications = j.query_template(dep.Template(queries, predicates, rule.name))
     log.info("{} matches for entire rule".format(len(applications), q))
 
+
 def expand_run(jinja2_env, command, script_body, config, inputs):
     command = render_template(jinja2_env, command, config, inputs=inputs)
     if script_body != None:
         script_body = render_template(jinja2_env, script_body, config, inputs=inputs)
     return (command, script_body)
+
 
 def expand_dict(jinja2_env, d, config, **kwargs):
     assert isinstance(d, dict)
@@ -834,7 +882,7 @@ def expand_dict(jinja2_env, d, config, **kwargs):
 
     new_output = {}
     for k, v in d.items():
-#        print("expanding k", k)
+        #        print("expanding k", k)
         k = render_template(jinja2_env, k, config, **kwargs)
         # QueryVariables get introduced via expand input spec
         if not isinstance(v, parser.QueryVariable):
@@ -846,8 +894,10 @@ def expand_dict(jinja2_env, d, config, **kwargs):
 
     return new_output
 
+
 def expand_outputs(jinja2_env, output, config, **kwargs):
     return expand_dict(jinja2_env, output, config, **kwargs)
+
 
 def expand_input_spec(jinja2_env, spec, config):
     spec = dict(spec)
@@ -864,11 +914,13 @@ def expand_input_spec(jinja2_env, spec, config):
         expanded[k] = v
     return expanded
 
+
 def expand_xref(jinja2_env, xref, config):
     return parser.XRef(
         render_template(jinja2_env, xref.url, config),
         expand_dict(jinja2_env, xref.obj, config)
     )
+
 
 def convert_input_spec_to_queries(jinja2_env, rule, config):
     queries = []
@@ -881,7 +933,7 @@ def convert_input_spec_to_queries(jinja2_env, rule, config):
         constants = {}
         for prop_name, value in spec.items():
             if isinstance(value, parser.QueryVariable):
-                pairs_by_var[value.name].append( (bound_name, prop_name) )
+                pairs_by_var[value.name].append((bound_name, prop_name))
             else:
                 constants[prop_name] = value
         if for_all:
@@ -896,9 +948,11 @@ def convert_input_spec_to_queries(jinja2_env, rule, config):
 
     return queries, predicates
 
+
 def to_template(jinja2_env, rule, config):
     queries, predicates = convert_input_spec_to_queries(jinja2_env, rule, config)
     return dep.Template(queries, predicates, rule.name, output_matches_expectation=rule.output_matches_expectation)
+
 
 def quote_str(x):
     if isinstance(x, jinja2.StrictUndefined):
@@ -906,11 +960,13 @@ def quote_str(x):
     else:
         return json.dumps(x)
 
+
 def create_jinja2_env():
     jinja2_env = jinja2.Environment(undefined=jinja2.StrictUndefined)
 
     jinja2_env.filters['quoted'] = quote_str
     return jinja2_env
+
 
 def print_rules(depfile):
     rules = read_deps(depfile)
@@ -918,6 +974,7 @@ def print_rules(depfile):
     names.sort()
     for name in names:
         print(name)
+
 
 def _rules_to_dot(rules):
     """
@@ -945,10 +1002,10 @@ def _rules_to_dot(rules):
 
         rule_id = add_rule(rule.name, rule.filename)
         for input in rule.inputs:
-            #print(input)
+            # print(input)
             obj_id = add_obj(input.json_obj.get("type", "unknown"))
 
-#            stmts.append("o{} -> r{} [label=\"{}\"]".format(obj_id, rule_id, input.variable))
+            #            stmts.append("o{} -> r{} [label=\"{}\"]".format(obj_id, rule_id, input.variable))
             stmts.append("o{} -> r{}".format(obj_id, rule_id))
 
         outputs = []
@@ -966,23 +1023,27 @@ def _rules_to_dot(rules):
             obj_id = add_obj(output.get("type", "unknown"))
             stmts.append("r{} -> o{}".format(rule_id, obj_id))
 
-        #color=state_color[self.get_rule_state(rule.id)]
-#        color="gray"
-#        stmts.append("r{} [shape=box, label=\"{}\", style=\"filled\" fillcolor=\"{}\"]".format(rule_id, rule.name, color))
+            # color=state_color[self.get_rule_state(rule.id)]
+            #        color="gray"
+            #        stmts.append("r{} [shape=box, label=\"{}\", style=\"filled\" fillcolor=\"{}\"]".format(rule_id, rule.name, color))
 
     for node in rule_nodes.values():
-        stmts.append("r{} [shape=box, style=\"filled\", fillcolor=\"gray\", label=\"{}\n{}\"]".format(node['id'], node['name'], node['filename']))
+        stmts.append(
+            "r{} [shape=box, style=\"filled\", fillcolor=\"gray\", label=\"{}\n{}\"]".format(node['id'], node['name'],
+                                                                                             node['filename']))
 
     for obj in objs.values():
-        prop_values = ["type="+obj['type']]
+        prop_values = ["type=" + obj['type']]
         label = "\\n".join(prop_values)
         stmts.append("o{} [label=\"{}\"]".format(obj['id'], label))
 
     return "digraph { " + (";\n".join(set(stmts))) + " } "
 
+
 def alt_dot(depfile):
     rules = read_deps(depfile)
     print(_rules_to_dot(rules))
+
 
 def gc(state_dir):
     db_path = os.path.join(state_dir, "db.sqlite3")
@@ -996,6 +1057,7 @@ def gc(state_dir):
 
     j.gc(rm_job_dir)
 
+
 def load_config(config_file):
     config = {}
 
@@ -1008,10 +1070,12 @@ def load_config(config_file):
 
     return config
 
+
 def select_space(state_dir, name, create_if_missing):
     db_path = os.path.join(state_dir, "db.sqlite3")
     j = dep.open_job_db(db_path)
     j.select_space(name, create_if_missing)
+
 
 def print_spaces(state_dir):
     db_path = os.path.join(state_dir, "db.sqlite3")
@@ -1021,9 +1085,11 @@ def print_spaces(state_dir):
         selected = "*" if current_space == space else " "
         print("{} {}".format(selected, space))
 
+
 def make_uuid():
     import uuid
     return uuid.uuid4().hex
+
 
 def force_execution_of_rules(j, forced_targets):
     import re
@@ -1043,7 +1109,7 @@ def force_execution_of_rules(j, forced_targets):
                 constraint_input = m.group(1)
                 constraint_var = m.group(2)
                 constraint_value = m.group(3)
-                constraint_list.append( (constraint_input, constraint_var, constraint_value ))
+                constraint_list.append((constraint_input, constraint_var, constraint_value))
 
             print(rule_name, constraint_list)
 
@@ -1060,7 +1126,7 @@ def force_execution_of_rules(j, forced_targets):
                     return False
 
                 for constraint_input, constraint_var, constraint_value in constraint_list:
-                    if not inputs_has_constraint(inputs,  constraint_var, constraint_value, constraint_input):
+                    if not inputs_has_constraint(inputs, constraint_var, constraint_value, constraint_input):
                         return False
                 return True
 
@@ -1079,11 +1145,13 @@ def force_execution_of_rules(j, forced_targets):
 
     return rule_names
 
+
 def _get_dlcache_dir(state_dir):
     dlcache = os.path.join(state_dir, 'dlcache')
     if not os.path.exists(dlcache):
         os.makedirs(dlcache)
     return dlcache
+
 
 def _load_initial_config(state_dir, depfile, config_file):
     dlcache = _get_dlcache_dir(state_dir)
@@ -1100,7 +1168,9 @@ def _load_initial_config(state_dir, depfile, config_file):
 
     return initial_config
 
-def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_executions, capture_output, req_confirm, config_file,
+
+def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_executions, capture_output, req_confirm,
+         config_file,
          refresh_xrefs=False, maxfail=1, maxstart=None, force_no_targets=False):
     jinja2_env = create_jinja2_env()
 
@@ -1164,7 +1234,9 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
     executing = []
     pending_jobs = j.get_started_executions()
     if len(pending_jobs) > 0:
-        log.warning("Reattaching jobs that were started in a previous invocation of conseq, but had not terminated before conseq exited: %s", pending_jobs)
+        log.warning(
+            "Reattaching jobs that were started in a previous invocation of conseq, but had not terminated before conseq exited: %s",
+            pending_jobs)
 
         reattach_existing = user_wants_reattach()
 
@@ -1192,7 +1264,8 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
                 include_rule = True
 
         if not include_rule:
-            log.warn("Skipping {} because none of the following were set: {}".format(dec.name, ", ".join(dec.if_defined)))
+            log.warn(
+                "Skipping {} because none of the following were set: {}".format(dec.name, ", ".join(dec.if_defined)))
         else:
             try:
                 j.add_template(to_template(jinja2_env, dec, rules.vars))
@@ -1208,13 +1281,12 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
     def new_object_listener(obj):
         timestamp = datetime.datetime.now().isoformat()
         j.add_obj(timestamp, obj)
+
     try:
-        main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, capture_output, req_confirm, maxfail, maxstart)
+        main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, capture_output, req_confirm, maxfail,
+                  maxstart)
     except FatalUserError as e:
         print("Error: {}".format(e))
         return -1
 
     return 0
-
-
-

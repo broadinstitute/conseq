@@ -1,22 +1,22 @@
+import json
+import logging
 import os
 import re
-import subprocess
-import json
-from conseq.helper import Remote, drop_prefix, push_str_to_cas
-import argparse
-import logging
-from conseq import parser
+
 from conseq import exec_client
 from conseq import helper
+from conseq import parser
+from conseq.helper import Remote, drop_prefix, push_str_to_cas
 
 log = logging.getLogger(__name__)
+
 
 class ScatterGather:
     def __init__(self, exec_fn):
         self.exec_fn = exec_fn
 
     def is_task_complete(self, remote, name):
-        text = remote.download_as_str("completed/"+name)
+        text = remote.download_as_str("completed/" + name)
         if text != None:
             state = json.loads(text)
             if state["state"] == "success":
@@ -54,31 +54,29 @@ class ScatterGather:
 
         return self.submit_gather(gather_fn, remote, rcode)
 
-
     def generate_r_script(self, rcode, rest):
         execute_fn_r = open(os.path.join(os.path.dirname(__file__), "execute-r-fn.R"), "rt").read()
         return "{}\n{}\n{}\n".format(rcode, execute_fn_r, rest)
 
-
     def find_map_indices_not_run(self, remote, max_jobs):
         indices = set()
 
-        input_prefix = remote.remote_path+"/map-in"
+        input_prefix = remote.remote_path + "/map-in"
         for key in remote.bucket.list(prefix=input_prefix):
-            fn = drop_prefix(input_prefix+"/", key.key)
+            fn = drop_prefix(input_prefix + "/", key.key)
             m = re.match("(\\d+)", fn)
             if m != None:
                 indices.add(m.group(1))
 
         if max_jobs is not None:
             # only take first few examples
-            x=list(indices)
+            x = list(indices)
             x.sort()
             indices = set(x[:max_jobs])
 
-        output_prefix = remote.remote_path+"/map-out"
+        output_prefix = remote.remote_path + "/map-out"
         for key in remote.bucket.list(prefix=output_prefix):
-            fn = drop_prefix(output_prefix+"/", key.key)
+            fn = drop_prefix(output_prefix + "/", key.key)
             m = re.match("(\\d+)", fn)
             if m != None and m.group(1) in indices:
                 indices.remove(m.group(1))
@@ -88,7 +86,7 @@ class ScatterGather:
     def submit_config(self, url):
         command = ["docker",
                    "run",
-                   "-e", 'AWS_ACCESS_KEY_ID='+ os.getenv('AWS_ACCESS_KEY_ID'),
+                   "-e", 'AWS_ACCESS_KEY_ID=' + os.getenv('AWS_ACCESS_KEY_ID'),
                    "-e", 'AWS_SECRET_ACCESS_KEY=' + os.getenv('AWS_SECRET_ACCESS_KEY'),
                    "-w", "/work", "-i",
                    "enrichment", "python", "/helper.py", "exec-config", url]
@@ -101,23 +99,23 @@ class ScatterGather:
         script_url = push_str_to_cas(remote, r_script)
 
         config = dict(
-            remote_url = remote.remote_url,
-             pull=[{"src": args_url, "dest": "scatter-in/params.json", "isDir": False},
-                   {"src": script_url, "dest": "script.R", "isDir": False},],
-             mkdir=["shared", "map-in", "results"],
-             command=["Rscript", "script.R"],
-             exec_summary="retcode.json",
-             stdout="stdout.txt",
-             stderr="stderr.txt",
-             push=[{"src": "shared", "dest": "shared", "isDir": True},
-                   {"src": "map-in", "dest": "map-in", "isDir": True},
-                   {"src": "results", "dest": "results", "isDir": True},
-                   {"src": "retcode.json", "dest": "completed/scatter", "isDir": False},
-                   {"src": "stdout.txt", "dest": "logs/scatter/stdout.txt", "isDir": False},
-                   {"src": "stderr.txt", "dest": "logs/scatter/stderr.txt", "isDir": False},])
+            remote_url=remote.remote_url,
+            pull=[{"src": args_url, "dest": "scatter-in/params.json", "isDir": False},
+                  {"src": script_url, "dest": "script.R", "isDir": False}, ],
+            mkdir=["shared", "map-in", "results"],
+            command=["Rscript", "script.R"],
+            exec_summary="retcode.json",
+            stdout="stdout.txt",
+            stderr="stderr.txt",
+            push=[{"src": "shared", "dest": "shared", "isDir": True},
+                  {"src": "map-in", "dest": "map-in", "isDir": True},
+                  {"src": "results", "dest": "results", "isDir": True},
+                  {"src": "retcode.json", "dest": "completed/scatter", "isDir": False},
+                  {"src": "stdout.txt", "dest": "logs/scatter/stdout.txt", "isDir": False},
+                  {"src": "stderr.txt", "dest": "logs/scatter/stderr.txt", "isDir": False}, ])
 
         config_url = push_str_to_cas(remote, json.dumps(config))
-        sge_job_id = self.submit_config(remote.remote_url+"/"+config_url)
+        sge_job_id = self.submit_config(remote.remote_url + "/" + config_url)
         return [sge_job_id]
 
     def submit_map(self, map_fn, indices, remote, rcode):
@@ -127,22 +125,22 @@ class ScatterGather:
 
         for index in indices:
             config = dict(
-                remote_url = remote.remote_url,
-                 pull=[{"src": "shared", "dest": "shared", "isDir": True},
-                       {"src": "map-in/"+index, "dest": "map-in/"+index, "isDir": False},
-                       {"src": script_url, "dest": "script.R", "isDir": False},],
-                 mkdir=["map-out", "results"],
-                 command=["Rscript", "script.R"],
-                 exec_summary="retcode.json",
-                 stdout="stdout.txt",
-                 stderr="stderr.txt",
-                 push=[{"src": "map-out", "dest": "map-out", "isDir": True},
-                       {"src": "results", "dest": "results", "isDir": True},
-                       {"src": "stdout.txt", "dest": "logs/"+index+"/stdout.txt", "isDir": False},
-                       {"src": "stderr.txt", "dest": "logs/"+index+"/stderr.txt", "isDir": False},])
+                remote_url=remote.remote_url,
+                pull=[{"src": "shared", "dest": "shared", "isDir": True},
+                      {"src": "map-in/" + index, "dest": "map-in/" + index, "isDir": False},
+                      {"src": script_url, "dest": "script.R", "isDir": False}, ],
+                mkdir=["map-out", "results"],
+                command=["Rscript", "script.R"],
+                exec_summary="retcode.json",
+                stdout="stdout.txt",
+                stderr="stderr.txt",
+                push=[{"src": "map-out", "dest": "map-out", "isDir": True},
+                      {"src": "results", "dest": "results", "isDir": True},
+                      {"src": "stdout.txt", "dest": "logs/" + index + "/stdout.txt", "isDir": False},
+                      {"src": "stderr.txt", "dest": "logs/" + index + "/stderr.txt", "isDir": False}, ])
 
             config_url = push_str_to_cas(remote, json.dumps(config))
-            sge_job_ids.append( self.submit_config(remote.remote_url+"/"+config_url) )
+            sge_job_ids.append(self.submit_config(remote.remote_url + "/" + config_url))
 
         return sge_job_ids
 
@@ -151,27 +149,30 @@ class ScatterGather:
         script_url = push_str_to_cas(remote, r_script)
 
         config = dict(
-            remote_url = remote.remote_url,
-             pull=[{"src": "shared", "dest": "shared", "isDir": True},
-                   {"src": "map-out", "dest": "map-out", "isDir": True},
-                   {"src": script_url, "dest": "script.R", "isDir": False},],
-             mkdir=["results"],
-             command=["Rscript", "script.R"],
-             exec_summary="retcode.json",
-             stdout="stdout.txt",
-             stderr="stderr.txt",
-             push=[{"src": "results", "dest": "results", "isDir": True},
-                   {"src": "retcode.json", "dest": "completed/gather", "isDir": False},
-                   {"src": "stdout.txt", "dest": "logs/gather/stdout.txt", "isDir": False},
-                   {"src": "stderr.txt", "dest": "logs/gather/stderr.txt", "isDir": False},])
+            remote_url=remote.remote_url,
+            pull=[{"src": "shared", "dest": "shared", "isDir": True},
+                  {"src": "map-out", "dest": "map-out", "isDir": True},
+                  {"src": script_url, "dest": "script.R", "isDir": False}, ],
+            mkdir=["results"],
+            command=["Rscript", "script.R"],
+            exec_summary="retcode.json",
+            stdout="stdout.txt",
+            stderr="stderr.txt",
+            push=[{"src": "results", "dest": "results", "isDir": True},
+                  {"src": "retcode.json", "dest": "completed/gather", "isDir": False},
+                  {"src": "stdout.txt", "dest": "logs/gather/stdout.txt", "isDir": False},
+                  {"src": "stderr.txt", "dest": "logs/gather/stderr.txt", "isDir": False}, ])
 
         config_url = push_str_to_cas(remote, json.dumps(config))
-        sge_job_id = self.submit_config(remote.remote_url+"/"+config_url)
+        sge_job_id = self.submit_config(remote.remote_url + "/" + config_url)
         return [sge_job_id]
+
 
 import sqlite3
 
-CREATE_STATEMENTS = ["CREATE TABLE JOB (FLOCK_ID INTEGER PRIMARY KEY AUTOINCREMENT, FN_PREFIX STRING, DOCKER_IMG STRING, REMOTE_URL STRING, STATE STRING, SGE_JOB_IDS STRING, MAX_JOBS INTEGER, RCODE_URL STRING, LOCAL_DIR STRING)"]
+CREATE_STATEMENTS = [
+    "CREATE TABLE JOB (FLOCK_ID INTEGER PRIMARY KEY AUTOINCREMENT, FN_PREFIX STRING, DOCKER_IMG STRING, REMOTE_URL STRING, STATE STRING, SGE_JOB_IDS STRING, MAX_JOBS INTEGER, RCODE_URL STRING, LOCAL_DIR STRING)"]
+
 
 class FlockClient:
     def __init__(self, sge_exec_client, db_filename):
@@ -199,8 +200,8 @@ class FlockClient:
         self.scatter_gather.check_state_complete(remote, state, max_jobs)
 
         scatter_fn = fn_prefix + ".scatter"
-        map_fn = fn_prefix +".map"
-        gather_fn = fn_prefix +".gather"
+        map_fn = fn_prefix + ".map"
+        gather_fn = fn_prefix + ".gather"
 
         rcode = remote.download_as_str(rcode_url)
 
@@ -221,7 +222,9 @@ class FlockClient:
     def _get_job_params(self, flock_id):
         c = self.connection.cursor()
         try:
-            c.execute("SELECT FN_PREFIX, DOCKER_IMG, REMOTE_URL, MAX_JOBS, RCODE_URL, LOCAL_DIR FROM JOB WHERE FLOCK_ID = ?", [flock_id])
+            c.execute(
+                "SELECT FN_PREFIX, DOCKER_IMG, REMOTE_URL, MAX_JOBS, RCODE_URL, LOCAL_DIR FROM JOB WHERE FLOCK_ID = ?",
+                [flock_id])
             fn_prefix, docker_img, remote_url, max_jobs, rcode_url, local_dir = c.fetchone()
         finally:
             c.close()
@@ -243,15 +246,17 @@ class FlockClient:
         sge_job_ids_str = json.dumps(sge_job_ids)
         c = self.connection.cursor()
         try:
-            c.execute("UPDATE JOB SET STATE = ?, SGE_JOB_IDS = ? WHERE FLOCK_ID = ?", [state, flock_id, sge_job_ids_str])
+            c.execute("UPDATE JOB SET STATE = ?, SGE_JOB_IDS = ? WHERE FLOCK_ID = ?",
+                      [state, flock_id, sge_job_ids_str])
         finally:
             c.close()
 
     def _create_flock_job(self, docker_img, remote_url, rcode_url, fn_prefix, local_dir):
         c = self.connection.cursor()
         try:
-            c.execute("INSERT INTO JOB (STATE, FN_PREFIX, DOCKER_IMG, REMOTE_URL, MAX_JOBS, RCODE_URL, SGE_JOB_IDS, LOCAL_DIR) values (?, ?, ?, ?, ?, ?, ?, ?)",
-                      ["created", fn_prefix, docker_img, remote_url, None, rcode_url, "[]", local_dir])
+            c.execute(
+                "INSERT INTO JOB (STATE, FN_PREFIX, DOCKER_IMG, REMOTE_URL, MAX_JOBS, RCODE_URL, SGE_JOB_IDS, LOCAL_DIR) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                ["created", fn_prefix, docker_img, remote_url, None, rcode_url, "[]", local_dir])
             flock_id = c.lastrowid
         finally:
             c.close()
@@ -308,6 +313,7 @@ class FlockClient:
 
         return FlockExecution(flock_id, self)
 
+
 class FlockExecution:
     def __init__(self, flock_id, client):
         self.flock_id = flock_id
@@ -318,7 +324,7 @@ class FlockExecution:
         raise Exception("unimp")
 
     def get_state_label(self):
-        return "Flock-"+self.client.get_state(self.flock_id)
+        return "Flock-" + self.client.get_state(self.flock_id)
 
     def get_external_id(self):
         return json.dumps(self.extern_ref)

@@ -1,13 +1,13 @@
-import os
-import tempfile
-from six.moves.urllib.parse import urlparse
-from six.moves.urllib import request
-
-import paramiko
 import logging
 import os
+import tempfile
+
+import paramiko
+from six.moves.urllib import request
+from six.moves.urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
+
 
 def http_fetch(url, dest):
     with open(dest, "wb") as fdo:
@@ -15,8 +15,10 @@ def http_fetch(url, dest):
         for chunk in iter(lambda: fd.read(10000), b""):
             fdo.write(chunk)
 
+
 from boto.s3.connection import S3Connection
 from conseq.patched_resumable_download_handler import ResumableDownloadHandler
+
 
 def s3_fetch(bucket_name, path, destination_filename, config):
     # retry_count = 0
@@ -46,11 +48,12 @@ def s3_fetch(bucket_name, path, destination_filename, config):
     res_download_handler = ResumableDownloadHandler(num_retries=5)
 
     last = [time.time()]
+
     def report_progress(bytes_done, total_expected):
         now = time.time()
         elapsed = last[0] - now
         if elapsed > 10:
-            log.info("Downloaded {}/{} ({})".format(bytes_done, total_expected, 100*bytes_done/total_expected))
+            log.info("Downloaded {}/{} ({})".format(bytes_done, total_expected, 100 * bytes_done / total_expected))
 
     k.get_contents_to_filename(destination_filename, res_download_handler=res_download_handler, cb=report_progress)
 
@@ -62,7 +65,7 @@ class Pull:
 
     def _get_ssh_client(self, host):
         client = paramiko.SSHClient()
-        #client.load_system_host_keys()
+        # client.load_system_host_keys()
         client.set_missing_host_key_policy(paramiko.client.AutoAddPolicy())
 
         sshconfig = paramiko.config.SSHConfig()
@@ -70,7 +73,8 @@ class Pull:
         sshconfig.parse(open(config_name))
         host_config = sshconfig.lookup(host)
         if host_config != None:
-            client.connect(host_config["hostname"], username=host_config['user'], key_filename=host_config['identityfile'])
+            client.connect(host_config["hostname"], username=host_config['user'],
+                           key_filename=host_config['identityfile'])
         else:
             client.connect(host)
 
@@ -99,8 +103,11 @@ class Pull:
             client.close()
         self.ssh_client_cache = {}
 
+
 import time
 import sqlite3
+
+
 def open_cache_db(state_dir):
     filename = os.path.join(state_dir, "cache.sqlite3")
     needs_create = not os.path.exists(filename)
@@ -120,6 +127,7 @@ def open_cache_db(state_dir):
 
     return DownloadCacheDb(db)
 
+
 class DownloadCacheDb:
     def __init__(self, db):
         self.db = db
@@ -127,7 +135,8 @@ class DownloadCacheDb:
     def put(self, url, filename, etag, fetched_time):
         c = self.db.cursor()
         try:
-            c.execute("insert into downloaded (url, filename, etag, fetched_time) values (?, ?, ?, ?)", [url, filename, etag, fetched_time])
+            c.execute("insert into downloaded (url, filename, etag, fetched_time) values (?, ?, ?, ?)",
+                      [url, filename, etag, fetched_time])
             self.db.commit()
         finally:
             c.close()
@@ -141,6 +150,7 @@ class DownloadCacheDb:
             c.close()
         return result
 
+
 class Resolver:
     def __init__(self, state_dir, config):
         self.puller = Pull(config)
@@ -151,9 +161,8 @@ class Resolver:
         if os.path.exists(url):
             return dict(filename=os.path.abspath(url))
         elif url.startswith("taiga://"):
-            from conseq import taiga_pull
             dataset_id = url.replace("taiga://", "")
-            return dict(dataset_id = dataset_id)
+            return dict(dataset_id=dataset_id)
         else:
             url_rec = self.cache.get(url)
             dest_filename = None
@@ -180,5 +189,3 @@ class Resolver:
         else:
             etag = self.puller.get_etag(url)
             return etag != obj["etag"]["$value"]
-
-

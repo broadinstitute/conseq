@@ -2,6 +2,7 @@ import collections
 
 PropConst = collections.namedtuple("PropConst", ["property", "value"])
 
+
 def count_unique_values_per_property(instances):
     per_prop = collections.defaultdict(lambda: set())
 
@@ -27,7 +28,8 @@ def count_unique_values_per_property(instances):
                 import json
                 v = json.dumps(v)
             per_prop[k].add(v)
-    return [ (property, len(values)) for property, values in per_prop.items() ]
+    return [(property, len(values)) for property, values in per_prop.items()]
+
 
 def split_props_by_counts(property_counts):
     common = []
@@ -41,6 +43,7 @@ def split_props_by_counts(property_counts):
     varying.sort()
     return common, varying
 
+
 def count_instances_with_values(property, instances):
     per_value = collections.defaultdict(lambda: 0)
     for x in instances:
@@ -49,6 +52,7 @@ def count_instances_with_values(property, instances):
             per_value[x[property]] += 1
     return per_value.items()
 
+
 def count_instances_with_properties(properties, instances):
     per_property = collections.defaultdict(lambda: 0)
     for x in instances:
@@ -56,6 +60,7 @@ def count_instances_with_properties(properties, instances):
             if property in x:
                 per_property[property] += 1
     return per_property.items()
+
 
 class MockStore:
     def __init__(self, values):
@@ -68,7 +73,7 @@ class MockStore:
         return True
 
     def get_instances(self, query):
-        results = [ x for x in self.values if self._satisifies(x, query) ]
+        results = [x for x in self.values if self._satisifies(x, query)]
         return results
 
     def find_props(self, query):
@@ -80,6 +85,7 @@ class MockStore:
     def find_prop_values(self, query, property):
         instances = self.get_instances(query)
         return count_instances_with_values(property, instances)
+
 
 class AugmentedStore:
     def __init__(self, instances):
@@ -123,6 +129,7 @@ class AugmentedStore:
 
     def get_instances(self, query, sort_props, first, max_count):
         "returns: {common: list of PropConsts, properties: list of string, instances: list of dicts, next: token}"
+
         def row_key_fn(x):
             key = []
             for p in sort_props:
@@ -136,7 +143,7 @@ class AugmentedStore:
         rows = list(enumerate(instances))
         subset, next = self.slice_range(rows, first, max_count, lambda x: x[0])
         # now drop row numbers
-        subset = [x for i,x in subset]
+        subset = [x for i, x in subset]
 
         counts = count_unique_values_per_property(subset)
         common, varying = split_props_by_counts(counts)

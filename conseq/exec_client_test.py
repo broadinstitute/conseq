@@ -1,13 +1,14 @@
-import time
-import textwrap
-import uuid
 import os
-import logging
-from conseq import xref
+import textwrap
+import time
+import uuid
 
 import pytest
+
+from conseq import xref
+
 pytestmark = pytest.mark.skipif(os.getenv("AWS_ACCESS_KEY_ID") is None,
-                    reason="requires S3 credentials set as environment variables")
+                                reason="requires S3 credentials set as environment variables")
 
 from conseq import exec_client
 import os
@@ -21,17 +22,18 @@ TEST_REMOTE_URL_ROOT = "s3://broad-datasci/conseq-test"
 TEST_HELPER_PATH = "python /home/unix/pmontgom/helper.py"
 TEST_RESOURCES = {"mem": 10}
 
+
 def create_client_for(tmpdir, script, uid=None):
     workdir = str(tmpdir)
 
-    job_dir = workdir+"/r1"
+    job_dir = workdir + "/r1"
     if not os.path.exists(job_dir):
         os.mkdir(job_dir)
 
     scripts_to_download = []
     if script is not None:
-        scripts_to_download.append( (workdir+"/r1/script1", "script1"))
-        with open(workdir+"/r1/script1", "wt") as fd:
+        scripts_to_download.append((workdir + "/r1/script1", "script1"))
+        with open(workdir + "/r1/script1", "wt") as fd:
             fd.write(textwrap.dedent(script))
             fd.close()
 
@@ -40,13 +42,15 @@ def create_client_for(tmpdir, script, uid=None):
     remote_url = TEST_REMOTE_URL_ROOT + "/" + uid
     remote_workdir = TEST_REMOTE_WORKDIR + "/" + uid
 
-    print("remote_workdir=",remote_workdir)
+    print("remote_workdir=", remote_workdir)
 
-
-    c = exec_client.SgeExecClient(TEST_HOST, TEST_REMOTE_PROLOGUE, workdir, remote_workdir, remote_url, TEST_REMOTE_URL_ROOT+"/CAS", TEST_HELPER_PATH, TEST_SGE_CMD_PROLOGUE, TEST_RESOURCES,
+    c = exec_client.SgeExecClient(TEST_HOST, TEST_REMOTE_PROLOGUE, workdir, remote_workdir, remote_url,
+                                  TEST_REMOTE_URL_ROOT + "/CAS", TEST_HELPER_PATH, TEST_SGE_CMD_PROLOGUE,
+                                  TEST_RESOURCES,
                                   TEST_REMOTE_WORKDIR, AWS_ACCESS_KEY_ID=None, AWS_SECRET_ACCESS_KEY=None)
-    resolver_state = exec_client.SGEResolveState(scripts_to_download,[])
+    resolver_state = exec_client.SGEResolveState(scripts_to_download, [])
     return job_dir, c, uid, resolver_state
+
 
 def test_basic_sge_job_exec(tmpdir):
     job_dir, c, uid, resolver_state = create_client_for(tmpdir, """
@@ -54,7 +58,8 @@ def test_basic_sge_job_exec(tmpdir):
         """)
 
     print("resolver_state", resolver_state.files_to_upload_and_download)
-    e = c.exec_script("name", "ID", job_dir, ["python script1"], [{"name": "banana"}], True, "", "desc", resolver_state, {"mem": 10})
+    e = c.exec_script("name", "ID", job_dir, ["python script1"], [{"name": "banana"}], True, "", "desc", resolver_state,
+                      {"mem": 10})
     while True:
         print("HEREHEREHERE")
         failure, output = e.get_completion()
@@ -65,12 +70,14 @@ def test_basic_sge_job_exec(tmpdir):
 
     assert output == [{"name": "banana"}]
 
+
 def test_sge_job_reattach(tmpdir):
     job_dir, c, uid, resolver_state = create_client_for(tmpdir, """
         print("run")
         """)
 
-    e = c.exec_script("name", "ID", job_dir, ["python script1"], [{"name": "test_sge_job_reattach"}], True, "", "desc", resolver_state, {"mem": 10})
+    e = c.exec_script("name", "ID", job_dir, ["python script1"], [{"name": "test_sge_job_reattach"}], True, "", "desc",
+                      resolver_state, {"mem": 10})
     extern_id = e.get_external_id()
 
     _, c2, _, resolver_state = create_client_for(tmpdir, None, uid)
@@ -85,6 +92,7 @@ def test_sge_job_reattach(tmpdir):
 
     assert output == [{"name": "test_sge_job_reattach"}]
 
+
 def test_sge_job_write_file(tmpdir):
     job_dir, c, _, resolver_state = create_client_for(tmpdir, """
         fd = open("output.txt", "wt")
@@ -92,7 +100,8 @@ def test_sge_job_write_file(tmpdir):
         fd.close()
         """)
 
-    e = c.exec_script("name", "ID", job_dir, ["python script1"], [{"file": {"$filename": "output.txt"}}], True, "", "desc", resolver_state, {"mem": 10})
+    e = c.exec_script("name", "ID", job_dir, ["python script1"], [{"file": {"$filename": "output.txt"}}], True, "",
+                      "desc", resolver_state, {"mem": 10})
     while True:
         failure, output = e.get_completion()
         assert failure is None
@@ -107,7 +116,7 @@ def test_sge_job_write_file(tmpdir):
     file_url = output["file"]["$file_url"]
     pull = xref.Pull({"AWS_ACCESS_KEY_ID": os.getenv("AWS_ACCESS_KEY_ID"),
                       "AWS_SECRET_ACCESS_KEY": os.getenv("AWS_SECRET_ACCESS_KEY")})
-    local_copy = str(tmpdir)+"/remote_file"
+    local_copy = str(tmpdir) + "/remote_file"
     pull.pull(file_url, local_copy)
 
     assert open(local_copy, "rt").read() == "hello"
@@ -161,6 +170,7 @@ rule c:
 
 from conseq.functional_test import run_conseq
 
+
 def get_aws_vars():
     return """
     let AWS_ACCESS_KEY_ID = "{}"
@@ -168,12 +178,13 @@ def get_aws_vars():
     let RANDSTR = "{}"
     """.format(os.getenv("AWS_ACCESS_KEY_ID"), os.getenv("AWS_SECRET_ACCESS_KEY"), time.time())
 
+
 def test_end_to_end(tmpdir):
     s3_config = get_aws_vars()
     j = run_conseq(tmpdir, s3_config + ONE_REMOTE_ONE_LOCAL_CONFIG)
 
     # verify all outputs generated
-    assert len(j.find_objs("public", {}))==3
+    assert len(j.find_objs("public", {})) == 3
 
     # verify the final output is intact
     objs = (j.find_objs("public", {"name": "final"}))

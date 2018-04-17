@@ -1,18 +1,21 @@
-import json
-import sqlite3
-import os
 import collections
+import json
 import logging
+import os
 import re
+import sqlite3
+
 import six
 
 log = logging.getLogger(__name__)
 
 DISABLE_AUTO_CREATE_RULES = False
 
+
 class InstanceTemplate:
     def __init__(self, props):
         pass
+
 
 STATUS_UNKNOWN = "unknown"
 STATUS_STARTED = "started"
@@ -25,8 +28,10 @@ RE_STATUS_COMPLETE = "complete"
 RE_STATUS_FAILED = "failed"
 RE_STATUS_DEFERRED = "deferred"
 
+
 class DefaultSpace:
     pass
+
 
 PUBLIC_SPACE = "public"
 DEFAULT_SPACE = DefaultSpace()
@@ -35,6 +40,7 @@ from contextlib import contextmanager
 import threading
 
 current_db_cursor_state = threading.local()
+
 
 @contextmanager
 def transaction(db):
@@ -62,6 +68,7 @@ def get_cursor():
     assert current_db_cursor_state.cursor != None
     return current_db_cursor_state.cursor
 
+
 def split_props_into_key_and_other(props):
     key_props = {}
     other_props = {}
@@ -69,15 +76,17 @@ def split_props_into_key_and_other(props):
     for k, v in props.items():
         if (isinstance(v, dict) and len(v) == 1 and list(v.keys())[0].startswith("$")):
             other_props[k] = list(v.values())[0]
-        elif k=='$hash':
+        elif k == '$hash':
             other_props[k] = v
         else:
             key_props[k] = v
 
     return key_props, other_props
 
+
 class Obj:
     "Models an any input or output artifact by a set of key-value pairs"
+
     def __init__(self, id, space, timestamp, props):
         """
         :param id:
@@ -112,6 +121,7 @@ class Obj:
     def __repr__(self):
         return "<{}:{} {}>".format(self.space, self.id, repr(self.props))
 
+
 class ObjHistory:
     def __init__(self):
         pass
@@ -131,7 +141,9 @@ class ObjHistory:
             return
 
         c = get_cursor()
-        c.execute("insert into past_obj (id, space, timestamp, json) values (?, ?, ?, ?)", [obj.id, obj.space, obj.timestamp, json.dumps(obj.props)])
+        c.execute("insert into past_obj (id, space, timestamp, json) values (?, ?, ?, ?)",
+                  [obj.id, obj.space, obj.timestamp, json.dumps(obj.props)])
+
 
 class ObjSet:
     """
@@ -139,6 +151,7 @@ class ObjSet:
 
     This prototype implementation does everything in memory but is intended to be replaced with one that read/writes to a persistent DB
     """
+
     def __init__(self):
         self.add_listeners = []
         self.remove_listeners = []
@@ -154,7 +167,7 @@ class ObjSet:
         c.execute("select id, space, timestamp, json from cur_obj")
         objs = []
         for id, space, timestamp, _json in c.fetchall():
-            objs.append( Obj(id, space, timestamp, json.loads(_json)) )
+            objs.append(Obj(id, space, timestamp, json.loads(_json)))
         return iter(objs)
 
     def get(self, id):
@@ -218,7 +231,8 @@ class ObjSet:
         self.assert_space_exists(space, True, self.default_space)
 
         c = get_cursor()
-        c.execute("insert into cur_obj (space, timestamp, json) values (?, ?, ?)", [space, timestamp, json.dumps(props)])
+        c.execute("insert into cur_obj (space, timestamp, json) values (?, ?, ?)",
+                  [space, timestamp, json.dumps(props)])
         id = c.lastrowid
 
         obj = Obj(id, space, timestamp, props)
@@ -271,16 +285,19 @@ class ObjSet:
 
         return result
 
+
 def assertInputsValid(inputs):
     for x in inputs:
         assert isinstance(x, tuple) and len(x) == 2
         name, value = x
         assert isinstance(value, Obj) or (isinstance(value, tuple) and isinstance(value[0], Obj))
 
+
 class RuleExecution:
     """
     Represents a statement describing what transform to run to generate a set of Objs (outputs) from a different set of Objs (inputs)
     """
+
     def __init__(self, id, space, inputs, transform, state, execution_id=None):
         assertInputsValid(inputs)
 
@@ -292,24 +309,26 @@ class RuleExecution:
         self.execution_id = execution_id
 
     def __repr__(self):
-        return "<Rule {} in:{}:{} transform:{} state:{}>".format(self.space, self.id, self.inputs, self.transform, self.state)
+        return "<Rule {} in:{}:{} transform:{} state:{}>".format(self.space, self.id, self.inputs, self.transform,
+                                                                 self.state)
 
 
 class RuleSet:
     """
         The all active rules
     """
+
     def __init__(self, objects):
         self.remove_rule_listeners = []
         self.add_rule_listeners = []
         self.objects = objects
 
-    def _find_rule_execs(self, where_class="", where_params=() ):
+    def _find_rule_execs(self, where_class="", where_params=()):
         results = []
         c = get_cursor()
         query = "select id, space, transform, key, state, execution_id from rule_execution re"
         if where_class != "":
-            query += " WHERE "+where_class
+            query += " WHERE " + where_class
         c.execute(query, where_params)
         for id, space, transform, key, state, execution_id in list(c.fetchall()):
             c.execute("select name, obj_id, is_list from rule_execution_input where rule_execution_id = ?", (id,))
@@ -325,13 +344,12 @@ class RuleSet:
                 obj_ids = objs_by_name[name]
                 objs = tuple([self.objects.get(obj_id) for obj_id in obj_ids])
                 if is_list:
-                    inputs.append( (name, objs))
+                    inputs.append((name, objs))
                 else:
-                    inputs.append( (name, objs[0]))
+                    inputs.append((name, objs[0]))
 
-            results.append( RuleExecution(id, space, tuple(inputs), transform, state, execution_id=execution_id) )
+            results.append(RuleExecution(id, space, tuple(inputs), transform, state, execution_id=execution_id))
         return results
-
 
     def __iter__(self):
         return iter(self._find_rule_execs())
@@ -345,7 +363,7 @@ class RuleSet:
                     continue
             else:
                 vs = (vs,)
-            flattened_inputs.append( (str(n), tuple([x.id for x in vs]))  )
+            flattened_inputs.append((str(n), tuple([x.id for x in vs])))
         flattened_inputs.sort()
         return repr((tuple(flattened_inputs), str(transform)))
 
@@ -354,7 +372,9 @@ class RuleSet:
 
     def find_by_input(self, input_id):
         "given an input id, find all of the rule executions ids which refer to that input"
-        rules = self._find_rule_execs("EXISTS (select 1 from rule_execution_input rei where rei.rule_execution_id = re.id and rei.obj_id = ?)", (input_id,))
+        rules = self._find_rule_execs(
+            "EXISTS (select 1 from rule_execution_input rei where rei.rule_execution_id = re.id and rei.obj_id = ?)",
+            (input_id,))
         rule_ids = [x.id for x in rules]
         return rule_ids
 
@@ -418,7 +438,8 @@ class RuleSet:
                 state = RE_STATUS_DEFERRED
 
         c = get_cursor()
-        c.execute("insert into rule_execution (space, transform, key, state) values (?, ?, ?, ?)", (space, transform, key, state))
+        c.execute("insert into rule_execution (space, transform, key, state) values (?, ?, ?, ?)",
+                  (space, transform, key, state))
         rule_execution_id = c.lastrowid
         for name, objs in inputs:
 
@@ -430,7 +451,9 @@ class RuleSet:
 
             for obj in objs:
                 self.objects.add(obj)
-                c.execute("insert into rule_execution_input (rule_execution_id, name, obj_id, is_list) values (?, ?, ?, ?)", (rule_execution_id, name, obj.id, is_list))
+                c.execute(
+                    "insert into rule_execution_input (rule_execution_id, name, obj_id, is_list) values (?, ?, ?, ?)",
+                    (rule_execution_id, name, obj.id, is_list))
 
         rule = RuleExecution(rule_execution_id, space, inputs, transform, state)
         for add_rule_listener in self.add_rule_listeners:
@@ -455,7 +478,8 @@ class RuleSet:
 
     def started(self, rule_id, execution_id):
         c = get_cursor()
-        c.execute("update rule_execution set state = ?, execution_id = ? where id = ?", (RE_STATUS_STARTED, execution_id, rule_id))
+        c.execute("update rule_execution set state = ?, execution_id = ? where id = ?",
+                  (RE_STATUS_STARTED, execution_id, rule_id))
 
     def get_space_by_execution_id(self, execution_id):
         rule = self.get_by_execution_id(execution_id)
@@ -476,7 +500,7 @@ class RuleSet:
         c = get_cursor()
         c.execute("update rule_execution set state = ? where execution_id = ?", (s, execution_id))
 
-        c.execute("select id from rule_execution where execution_id = ?", (execution_id, ))
+        c.execute("select id from rule_execution where execution_id = ?", (execution_id,))
         rule_exec_id = c.fetchone()
         if rule_exec_id is None:
             return "norow"
@@ -490,9 +514,11 @@ class RuleSet:
         return rules[0]
 
     def remove_unsuccessful(self):
-        incomplete = self._find_rule_execs("state in (?, ?, ?)", (RE_STATUS_FAILED, RE_STATUS_PENDING, RE_STATUS_DEFERRED))
+        incomplete = self._find_rule_execs("state in (?, ?, ?)",
+                                           (RE_STATUS_FAILED, RE_STATUS_PENDING, RE_STATUS_DEFERRED))
         for rule in incomplete:
             self.remove_rule(rule.id)
+
 
 class Execution:
     def __init__(self, id, inputs, outputs, transform, status, exec_xref, job_dir):
@@ -508,7 +534,11 @@ class Execution:
         self.job_dir = job_dir
 
     def __repr__(self):
-        return "<Execution id:{} inputs:{} outputs:{} transform:{} status:{} exec_xref:{}>".format(self.id, self.inputs, self.outputs, self.transform, self.status, self.exec_xref)
+        return "<Execution id:{} inputs:{} outputs:{} transform:{} status:{} exec_xref:{}>".format(self.id, self.inputs,
+                                                                                                   self.outputs,
+                                                                                                   self.transform,
+                                                                                                   self.status,
+                                                                                                   self.exec_xref)
 
 
 class ExecutionLog:
@@ -536,12 +566,14 @@ class ExecutionLog:
                 is_list = False
             for obj in objs:
                 obj_id = self._make_copy_get_id(obj)
-                c.execute("insert into execution_input (execution_id, name, obj_id, is_list) values (?, ?, ?, ?)", [exec_id, name, obj_id, is_list])
+                c.execute("insert into execution_input (execution_id, name, obj_id, is_list) values (?, ?, ?, ?)",
+                          [exec_id, name, obj_id, is_list])
         return exec_id
 
     def get_started_executions(self):
         c = get_cursor()
-        c.execute("select id, transform, status, execution_xref, job_dir from execution e where status = ?", [STATUS_STARTED])
+        c.execute("select id, transform, status, execution_xref, job_dir from execution e where status = ?",
+                  [STATUS_STARTED])
         return self._as_RuleList(c)
 
     def _as_RuleList(self, c):
@@ -562,7 +594,7 @@ class ExecutionLog:
                 else:
                     assert len(values) == 1
                     values = values[0]
-                in_name_values.append( (name, values) )
+                in_name_values.append((name, values))
 
             outputs = []
             c.execute("select obj_id from execution_output where execution_id = ?", [exec_id])
@@ -593,7 +625,9 @@ class ExecutionLog:
         # probably won't really make a copy, just want to get the corresponding id
         obj_id = self._make_copy_get_id(obj)
         c = get_cursor()
-        c.execute("select id, transform, status, execution_xref, job_dir from execution e where exists (select 1 from execution_output o where o.execution_id = e.id and obj_id = ?)", [obj_id])
+        c.execute(
+            "select id, transform, status, execution_xref, job_dir from execution e where exists (select 1 from execution_output o where o.execution_id = e.id and obj_id = ?)",
+            [obj_id])
         return self._as_RuleList(c)
 
     def get_all(self):
@@ -623,7 +657,9 @@ class ExecutionLog:
 
             objs_reached.add(obj_id)
 
-            c.execute("select ei.obj_id from execution_output eo join execution e on eo.execution_id = e.id join execution_input ei on e.id = ei.execution_id where eo.obj_id = ?", [obj_id])
+            c.execute(
+                "select ei.obj_id from execution_output eo join execution e on eo.execution_id = e.id join execution_input ei on e.id = ei.execution_id where eo.obj_id = ?",
+                [obj_id])
             input_obj_ids = [x[0] for x in c.fetchall()]
 
             for input_obj_id in input_obj_ids:
@@ -632,7 +668,6 @@ class ExecutionLog:
                 objs_to_explore.append(input_obj_id)
 
         return objs_reached
-
 
     def find_all_reachable_downstream_objs(self, root_obj_ids):
         c = get_cursor()
@@ -645,7 +680,9 @@ class ExecutionLog:
 
             objs_reached.add(obj_id)
 
-            c.execute("select eo.obj_id from execution_input ei join execution e on ei.execution_id = e.id join execution_output eo on e.id = eo.execution_id where ei.obj_id = ?", [obj_id])
+            c.execute(
+                "select eo.obj_id from execution_input ei join execution e on ei.execution_id = e.id join execution_output eo on e.id = eo.execution_id where ei.obj_id = ?",
+                [obj_id])
             output_obj_ids = [x[0] for x in c.fetchall()]
 
             for output_obj_id in output_obj_ids:
@@ -661,7 +698,7 @@ class ExecutionLog:
         """
         stmts = []
         objs = {}
-        #state_color = {WAITING:"gray", READY:"red", STARTED:"blue", FAILED:"green", COMPLETED:"turquoise"}
+        # state_color = {WAITING:"gray", READY:"red", STARTED:"blue", FAILED:"green", COMPLETED:"turquoise"}
         for rule in self.get_all():
             if rule.status == "canceled":
                 continue
@@ -673,35 +710,41 @@ class ExecutionLog:
                     stmts.append("o{} -> r{} [label=\"{}\"]".format(v.id, rule.id, name))
                     objs[v.id] = v
             for output in rule.outputs:
-               stmts.append("r{} -> o{}".format(rule.id, output.id))
-               objs[output.id] = output
+                stmts.append("r{} -> o{}".format(rule.id, output.id))
+                objs[output.id] = output
 
-            #color=state_color[self.get_rule_state(rule.id)]
-            color="gray"
+            # color=state_color[self.get_rule_state(rule.id)]
+            color = "gray"
 
-            stmts.append("r{} [shape=box, label=\"{}\", style=\"filled\" fillcolor=\"{}\"]".format(rule.id, rule.transform, color))
+            stmts.append(
+                "r{} [shape=box, label=\"{}\", style=\"filled\" fillcolor=\"{}\"]".format(rule.id, rule.transform,
+                                                                                          color))
 
         for obj in objs.values():
             prop_values = []
-            for k,v in obj.props.items():
+            for k, v in obj.props.items():
                 if not isinstance(v, dict) or detailed:
                     prop_values.append("{}: {}".format(k, v))
             label = "\\n".join(prop_values)
             stmts.append("o{} [label=\"{}\"]".format(obj.id, label))
         return "digraph { " + (";\n".join(stmts)) + " } "
 
+
 class ForEach:
-    def __init__(self, variable, const_constraints = {}):
+    def __init__(self, variable, const_constraints={}):
         assert variable != ""
         self.variable = variable
         self.const_constraints = const_constraints
+
     def __repr__(self):
         return "<ForEach {} where {}>".format(self.variable, self.const_constraints)
 
+
 class ForAll:
-    def __init__(self, variable, const_constraints = {}):
+    def __init__(self, variable, const_constraints={}):
         self.variable = variable
         self.const_constraints = const_constraints
+
 
 class PropEqualsConstant:
     def __init__(self, variable, property, constant):
@@ -711,6 +754,7 @@ class PropEqualsConstant:
 
     def satisfied(self, bindings):
         return bindings[self.variable][self.property] == self.constant
+
 
 class PropMatchesRegexp:
     def __init__(self, variable, property, regexp):
@@ -723,6 +767,7 @@ class PropMatchesRegexp:
 
     def satisfied(self, bindings):
         return self.regexp.match(bindings[self.variable][self.property]) != None
+
 
 class PropsMatch:
     def __init__(self, pairs):
@@ -744,7 +789,9 @@ class PropsMatch:
             first = False
         return True
 
+
 from conseq.timeit import timeblock
+
 
 class Template:
     def __init__(self, queries, predicates, transform, output_matches_expectation=lambda x: True):
@@ -769,7 +816,7 @@ class Template:
         key_value_pairs = set()
         for k, v in obj.props.items():
             if isinstance(v, str):
-                key_value_pairs.add( (k,v) )
+                key_value_pairs.add((k, v))
 
         for q in self.foreach_queries + self.forall_queries:
             matched = True
@@ -793,7 +840,7 @@ class Template:
 
     def _rewrite_queries(self, props_to_fix, obj, queries):
         # props_to_fix is a list of (prop name, list of (name, propr))
-        q_map = dict( [(q.variable, q) for q in queries] )
+        q_map = dict([(q.variable, q) for q in queries])
         for prop, targets in props_to_fix:
             if prop in obj.props:
                 value = obj[prop]
@@ -830,9 +877,9 @@ class Template:
                     if q.variable == name:
                         uses_this_prop = prop
                     else:
-                        other_targets.append( (name, prop ) )
+                        other_targets.append((name, prop))
                 if uses_this_prop is not None:
-                    props_to_fix.append( (uses_this_prop, other_targets ) )
+                    props_to_fix.append((uses_this_prop, other_targets))
 
         results = []
         for obj in obj_set.find(space, q.const_constraints):
@@ -841,7 +888,8 @@ class Template:
 
             # refine future queries based on the obj we just found
 
-            results.extend(self._create_rules(obj_set, space, new_binding, self._rewrite_queries(props_to_fix, obj, q_rest)))
+            results.extend(
+                self._create_rules(obj_set, space, new_binding, self._rewrite_queries(props_to_fix, obj, q_rest)))
         return results
 
     def _execute_forall_queries(self, bindings, obj_set, space):
@@ -854,7 +902,7 @@ class Template:
         return bindings
 
     def create_rules(self, obj_set):
-        #print ("create_rules, transform:",self.transform,", queries: ", self.foreach_queries)
+        # print ("create_rules, transform:",self.transform,", queries: ", self.foreach_queries)
         with timeblock(log, "create_rules({})".format(self.transform), min_time=1):
             results = []
             for space in obj_set.get_spaces(parent=obj_set.default_space):
@@ -869,10 +917,11 @@ class Template:
                     if b == None:
                         continue
                     inputs = tuple(b.items())
-                    results.append( (space, inputs, self.transform) )
+                    results.append((space, inputs, self.transform))
 
             log.debug("Created rules for %s: %s", self.transform, results)
             return results
+
 
 class RuleAndDerivativesFilter:
     def __init__(self, rules_allowed, last_existing_id):
@@ -899,10 +948,12 @@ class RuleAndDerivativesFilter:
         # All others should be dropped
         return False
 
+
 class Jobs:
     """
         Top level class gluing everything together
     """
+
     def __init__(self, db):
         self.db = db
         self.objects = ObjSet()
@@ -940,7 +991,7 @@ class Jobs:
                 if template.is_interested_in(obj):
                     log.info("Need to refresh %s on next pass", template.transform)
                     self.pending_rules_to_evaluate.add(template.transform)
-                    #new_rules.extend(template.create_rules(self.objects))
+                    # new_rules.extend(template.create_rules(self.objects))
 
         for space, inputs, transform in new_rules:
             self._add_rule(space, inputs, transform)
@@ -951,7 +1002,7 @@ class Jobs:
             for template in self.rule_templates:
                 if template.is_interested_in(obj):
                     self.pending_rules_to_evaluate.add(template.transform)
-                    #new_rules.extend(template.create_rules(self.objects))
+                    # new_rules.extend(template.create_rules(self.objects))
 
         for space, inputs, transform in new_rules:
             self._add_rule(space, inputs, transform)
@@ -1000,7 +1051,7 @@ class Jobs:
                 add_executions += len(new_rules)
                 for rule in new_rules:
                     self._add_rule(*rule)
-            #log.info("Refreshed the following templates: %s, refresh_count=%s, added=%s", pending_rules_to_evaluate, refresh_count, add_executions)
+                    # log.info("Refreshed the following templates: %s, refresh_count=%s, added=%s", pending_rules_to_evaluate, refresh_count, add_executions)
 
     def add_obj(self, space, timestamp, obj_props, overwrite=True):
         """
@@ -1080,7 +1131,8 @@ class Jobs:
         with transaction(self.db):
             default_space = self.rule_set.get_space_by_execution_id(execution_id)
             if default_space == None:
-                log.warning("No associated rule execution for execution_id %s.  Dropping outputs: %s", repr(execution_id), outputs)
+                log.warning("No associated rule execution for execution_id %s.  Dropping outputs: %s",
+                            repr(execution_id), outputs)
                 self.log.record_completed(execution_id, new_status, [])
             else:
                 def get_space(obj):
@@ -1098,14 +1150,15 @@ class Jobs:
                     rule_def = self.rule_template_by_name[rule_exec.transform]
                     for output in outputs:
                         if not rule_def.output_matches_expectation(output):
-                            log.warning("Output %s did not match any of the expected outputs on rule \"%s\"", output, rule_exec.transform)
+                            log.warning("Output %s did not match any of the expected outputs on rule \"%s\"", output,
+                                        rule_exec.transform)
 
                 interned_outputs = []
                 for output in outputs:
                     space, output = get_space(output)
 
                     obj_id = self.add_obj(space, timestamp, output)
-                    interned_outputs.append( self.objects.get(obj_id) )
+                    interned_outputs.append(self.objects.get(obj_id))
                 return self._record_completed(execution_id, new_status, interned_outputs)
 
     def update_exec_xref(self, exec_id, xref, job_dir):
@@ -1132,7 +1185,7 @@ class Jobs:
                 value = tuple([resolve_obj(i) for i in value_json])
             else:
                 value = resolve_obj(value_json)
-            inputs.append( (name, value) )
+            inputs.append((name, value))
 
         outputs_json = exec_stmt.outputs
         interned_outputs = [resolve_obj(o) for o in outputs_json]
@@ -1144,7 +1197,7 @@ class Jobs:
     def cleanup_unsuccessful(self):
         with transaction(self.db):
             self.rule_set.remove_unsuccessful()
-            #self.log.mark_incomplete()
+            # self.log.mark_incomplete()
 
     def invalidate_rule_execution(self, transform):
         with transaction(self.db):
@@ -1192,11 +1245,14 @@ class Jobs:
                 print("rule:", rs)
             for job in self.log.get_all():
                 print("all job:", job)
-#            for job in self.log.get_pending():
+
+
+# for job in self.log.get_pending():
 #                print("pending job:", job)
 
 def open_state_dir(state_dir):
     return open_job_db(os.path.join(state_dir, "db.sqlite3"))
+
 
 def open_job_db(filename):
     needs_create = not os.path.exists(filename)
@@ -1222,7 +1278,7 @@ def open_job_db(filename):
     else:
         c = db.cursor()
         try:
-            c.execute("select schema_version from settings")
+            c.execute("SELECT schema_version FROM settings")
             schema_version = c.fetchone()[0]
         except sqlite3.OperationalError:
             schema_version = 0
@@ -1240,4 +1296,3 @@ def open_job_db(filename):
         db.execute(stmt)
 
     return Jobs(db)
-

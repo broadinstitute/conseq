@@ -1,5 +1,5 @@
-from conseq import parser
 from conseq import depexec
+from conseq import parser
 
 pair_of_rules = """
 xref http://foo.org {"a": "b"}
@@ -20,6 +20,8 @@ rule square:
         conseq.publish(dict(type="squared", value=str(result)))
         \"\"\"
 """
+
+
 def test_parse_three_rules():
     decs = parser.parse_str(pair_of_rules)
     assert len(decs) == 3
@@ -37,6 +39,8 @@ rule a:
     run "bash"
 """
 import jinja2
+
+
 def test_parse_constrained_query():
     jinja2_env = jinja2.Environment(undefined=jinja2.StrictUndefined)
 
@@ -60,6 +64,7 @@ def test_parse_constrained_query():
     assert pred.satisfied({"a": {"value": "1"}, "b": {"value": "1"}})
     assert not pred.satisfied({"a": {"value": "1"}, "b": {"value": "2"}})
 
+
 def test_parse_vars():
     decs = parser.parse_str("let a=\"x\"\n")
     assert len(decs) == 1
@@ -67,11 +72,13 @@ def test_parse_vars():
     assert assignment.name == "a"
     assert assignment.value == "x"
 
+
 rule_with_forall = """
 rule create_numbers:
     inputs: a=all {"type": "box"}, b={"name": "shoe"}
     run "command"
 """
+
 
 def test_forall_query():
     decs = parser.parse_str(rule_with_forall)
@@ -91,6 +98,7 @@ rule dynamic_outputs:
     run "command"
 """
 
+
 def test_expected_outputs():
     decs = parser.parse_str(rule_with_expected_outputs)
     assert len(decs) == 1
@@ -108,8 +116,8 @@ rule pub:
     publish: "sample{{inputs.a.other}}"
 """
 
-def test_publish_rule(monkeypatch):
 
+def test_publish_rule(monkeypatch):
     decs = parser.parse_str(publish_rule)
     assert len(decs) == 1
     rule = decs[0]

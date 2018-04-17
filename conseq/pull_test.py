@@ -1,7 +1,9 @@
-from conseq import xref
 import pytest
 
+from conseq import xref
+
 at_broad = False
+
 
 @pytest.mark.skipif(not at_broad, reason="need ssh host")
 def test_pull(tmpdir):

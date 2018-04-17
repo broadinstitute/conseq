@@ -1,9 +1,11 @@
 import argparse
 import logging
-import colorlog
-from conseq import depexec, dep
-
 import re
+
+import colorlog
+
+from conseq import depexec
+
 
 class RegExpMatch:
     def __init__(self, pattern):
@@ -17,8 +19,10 @@ def add_list(sub):
     parser = sub.add_parser("list", help="List all objects, executions, etc")
     parser.set_defaults(func=_list)
 
+
 def _list(args):
     depexec.list_cmd(args.dir)
+
 
 def space(args):
     if args.name:
@@ -26,11 +30,14 @@ def space(args):
     else:
         depexec.print_spaces(args.dir)
 
+
 def add_space(sub):
     parser = sub.add_parser("space", help="Switch default space")
-    parser.add_argument("name", nargs="?", help="Name of space to use as the default.  If omitted, lists the names of all spaces")
+    parser.add_argument("name", nargs="?",
+                        help="Name of space to use as the default.  If omitted, lists the names of all spaces")
     parser.add_argument("--new", "-n", action="store_true")
     parser.set_defaults(func=space)
+
 
 def add_ls(sub):
     parser = sub.add_parser("ls", help="List artifacts")
@@ -46,12 +53,15 @@ def ls(args):
 
     depexec.ls_cmd(args.dir, args.space, key_value_pairs, args.groupby, args.columns)
 
+
 def add_gc(sub):
     parser = sub.add_parser("gc", help="Garbage collect (clean up unused files)")
     parser.set_defaults(func=gc)
 
+
 def gc(args):
     depexec.gc(args.dir)
+
 
 def add_rm(sub):
     parser = sub.add_parser("rm", help="Remove objects that satisfy given query")
@@ -59,6 +69,7 @@ def add_rm(sub):
     parser.add_argument('--dry-run', action="store_true", dest="dry_run")
     parser.add_argument('predicates', nargs='+', help="predicates to match in form 'key=value' ")
     parser.set_defaults(func=rm)
+
 
 def _parse_predicate_expr(txt):
     m = re.match("^([^=~]+)(.)(.*)$", txt)
@@ -71,6 +82,7 @@ def _parse_predicate_expr(txt):
     else:
         return (name, RegExpMatch(value))
 
+
 def _parse_query(predicates):
     query = {}
     for pair in predicates:
@@ -78,8 +90,10 @@ def _parse_query(predicates):
         query[name] = value
     return query
 
+
 def rm(args):
     depexec.rm_cmd(args.dir, args.dry_run, args.space, _parse_query(args.predicates))
+
 
 def add_run(sub):
     parser = sub.add_parser("run", help="Run rules in the specified file")
@@ -89,10 +103,12 @@ def add_run(sub):
     parser.add_argument("--confirm", action="store_true")
     parser.add_argument("--maxfail", type=int, default=1)
     parser.add_argument("--maxstart", type=int, default=None)
-    parser.add_argument("--nothing", action="store_true", help="Don't run anything (useful when re-attaching existing jobs but you don't want to run downstream steps)")
+    parser.add_argument("--nothing", action="store_true",
+                        help="Don't run anything (useful when re-attaching existing jobs but you don't want to run downstream steps)")
     parser.add_argument('--refresh_xrefs', help='refresh xrefs', action="store_true")
     parser.add_argument('targets', nargs='*')
     parser.set_defaults(func=run_cmd)
+
 
 def run_cmd(args):
     concurrent = args.concurrent
@@ -105,95 +121,122 @@ def run_cmd(args):
         config_file = None
 
     depexec.main(args.file, args.dir, args.targets, {}, concurrent, not args.nocapture, args.confirm, config_file,
-                 refresh_xrefs=args.refresh_xrefs, maxfail=args.maxfail, maxstart=args.maxstart, force_no_targets=args.nothing)
+                 refresh_xrefs=args.refresh_xrefs, maxfail=args.maxfail, maxstart=args.maxstart,
+                 force_no_targets=args.nothing)
+
 
 def add_rules(sub):
     parser = sub.add_parser("rules", help="Print the names all rules in the file")
     parser.add_argument('file', metavar="FILE", help="the input file to parse")
     parser.set_defaults(func=rules)
 
+
 def rules(args):
     depexec.print_rules(args.file)
+
 
 def add_altdot(sub):
     parser = sub.add_parser("altdot", help="Print the names all rules in the file")
     parser.add_argument('file', metavar="FILE", help="the input file to parse")
     parser.set_defaults(func=altdot)
 
+
 def altdot(args):
     depexec.alt_dot(args.file)
 
+
 def add_debugrun(sub):
-    parser = sub.add_parser("debugrun", help="perform query associated with a given target and report what matched (for debugging why rule doesn't run)")
+    parser = sub.add_parser("debugrun",
+                            help="perform query associated with a given target and report what matched (for debugging why rule doesn't run)")
     parser.add_argument('file', metavar="FILE", help="the input file to parse")
     parser.add_argument('target')
     parser.set_defaults(func=debugrun)
 
+
 def debugrun(args):
     depexec.debugrun(args.dir, args.file, args.target, {}, args.config)
+
 
 def add_dot(sub):
     parser = sub.add_parser("dot", help="Write out a .dot file of the execution history")
     parser.add_argument("--detailed", action="store_true")
     parser.set_defaults(func=dot)
 
+
 def dot(args):
     depexec.dot_cmd(args.dir, args.detailed)
+
 
 def add_export_conseq(sub):
     parser = sub.add_parser("export-conseq", help="export artifacts as a conseq file")
     parser.add_argument("--out", help="Name of file to write output to. Otherwise writes to stdout")
-    parser.add_argument("--upload", help="Path to upload files so that they will be accessible on a different machine.  Should be of the form s3://bucket/prefix/CAS")
+    parser.add_argument("--upload",
+                        help="Path to upload files so that they will be accessible on a different machine.  Should be of the form s3://bucket/prefix/CAS")
     parser.set_defaults(func=export_conseq)
+
 
 def export_conseq(args):
     from conseq import export_cmd
     export_cmd.export_conseq(args.dir, args.out, args.upload)
 
-    #export_meta
+    # export_meta
+
 
 def add_export(sub):
     parser = sub.add_parser("export", help="export all artifacts to S3")
     parser.add_argument("url", help="should be of the form s3://bucket/path")
     parser.set_defaults(func=export)
 
+
 def export(args):
     from conseq import export_cmd
     export_cmd.export_artifacts(args.dir, args.url, args.config)
 
+
 def publish_cmd(args):
     from conseq.export_cmd import publish_artifacts
-    publish_artifacts(args.dir, args.upload, [_parse_query(p.split(",")) for p in args.predicates], args.manifest, args.config)
+    publish_artifacts(args.dir, args.upload, [_parse_query(p.split(",")) for p in args.predicates], args.manifest,
+                      args.config)
+
 
 def add_publish(sub):
     parser = sub.add_parser("publish", help="write artifacts and metadata to S3")
-    parser.add_argument("--upload", help="Path to upload files so that they will be accessible on a different machine.  Should be of the form s3://bucket/prefix/CAS")
-    parser.add_argument("--manifest", help="Path to upload the manifest of artifacts (example: s3://bucket/prefix/manifest.json)")
+    parser.add_argument("--upload",
+                        help="Path to upload files so that they will be accessible on a different machine.  Should be of the form s3://bucket/prefix/CAS")
+    parser.add_argument("--manifest",
+                        help="Path to upload the manifest of artifacts (example: s3://bucket/prefix/manifest.json)")
     parser.add_argument('predicates', nargs='+', help="predicates to match in form 'key=value' ")
     parser.set_defaults(func=publish_cmd)
+
 
 def add_import(sub):
     parser = sub.add_parser("import", help="import artifacts from S3")
     parser.add_argument("url", help="should be of the form s3://bucket/path")
     parser.set_defaults(func=_import)
 
+
 def _import(args):
     from conseq import export_cmd
     export_cmd.import_artifacts(args.dir, args.url, args.config)
 
+
 def history_cmd(args):
     depexec.print_history(args.dir)
+
 
 def version_cmd(args):
     import conseq
     print(conseq.__version__)
 
+
 def add_history_cmd(sub):
     parser = sub.add_parser("history", help="Print the history of all executions")
     parser.set_defaults(func=history_cmd)
 
+
 def localize_cmd(args):
     depexec.localize_cmd(args.dir, args.space, _parse_query(args.predicates), args.file, args.config)
+
 
 def add_localize(sub):
     parser = sub.add_parser("localize", help="Download any artifacts with $file_url references")
@@ -202,16 +245,19 @@ def add_localize(sub):
     parser.add_argument('predicates', nargs='+', help="predicates to match in form 'key=value' ")
     parser.set_defaults(func=localize_cmd)
 
+
 def add_version(sub):
     parser = sub.add_parser("version", help="prints version")
     parser.set_defaults(func=version_cmd)
+
 
 def main():
     from conseq import trace_on_demand
     trace_on_demand.install()
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dir', metavar="DIR", help="The directory to write working versions of files to", default="state")
+    parser.add_argument('--dir', metavar="DIR", help="The directory to write working versions of files to",
+                        default="state")
     parser.add_argument('--verbose', dest='verbose', action='store_true')
     parser.add_argument('--config', help="Path to initial config", default="~/.conseq")
     parser.set_defaults(func=None)
@@ -251,15 +297,3 @@ def main():
         args.func(args)
     else:
         parser.print_help()
-
-
-
-
-
-
-
-
-
-
-
-

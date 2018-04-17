@@ -1,13 +1,14 @@
-from conseq import export_cmd
-from conseq import depexec, dep
 import os
+
+from conseq import depexec, dep
+from conseq import export_cmd
 
 
 def test_export_import(tmpdir):
-    state1_dir=str(tmpdir)+"/state1"
-    state2_dir=str(tmpdir)+"/state2"
-    config1 = str(tmpdir)+"/1.conseq"
-    config2 = str(tmpdir)+"/2.conseq"
+    state1_dir = str(tmpdir) + "/state1"
+    state2_dir = str(tmpdir) + "/state2"
+    config1 = str(tmpdir) + "/1.conseq"
+    config2 = str(tmpdir) + "/2.conseq"
     with open(config1, "wt") as fd:
         fd.write("""
     rule a:

@@ -14,8 +14,6 @@
 from __future__ import print_function, division, absolute_import, unicode_literals
 
 from grako.parsing import graken, Parser
-from grako.util import re, RE_FLAGS  # noqa
-
 
 __version__ = (2016, 1, 29, 20, 20, 21, 4)
 
@@ -95,6 +93,7 @@ class grammarParser(Parser):
         def block0():
             self._token('and')
             self._predicate_()
+
         self._closure(block0)
 
     @graken()
@@ -152,10 +151,12 @@ def main(filename, startrule, trace=False, whitespace=None, nameguard=None):
     print(json.dumps(ast, indent=2))
     print()
 
+
 if __name__ == '__main__':
     import argparse
     import string
     import sys
+
 
     class ListRules(argparse.Action):
         def __call__(self, parser, namespace, values, option_string):
@@ -164,6 +165,7 @@ if __name__ == '__main__':
                 print(r)
             print()
             sys.exit(0)
+
 
     parser = argparse.ArgumentParser(description="Simple parser for grammar.")
     parser.add_argument('-l', '--list', action=ListRules, nargs=0,
