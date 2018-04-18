@@ -38,10 +38,11 @@ def create_client_for(tmpdir, script, uid=None):
                                        TEST_REMOTE_URL_ROOT + "/CAS", TEST_HELPER_PATH,
                                        "docker run --rm -e AWS_ACCESS_KEY_ID=" + os.getenv("AWS_ACCESS_KEY_ID") +
                                        " -e AWS_SECRET_ACCESS_KEY=" + os.getenv("AWS_SECRET_ACCESS_KEY") +
-                                       " conseq-del-test {COMMAND}",
+                                       " conseq-delegate-test {COMMAND}",
                                        "python",
-                                       AWS_ACCESS_KEY_ID=None, AWS_SECRET_ACCESS_KEY=None)
-    resolver_state = exec_client.SGEResolveState(scripts_to_download, [])
+                                       AWS_ACCESS_KEY_ID=None, AWS_SECRET_ACCESS_KEY=None,
+                                       recycle_past_runs=False)
+    resolver_state = exec_client.RemoteResolveState(scripts_to_download, [])
     return job_dir, c, uid, resolver_state
 
 
@@ -72,7 +73,7 @@ def create_async_client_for(tmpdir, script, uid=None):
     x_job_id_pattern = "(.*)"
     run_command_template = ("docker run -d -e AWS_ACCESS_KEY_ID=" + os.getenv("AWS_ACCESS_KEY_ID") +
                             " -e AWS_SECRET_ACCESS_KEY=" + os.getenv("AWS_SECRET_ACCESS_KEY") +
-                            " conseq-del-test {COMMAND}")
+                            " conseq-delegate-test {COMMAND}")
     AWS_ACCESS_KEY_ID = None
     AWS_SECRET_ACCESS_KEY = None
     c = exec_client.AsyncDelegateExecClient(resources, "delegate", workdir, remote_url, cas_remote_url,
@@ -81,23 +82,14 @@ def create_async_client_for(tmpdir, script, uid=None):
                                             "python",
                                             AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
                                             check_cmd_template, is_running_pattern, terminate_cmd_template,
-                                            x_job_id_pattern)
+                                            x_job_id_pattern,
+                                            False)
 
-    resolver_state = exec_client.SGEResolveState(scripts_to_download, [])
+    resolver_state = exec_client.RemoteResolveState(scripts_to_download, [])
     return job_dir, c, uid, resolver_state
 
 
-@pytest.mark.parametrize("use_async", [True, False])
-def test_basic_docker_exec(tmpdir, use_async):
-    if use_async:
-        create_fn = create_async_client_for
-    else:
-        create_fn = create_client_for
-
-    job_dir, c, uid, resolver_state = create_fn(tmpdir, """
-        print("run")
-        """)
-
+def _verify_job_runs(job_dir, c, uid, resolver_state):
     print("resolver_state", resolver_state.files_to_upload_and_download)
     e = c.exec_script("name", "ID", job_dir, ["python script1"], [{"name": "banana"}], True, "", "desc", resolver_state,
                       {"mem": 10})
@@ -109,6 +101,20 @@ def test_basic_docker_exec(tmpdir, use_async):
         time.sleep(5)
 
     assert output == [{"name": "banana"}]
+
+
+def test_basic_docker_exec(tmpdir):
+    job_dir, c, uid, resolver_state = create_client_for(tmpdir, """
+        print("run")
+        """)
+    _verify_job_runs(job_dir, c, uid, resolver_state)
+
+
+def test_async_docker_exec(tmpdir):
+    job_dir, c, uid, resolver_state = create_async_client_for(tmpdir, """
+        print("run")
+        """)
+    _verify_job_runs(job_dir, c, uid, resolver_state)
 
 
 @pytest.mark.parametrize("use_async", [True, False])

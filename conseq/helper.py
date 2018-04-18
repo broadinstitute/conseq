@@ -353,6 +353,8 @@ def exec_config(args, config):
 
 def exec_cmd(args, config):
     remote = Remote(args.remote_url, args.local_dir, config["AWS_ACCESS_KEY_ID"], config["AWS_SECRET_ACCESS_KEY"])
+    cas_remote = Remote(args.cas_remote_url, args.local_dir, config["AWS_ACCESS_KEY_ID"],
+                        config["AWS_SECRET_ACCESS_KEY"])
 
     pull_map = []
     if args.download_pull_map is not None:
@@ -374,7 +376,7 @@ def exec_cmd(args, config):
     if args.uploadresults is not None:
         results_json_file = "./results.json"
         published_files_root = args.local_dir
-        publish_results(results_json_file, remote, published_files_root, args.uploadresults)
+        publish_results(results_json_file, cas_remote, published_files_root, args.uploadresults)
 
 
 def exec_command_with_capture(command, stderr_path, stdout_path, retcode_path, local_dir):
@@ -412,6 +414,7 @@ def main(varg=None):
 
     exec_parser = subparsers.add_parser("exec")
     exec_parser.add_argument("remote_url")
+    exec_parser.add_argument("cas_remote_url")
     exec_parser.add_argument("local_dir")
     exec_parser.add_argument("--download_pull_map", "-f")
     exec_parser.add_argument("--download", "-d", default=[], action="append")

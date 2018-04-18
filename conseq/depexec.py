@@ -573,7 +573,7 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
     log.info("%d jobs successfully executed", success_count)
     if failure_count > 0:
         # maybe also show summary of which jobs failed?
-        log.warn("%d jobs failed", failure_count)
+        log.warning("%d jobs failed", failure_count)
 
 
 def _datetimefromiso(isostr):
@@ -1264,7 +1264,7 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
                 include_rule = True
 
         if not include_rule:
-            log.warn(
+            log.warning(
                 "Skipping {} because none of the following were set: {}".format(dec.name, ", ".join(dec.if_defined)))
         else:
             try:

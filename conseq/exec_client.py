@@ -4,7 +4,6 @@ import logging
 import os
 import re
 import subprocess
-import xml.etree.ElementTree as ETree
 
 import six
 
@@ -531,7 +530,6 @@ class LocalExecClient:
 
 
 import collections
-import time
 
 SgeState = collections.namedtuple("SgeState", ["update_timestamp", "status", "refresh_id"])
 
@@ -540,8 +538,6 @@ SGE_STATUS_PENDING = "pending"
 SGE_STATUS_RUNNING = "running"
 SGE_STATUS_COMPLETE = "complete"
 SGE_STATUS_UNKNOWN = "unknown"
-
-from cpdshelpers import SimpleSSH
 
 import tempfile
 
@@ -698,7 +694,7 @@ class PublishExecClient:
 class AsyncDelegateExecClient:
     def __init__(self, resources, label, local_workdir, remote_url, cas_remote_url, helper_path, run_command_template,
                  python_path, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, check_cmd_template, is_running_pattern,
-                 terminate_cmd_template, x_job_id_pattern):
+                 terminate_cmd_template, x_job_id_pattern, recycle_past_runs):
         self.resources = resources
         self.helper_path = helper_path
         self.local_workdir = local_workdir
@@ -713,6 +709,7 @@ class AsyncDelegateExecClient:
         self.is_running_pattern = is_running_pattern
         self.terminate_cmd_template = terminate_cmd_template
         self.x_job_id_pattern = x_job_id_pattern
+        self.recycle_past_runs = recycle_past_runs
 
     def _extract_job_id(self, output):
         m = re.match(self.x_job_id_pattern, output)
@@ -730,7 +727,7 @@ class AsyncDelegateExecClient:
 
     def preprocess_inputs(self, resolver, inputs):
         files_to_download, files_to_upload_and_download, result = process_inputs_for_remote_exec(inputs)
-        return result, SGEResolveState(files_to_upload_and_download, files_to_download)
+        return result, RemoteResolveState(files_to_upload_and_download, files_to_download)
 
     def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name, resolver_state,
                     resources):
@@ -766,7 +763,7 @@ class AsyncDelegateExecClient:
 
         pull_map = push_to_cas_with_pullmap(cas_remote, source_and_dest, resolver_state.files_to_download)
         results_path = make_results_path(self.cas_remote_url, pull_map)
-        if remote.exists(results_path):
+        if self.recycle_past_runs and remote.exists(results_path):
             return load_existing_results(id, remote, results_path)
 
         command = "{helper_path} exec --uploadresults {results_path} " \
@@ -778,11 +775,14 @@ class AsyncDelegateExecClient:
                   "-r retcode.json " \
                   "-f {pull_map} " \
                   "--stage {stage_dir} " \
-                  "{remote_url} . " \
+                  "{remote_url} " \
+                  "{cas_remote_url} " \
+                  ". " \
                   "bash wrapper.sh".format(results_path=results_path,
                                            helper_path=self.helper_path,
                                            remote_url=remote_url,
                                            pull_map=pull_map,
+                                           cas_remote_url=self.cas_remote_url,
                                            stage_dir=".")
 
         #### start of local execution of delegate
@@ -819,7 +819,7 @@ class AsyncDelegateExecClient:
 
 class DelegateExecClient:
     def __init__(self, resources, label, local_workdir, remote_url, cas_remote_url, helper_path, command_template,
-                 python_path, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY):
+                 python_path, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, recycle_past_runs):
         self.resources = resources
         self.helper_path = helper_path
         self.local_workdir = local_workdir
@@ -830,8 +830,10 @@ class DelegateExecClient:
         self.AWS_SECRET_ACCESS_KEY = AWS_SECRET_ACCESS_KEY
         self.python_path = python_path
         self.label = label
+        self.recycle_past_runs = recycle_past_runs
 
     def reattach(self, external_ref):
+        print("reattach", repr(external_ref))
         d = json.loads(external_ref)
         remote = helper.Remote(d['remote_url'], d['local_job_dir'], self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
         file_fetcher = self._mk_file_fetcher(remote)
@@ -841,7 +843,7 @@ class DelegateExecClient:
 
     def preprocess_inputs(self, resolver, inputs):
         files_to_download, files_to_upload_and_download, result = process_inputs_for_remote_exec(inputs)
-        return result, SGEResolveState(files_to_upload_and_download, files_to_download)
+        return result, RemoteResolveState(files_to_upload_and_download, files_to_download)
 
     def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name, resolver_state,
                     resources):
@@ -877,7 +879,7 @@ class DelegateExecClient:
 
         pull_map = push_to_cas_with_pullmap(cas_remote, source_and_dest, resolver_state.files_to_download)
         results_path = make_results_path(self.cas_remote_url, pull_map)
-        if remote.exists(results_path):
+        if self.recycle_past_runs and remote.exists(results_path):
             return load_existing_results(id, remote, results_path)
 
         command = "{helper_path} exec --uploadresults {results_path} " \
@@ -889,11 +891,14 @@ class DelegateExecClient:
                   "-r retcode.json " \
                   "-f {pull_map} " \
                   "--stage {stage_dir} " \
-                  "{remote_url} . " \
+                  "{remote_url} " \
+                  "{cas_remote_url} " \
+                  ". " \
                   "bash wrapper.sh".format(results_path=results_path,
                                            helper_path=self.helper_path,
                                            remote_url=remote_url,
                                            pull_map=pull_map,
+                                           cas_remote_url=self.cas_remote_url,
                                            stage_dir=".")
 
         #### start of local execution of delegate
@@ -929,216 +934,216 @@ class DelegateExecClient:
         return file_fetcher
 
 
-class SgeExecClient:
-    def __init__(self, host, sge_prologue, local_workdir, remote_workdir, remote_url, cas_remote_url, helper_path,
-                 sge_cmd_prologue, resources, stage_dir, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY):
-        assert "{{" not in cas_remote_url
-        self.ssh_host = host
-        self.sge_prologue = sge_prologue
-        self.remote_workdir = remote_workdir
-        self.remote_url = remote_url
-        self.cas_remote_url = cas_remote_url
-        self.local_workdir = local_workdir
-        self.helper_path = helper_path
-        self.resources = resources
-        self.AWS_ACCESS_KEY_ID = AWS_ACCESS_KEY_ID
-        self.AWS_SECRET_ACCESS_KEY = AWS_SECRET_ACCESS_KEY
+# class SgeExecClient:
+#     def __init__(self, host, sge_prologue, local_workdir, remote_workdir, remote_url, cas_remote_url, helper_path,
+#                  sge_cmd_prologue, resources, stage_dir, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY):
+#         assert "{{" not in cas_remote_url
+#         self.ssh_host = host
+#         self.sge_prologue = sge_prologue
+#         self.remote_workdir = remote_workdir
+#         self.remote_url = remote_url
+#         self.cas_remote_url = cas_remote_url
+#         self.local_workdir = local_workdir
+#         self.helper_path = helper_path
+#         self.resources = resources
+#         self.AWS_ACCESS_KEY_ID = AWS_ACCESS_KEY_ID
+#         self.AWS_SECRET_ACCESS_KEY = AWS_SECRET_ACCESS_KEY
+#
+#         self.ssh = SimpleSSH()
+#
+#         self.status_cache_expiry = 5
+#         self.job_completion_delay = 6
+#         self.last_status_refresh = None
+#         self.last_refresh_id = 1
+#         self.sge_cmd_prologue = sge_cmd_prologue
+#
+#         # map of sge_job_id to sge status
+#         self.last_status = {}
+#
+#         self.stage_dir = stage_dir
+#
+#     def reattach(self, external_ref):
+#         d = json.loads(external_ref)
+#         remote_job_dir = d['remote_job_dir']
+#         remote = helper.Remote(d['remote_url'], d['local_job_dir'], self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
+#         sge_job_id = d['sge_job_id']
+#         self._saw_job_id(sge_job_id, SGE_STATUS_SUBMITTED)
+#         return SGEExecution(d['name'], d['id'], d['job_dir'], sge_job_id, d['desc_name'], self, remote, d,
+#                             self._mk_file_fetcher(remote_job_dir))
+#
+#     def _saw_job_id(self, sge_job_id, status):
+#         self.last_status[sge_job_id] = SgeState(time.time(), status, self.last_refresh_id)
+#
+#     def _refresh_job_statuses(self):
+#         qstat_command = "qstat -xml"
+#         if self.sge_cmd_prologue is not None:
+#             qstat_command = self.sge_cmd_prologue + " ; " + qstat_command
+#
+#         stdout = self.ssh.exec_cmd(self.ssh_host, qstat_command, logger=log.debug)
+#
+#         self.last_refresh_id += 1
+#
+#         doc = ETree.fromstring(stdout)
+#         job_list = doc.findall(".//job_list")
+#
+#         for job in job_list:
+#             job_id = job.find("JB_job_number").text
+#
+#             state = job.attrib['state']
+#             if state == "running":
+#                 self._saw_job_id(job_id, SGE_STATUS_RUNNING)
+#             elif state == "pending":
+#                 self._saw_job_id(job_id, SGE_STATUS_PENDING)
+#             else:
+#                 self._saw_job_id(job_id, SGE_STATUS_UNKNOWN)
+#
+#     def get_status(self, sge_job_id):
+#         now = time.time()
+#         if self.last_status_refresh is None or (now - self.last_status_refresh) > self.status_cache_expiry:
+#             self._refresh_job_statuses()
+#             self.last_status_refresh = now
+#
+#         status_obj = self.last_status[sge_job_id]
+#         if status_obj.refresh_id != self.last_refresh_id:
+#             # this job was missing the last time we refreshed
+#             if now - status_obj.update_timestamp > self.job_completion_delay:
+#                 return SGE_STATUS_COMPLETE
+#
+#         return status_obj.status
+#
+#     def preprocess_inputs(self, resolver, inputs):
+#         files_to_download, files_to_upload_and_download, result = process_inputs_for_remote_exec(inputs)
+#         return result, SGEResolveState(files_to_upload_and_download, files_to_download)
+#
+#     def add_script(self, resolver_state, filename):
+#         # assert not filename[0] == "/"
+#         resolver_state.files_to_upload_and_download.append((filename, os.path.basename(filename)))
+#
+#     def _exec_qsub(self, stdout, stderr, script_path, mem_in_mb, name):
+#         qsub_command = "qsub -N {name} -l h_vmem={mem_in_mb}M -terse -o {stdout} -e {stderr} {script_path}".format(
+#             name=name, stdout=stdout, stderr=stderr, script_path=script_path, mem_in_mb=mem_in_mb)
+#
+#         if self.sge_cmd_prologue is not None:
+#             qsub_command = self.sge_cmd_prologue + " ; " + qsub_command
+#
+#         sge_job_id = self.ssh.exec_cmd(self.ssh_host, qsub_command).strip()
+#         assert re.match("\\d+", sge_job_id) is not None
+#         self._saw_job_id(sge_job_id, SGE_STATUS_SUBMITTED)
+#
+#         return sge_job_id
+#
+#     def exec_generic_command(self, rel_job_dir, command, mem_in_mb, name):
+#         remote_job_dir = "{}/{}".format(self.remote_workdir, rel_job_dir)
+#
+#         docker_launch_script = "{}/run.sh".format(remote_job_dir)
+#         script = "#!/bin/bash\n{}\n".format(" ".join(command))
+#         self.ssh.put_string(self.ssh_host, script, docker_launch_script)
+#
+#         self._exec_qsub(remote_job_dir + "/stdout.txt", remote_job_dir + "/stderr.txt", docker_launch_script, mem_in_mb,
+#                         name)
+#
+#     def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name, resolver_state,
+#                     resources):
+#         mem_in_mb = resources.get("mem", 1000)
+#         assert job_dir[:len(self.local_workdir)] == self.local_workdir
+#         rel_job_dir = job_dir[len(self.local_workdir) + 1:]
+#
+#         remote_url = "{}/{}".format(self.remote_url, rel_job_dir)
+#         remote_job_dir = "{}/{}".format(self.remote_workdir, rel_job_dir)
+#         local_job_dir = "{}/{}".format(self.local_workdir, rel_job_dir)
+#         local_wrapper_path = os.path.join(local_job_dir, "wrapper.sh")
+#         remote_wrapper_path = os.path.join(remote_job_dir, "wrapper.sh")
+#
+#         source_and_dest = list(resolver_state.files_to_upload_and_download)
+#
+#         if outputs is not None:
+#             local_write_results_path = os.path.join(local_job_dir, 'write_results.py')
+#             source_and_dest += [(local_write_results_path, "write_results.py")]
+#             run_stmts += ["python write_results.py"]
+#             with open(local_write_results_path, "wt") as fd:
+#                 fd.write("import json\n"
+#                          "results = {}\n"
+#                          "fd = open('results.json', 'wt')\n"
+#                          "fd.write(json.dumps(results))\n"
+#                          "fd.close()\n".format(repr(dict(outputs=outputs))))
+#
+#         remote = helper.Remote(remote_url, local_job_dir, self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
+#         cas_remote = helper.Remote(self.cas_remote_url, local_job_dir, self.AWS_ACCESS_KEY_ID,
+#                                    self.AWS_SECRET_ACCESS_KEY)
+#         for _, dest in source_and_dest:
+#             assert dest[0] != '/'
+#
+#         pull_map = push_to_cas_with_pullmap(cas_remote, source_and_dest, resolver_state.files_to_download)
+#         results_path = make_results_path(self.cas_remote_url, pull_map)
+#         if remote.exists(results_path):
+#             return load_existing_results(id, remote, results_path)
+#
+#         self.ssh.exec_cmd(self.ssh_host, "mkdir -p {}".format(remote_job_dir))
+#         helper_script = "cd {remote_job_dir}\n" \
+#                         "{helper_path} exec --uploadresults {results_path} " \
+#                         "-u retcode.json " \
+#                         "-u stdout.txt " \
+#                         "-u stderr.txt " \
+#                         "-o stdout.txt " \
+#                         "-e stderr.txt " \
+#                         "-r retcode.json " \
+#                         "-f {pull_map} " \
+#                         "--stage {stage_dir} " \
+#                         "{remote_url} . " \
+#                         "bash wrapper.sh\n".format(results_path,
+#                                                    helper_path=self.helper_path,
+#                                                    remote_url=remote_url,
+#                                                    remote_job_dir=remote_job_dir,
+#                                                    pull_map=pull_map,
+#                                                    stage_dir=self.stage_dir)
+#
+#         if self.sge_prologue is not None:
+#             helper_script = self.sge_prologue + "\n" + helper_script
+#
+#         pull_and_run_script = "{}/pull_and_run.sh".format(remote_job_dir)
+#         self.ssh.put_string(self.ssh_host, helper_script, pull_and_run_script)
+#
+#         write_wrapper_script(local_wrapper_path, remote_job_dir, prologue, run_stmts, None)
+#
+#         log.debug("put %s %s", local_wrapper_path, remote_wrapper_path)
+#         self.ssh.put(self.ssh_host, local_wrapper_path, remote_wrapper_path)
+#
+#         sge_job_id = self._exec_qsub(remote_job_dir + "/helper_stdout.txt", remote_job_dir + "/helper_stderr.txt",
+#                                      pull_and_run_script, mem_in_mb, rel_job_dir)
+#
+#         extern_ref = dict(remote_url=remote_url,
+#                           local_job_dir=local_job_dir,
+#                           name=name,
+#                           id=id, job_dir=rel_job_dir,
+#                           sge_job_id=sge_job_id,
+#                           desc_name=desc_name,
+#                           remote_job_dir=remote_job_dir)
+#
+#         return SGEExecution(name, id, job_dir, sge_job_id, desc_name, self, remote, extern_ref,
+#                             self._mk_file_fetcher(remote_job_dir))
+#
+#     def _mk_file_fetcher(self, dir):
+#         def fetch(filename, destination):
+#             path = os.path.join(dir, filename)
+#             try:
+#                 self.ssh.get(self.ssh_host, path, destination)
+#                 return "{}:{}".format(self.ssh_host, path)
+#             except FileNotFoundError:
+#                 log.warning("No file at {}:{}".format(self.ssh_host, path))
+#
+#         return fetch
+#
+#     def cancel(self, sge_job_id):
+#         qdel_command = "qdel {}".format(sge_job_id)
+#         if self.sge_cmd_prologue is not None:
+#             qdel_command = self.sge_cmd_prologue + " ; " + qdel_command
+#
+#         # qdel may fail if job terminates while waiting for input, so just hope for the best
+#         # if we got an error
+#         self.ssh.exec_cmd(self.ssh_host, qdel_command, assert_success=False)
 
-        self.ssh = SimpleSSH()
 
-        self.status_cache_expiry = 5
-        self.job_completion_delay = 6
-        self.last_status_refresh = None
-        self.last_refresh_id = 1
-        self.sge_cmd_prologue = sge_cmd_prologue
-
-        # map of sge_job_id to sge status
-        self.last_status = {}
-
-        self.stage_dir = stage_dir
-
-    def reattach(self, external_ref):
-        d = json.loads(external_ref)
-        remote_job_dir = d['remote_job_dir']
-        remote = helper.Remote(d['remote_url'], d['local_job_dir'], self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
-        sge_job_id = d['sge_job_id']
-        self._saw_job_id(sge_job_id, SGE_STATUS_SUBMITTED)
-        return SGEExecution(d['name'], d['id'], d['job_dir'], sge_job_id, d['desc_name'], self, remote, d,
-                            self._mk_file_fetcher(remote_job_dir))
-
-    def _saw_job_id(self, sge_job_id, status):
-        self.last_status[sge_job_id] = SgeState(time.time(), status, self.last_refresh_id)
-
-    def _refresh_job_statuses(self):
-        qstat_command = "qstat -xml"
-        if self.sge_cmd_prologue is not None:
-            qstat_command = self.sge_cmd_prologue + " ; " + qstat_command
-
-        stdout = self.ssh.exec_cmd(self.ssh_host, qstat_command, logger=log.debug)
-
-        self.last_refresh_id += 1
-
-        doc = ETree.fromstring(stdout)
-        job_list = doc.findall(".//job_list")
-
-        for job in job_list:
-            job_id = job.find("JB_job_number").text
-
-            state = job.attrib['state']
-            if state == "running":
-                self._saw_job_id(job_id, SGE_STATUS_RUNNING)
-            elif state == "pending":
-                self._saw_job_id(job_id, SGE_STATUS_PENDING)
-            else:
-                self._saw_job_id(job_id, SGE_STATUS_UNKNOWN)
-
-    def get_status(self, sge_job_id):
-        now = time.time()
-        if self.last_status_refresh is None or (now - self.last_status_refresh) > self.status_cache_expiry:
-            self._refresh_job_statuses()
-            self.last_status_refresh = now
-
-        status_obj = self.last_status[sge_job_id]
-        if status_obj.refresh_id != self.last_refresh_id:
-            # this job was missing the last time we refreshed
-            if now - status_obj.update_timestamp > self.job_completion_delay:
-                return SGE_STATUS_COMPLETE
-
-        return status_obj.status
-
-    def preprocess_inputs(self, resolver, inputs):
-        files_to_download, files_to_upload_and_download, result = process_inputs_for_remote_exec(inputs)
-        return result, SGEResolveState(files_to_upload_and_download, files_to_download)
-
-    def add_script(self, resolver_state, filename):
-        # assert not filename[0] == "/"
-        resolver_state.files_to_upload_and_download.append((filename, os.path.basename(filename)))
-
-    def _exec_qsub(self, stdout, stderr, script_path, mem_in_mb, name):
-        qsub_command = "qsub -N {name} -l h_vmem={mem_in_mb}M -terse -o {stdout} -e {stderr} {script_path}".format(
-            name=name, stdout=stdout, stderr=stderr, script_path=script_path, mem_in_mb=mem_in_mb)
-
-        if self.sge_cmd_prologue is not None:
-            qsub_command = self.sge_cmd_prologue + " ; " + qsub_command
-
-        sge_job_id = self.ssh.exec_cmd(self.ssh_host, qsub_command).strip()
-        assert re.match("\\d+", sge_job_id) is not None
-        self._saw_job_id(sge_job_id, SGE_STATUS_SUBMITTED)
-
-        return sge_job_id
-
-    def exec_generic_command(self, rel_job_dir, command, mem_in_mb, name):
-        remote_job_dir = "{}/{}".format(self.remote_workdir, rel_job_dir)
-
-        docker_launch_script = "{}/run.sh".format(remote_job_dir)
-        script = "#!/bin/bash\n{}\n".format(" ".join(command))
-        self.ssh.put_string(self.ssh_host, script, docker_launch_script)
-
-        self._exec_qsub(remote_job_dir + "/stdout.txt", remote_job_dir + "/stderr.txt", docker_launch_script, mem_in_mb,
-                        name)
-
-    def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name, resolver_state,
-                    resources):
-        mem_in_mb = resources.get("mem", 1000)
-        assert job_dir[:len(self.local_workdir)] == self.local_workdir
-        rel_job_dir = job_dir[len(self.local_workdir) + 1:]
-
-        remote_url = "{}/{}".format(self.remote_url, rel_job_dir)
-        remote_job_dir = "{}/{}".format(self.remote_workdir, rel_job_dir)
-        local_job_dir = "{}/{}".format(self.local_workdir, rel_job_dir)
-        local_wrapper_path = os.path.join(local_job_dir, "wrapper.sh")
-        remote_wrapper_path = os.path.join(remote_job_dir, "wrapper.sh")
-
-        source_and_dest = list(resolver_state.files_to_upload_and_download)
-
-        if outputs is not None:
-            local_write_results_path = os.path.join(local_job_dir, 'write_results.py')
-            source_and_dest += [(local_write_results_path, "write_results.py")]
-            run_stmts += ["python write_results.py"]
-            with open(local_write_results_path, "wt") as fd:
-                fd.write("import json\n"
-                         "results = {}\n"
-                         "fd = open('results.json', 'wt')\n"
-                         "fd.write(json.dumps(results))\n"
-                         "fd.close()\n".format(repr(dict(outputs=outputs))))
-
-        remote = helper.Remote(remote_url, local_job_dir, self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
-        cas_remote = helper.Remote(self.cas_remote_url, local_job_dir, self.AWS_ACCESS_KEY_ID,
-                                   self.AWS_SECRET_ACCESS_KEY)
-        for _, dest in source_and_dest:
-            assert dest[0] != '/'
-
-        pull_map = push_to_cas_with_pullmap(cas_remote, source_and_dest, resolver_state.files_to_download)
-        results_path = make_results_path(self.cas_remote_url, pull_map)
-        if remote.exists(results_path):
-            return load_existing_results(id, remote, results_path)
-
-        self.ssh.exec_cmd(self.ssh_host, "mkdir -p {}".format(remote_job_dir))
-        helper_script = "cd {remote_job_dir}\n" \
-                        "{helper_path} exec --uploadresults {results_path} " \
-                        "-u retcode.json " \
-                        "-u stdout.txt " \
-                        "-u stderr.txt " \
-                        "-o stdout.txt " \
-                        "-e stderr.txt " \
-                        "-r retcode.json " \
-                        "-f {pull_map} " \
-                        "--stage {stage_dir} " \
-                        "{remote_url} . " \
-                        "bash wrapper.sh\n".format(results_path,
-                                                   helper_path=self.helper_path,
-                                                   remote_url=remote_url,
-                                                   remote_job_dir=remote_job_dir,
-                                                   pull_map=pull_map,
-                                                   stage_dir=self.stage_dir)
-
-        if self.sge_prologue is not None:
-            helper_script = self.sge_prologue + "\n" + helper_script
-
-        pull_and_run_script = "{}/pull_and_run.sh".format(remote_job_dir)
-        self.ssh.put_string(self.ssh_host, helper_script, pull_and_run_script)
-
-        write_wrapper_script(local_wrapper_path, remote_job_dir, prologue, run_stmts, None)
-
-        log.debug("put %s %s", local_wrapper_path, remote_wrapper_path)
-        self.ssh.put(self.ssh_host, local_wrapper_path, remote_wrapper_path)
-
-        sge_job_id = self._exec_qsub(remote_job_dir + "/helper_stdout.txt", remote_job_dir + "/helper_stderr.txt",
-                                     pull_and_run_script, mem_in_mb, rel_job_dir)
-
-        extern_ref = dict(remote_url=remote_url,
-                          local_job_dir=local_job_dir,
-                          name=name,
-                          id=id, job_dir=rel_job_dir,
-                          sge_job_id=sge_job_id,
-                          desc_name=desc_name,
-                          remote_job_dir=remote_job_dir)
-
-        return SGEExecution(name, id, job_dir, sge_job_id, desc_name, self, remote, extern_ref,
-                            self._mk_file_fetcher(remote_job_dir))
-
-    def _mk_file_fetcher(self, dir):
-        def fetch(filename, destination):
-            path = os.path.join(dir, filename)
-            try:
-                self.ssh.get(self.ssh_host, path, destination)
-                return "{}:{}".format(self.ssh_host, path)
-            except FileNotFoundError:
-                log.warning("No file at {}:{}".format(self.ssh_host, path))
-
-        return fetch
-
-    def cancel(self, sge_job_id):
-        qdel_command = "qdel {}".format(sge_job_id)
-        if self.sge_cmd_prologue is not None:
-            qdel_command = self.sge_cmd_prologue + " ; " + qdel_command
-
-        # qdel may fail if job terminates while waiting for input, so just hope for the best
-        # if we got an error
-        self.ssh.exec_cmd(self.ssh_host, qdel_command, assert_success=False)
-
-
-class SGEResolveState:
+class RemoteResolveState:
     def __init__(self, files_to_upload_and_download, files_to_download):
         self.files_to_upload_and_download = files_to_upload_and_download
         self.files_to_download = files_to_download
@@ -1184,71 +1189,73 @@ def _log_remote_failure(file_fetch, msg):
                            stderr_path_to_print=stderr_path)
 
 
-class SGEExecution:
-    def __init__(self, transform, id, job_dir, sge_job_id, desc_name, client, remote, extern_ref, file_fetch):
-        self.transform = transform
-        self.id = id
-        self.job_dir = job_dir
-        self.sge_job_id = sge_job_id
-        self.desc_name = desc_name
-        self.client = client
-        self.remote = remote
-        self.extern_ref = extern_ref
-        self.file_fetch = file_fetch
+# class SGEExecution:
+#     def __init__(self, transform, id, job_dir, sge_job_id, desc_name, client, remote, extern_ref, file_fetch):
+#         self.transform = transform
+#         self.id = id
+#         self.job_dir = job_dir
+#         self.sge_job_id = sge_job_id
+#         self.desc_name = desc_name
+#         self.client = client
+#         self.remote = remote
+#         self.extern_ref = extern_ref
+#         self.file_fetch = file_fetch
+#
+#     def cancel(self):
+#         log.warn("Executing qdel to delete job %s (%s)", self.sge_job_id, self.desc_name)
+#         self.client.cancel(self.sge_job_id)
+#
+#     def get_state_label(self):
+#         return "SGE-" + self.client.get_status(self.sge_job_id)
+#
+#     def get_external_id(self):
+#         return json.dumps(self.extern_ref)
+#
+#     def _log_failure(self, msg):
+#         _log_remote_failure(self.file_fetch, msg)
+#
+#     def get_completion(self):
+#         failure, outputs = self._get_completion()
+#         if failure is not None:
+#             log.error("SGE Job {} running {} failed".format(self.sge_job_id, self.desc_name))
+#             self._log_failure(failure)
+#         return failure, outputs
+#
+#     def _get_completion(self):
+#         status = self.client.get_status(self.sge_job_id)
+#
+#         if status != SGE_STATUS_COMPLETE:
+#             return None, None
+#
+#         log.debug("About to download retcode.json")
+#
+#         retcode_content = self.remote.download_as_str("retcode.json")
+#         if retcode_content is not None:
+#             retcode = json.loads(retcode_content)['retcode']
+#         else:
+#             log.debug("got no retcode")
+#             retcode = None
+#
+#         if retcode != 0:
+#             return ("shell command failed with {}".format(repr(retcode)), None)
+#
+#         results_str = self.remote.download_as_str("results.json")
+#         if results_str is None:
+#             return ("script reported success but results.json is missing!", None)
+#
+#         results = json.loads(results_str)
+#
+#         log.info("Rule {} completed ({}). Results: {}".format(self.desc_name, self.job_dir, results))
+#         assert type(results['outputs']) == list
+#         outputs = [_resolve_filenames(self.remote, o) for o in results['outputs']]
+#
+#         return None, outputs
 
-    def cancel(self):
-        log.warn("Executing qdel to delete job %s (%s)", self.sge_job_id, self.desc_name)
-        self.client.cancel(self.sge_job_id)
 
-    def get_state_label(self):
-        return "SGE-" + self.client.get_status(self.sge_job_id)
-
-    def get_external_id(self):
-        return json.dumps(self.extern_ref)
-
-    def _log_failure(self, msg):
-        _log_remote_failure(self.file_fetch, msg)
-
-    def get_completion(self):
-        failure, outputs = self._get_completion()
-        if failure is not None:
-            log.error("SGE Job {} running {} failed".format(self.sge_job_id, self.desc_name))
-            self._log_failure(failure)
-        return failure, outputs
-
-    def _get_completion(self):
-        status = self.client.get_status(self.sge_job_id)
-
-        if status != SGE_STATUS_COMPLETE:
-            return None, None
-
-        log.debug("About to download retcode.json")
-
-        retcode_content = self.remote.download_as_str("retcode.json")
-        if retcode_content is not None:
-            retcode = json.loads(retcode_content)['retcode']
-        else:
-            log.debug("got no retcode")
-            retcode = None
-
-        if retcode != 0:
-            return ("shell command failed with {}".format(repr(retcode)), None)
-
-        results_str = self.remote.download_as_str("results.json")
-        if results_str is None:
-            return ("script reported success but results.json is missing!", None)
-
-        results = json.loads(results_str)
-
-        log.info("Rule {} completed ({}). Results: {}".format(self.desc_name, self.job_dir, results))
-        assert type(results['outputs']) == list
-        outputs = [_resolve_filenames(self.remote, o) for o in results['outputs']]
-
-        return None, outputs
-
-
-def assert_has_only_props(properties, names):
-    assert set(properties.keys()) == set(names), "Expected properties: {}, but got {}".format(names, properties.keys())
+def assert_has_only_props(properties, names, optional=[]):
+    keys = set(properties.keys())
+    keys.difference_update(optional)
+    assert keys == set(names), "Expected properties: {}, but got {}".format(names, properties.keys())
 
 
 def create_client(name, config, properties):
@@ -1256,38 +1263,50 @@ def create_client(name, config, properties):
     for k, v in properties.get("resources", {}).items():
         resources[k] = float(v)
     type = properties.get('type')
-    if type == 'sge':
-        resources['mem'] = 1e20
-        expected_props = ["type", "SGE_HOST", "SGE_PROLOGUE", "SGE_REMOTE_WORKDIR", "SGE_HELPER_PATH",
-                          "SGE_CMD_PROLOGUE", "resources"]
-        assert_has_only_props(properties, expected_props)
-        return SgeExecClient(properties["SGE_HOST"],
-                             properties["SGE_PROLOGUE"],
-                             config["WORKING_DIR"],
-                             properties["SGE_REMOTE_WORKDIR"] + "/" + config["EXECUTION_ID"],
-                             config["S3_STAGING_URL"] + "/" + config["EXECUTION_ID"],
-                             config["S3_STAGING_URL"],
-                             properties["SGE_HELPER_PATH"],
-                             properties["SGE_CMD_PROLOGUE"],
-                             resources,
-                             properties["SGE_REMOTE_WORKDIR"] + "/CAS",
-                             config["AWS_ACCESS_KEY_ID"],
-                             config["AWS_SECRET_ACCESS_KEY"]
-                             )
-    elif type == "local":
+    # if type == 'sge':
+    #     resources['mem'] = 1e20
+    #     expected_props = ["type", "SGE_HOST", "SGE_PROLOGUE", "SGE_REMOTE_WORKDIR", "SGE_HELPER_PATH",
+    #                       "SGE_CMD_PROLOGUE", "resources"]
+    #     assert_has_only_props(properties, expected_props)
+    #     return SgeExecClient(properties["SGE_HOST"],
+    #                          properties["SGE_PROLOGUE"],
+    #                          config["WORKING_DIR"],
+    #                          properties["SGE_REMOTE_WORKDIR"] + "/" + config["EXECUTION_ID"],
+    #                          config["S3_STAGING_URL"] + "/" + config["EXECUTION_ID"],
+    #                          config["S3_STAGING_URL"],
+    #                          properties["SGE_HELPER_PATH"],
+    #                          properties["SGE_CMD_PROLOGUE"],
+    #                          resources,
+    #                          properties["SGE_REMOTE_WORKDIR"] + "/CAS",
+    #                          config["AWS_ACCESS_KEY_ID"],
+    #                          config["AWS_SECRET_ACCESS_KEY"]
+    #                          )
+    if type == "local":
         assert_has_only_props(properties, ["type", "resources"])
         return LocalExecClient(resources)
     elif type == "delegate":
-        assert_has_only_props(properties, ["type", "resources", "HELPER_PATH", "COMMAND_TEMPLATE", "label"])
+        assert_has_only_props(properties, ["type", "resources", "HELPER_PATH", "COMMAND_TEMPLATE", "label"],
+                              optional=["REUSE_PAST_RUNS"])
+
+        reuse_past_runs_str = properties.get("REUSE_PAST_RUNS", "true").lower()
+        assert reuse_past_runs_str in ['true', 'false']
+        reuse_past_runs = reuse_past_runs_str == "true"
+
         return DelegateExecClient(resources, properties['label'], config["WORKING_DIR"],
                                   config["S3_STAGING_URL"] + "/" + config["EXECUTION_ID"], config["S3_STAGING_URL"],
                                   properties["HELPER_PATH"], properties["COMMAND_TEMPLATE"],
                                   config.get("PYTHON_PATH", "python"), config["AWS_ACCESS_KEY_ID"],
-                                  config["AWS_SECRET_ACCESS_KEY"])
+                                  config["AWS_SECRET_ACCESS_KEY"], reuse_past_runs)
     elif type == "async-delegate":
         assert_has_only_props(properties,
                               ["type", "resources", "HELPER_PATH", "COMMAND_TEMPLATE", "CHECK_COMMAND_TEMPLATE",
-                               "IS_RUNNING_PATTERN", "label", "TERMINATE_CMD_TEMPLATE", "JOB_ID_PATTERN"])
+                               "IS_RUNNING_PATTERN", "label", "TERMINATE_CMD_TEMPLATE", "JOB_ID_PATTERN"],
+                              optional=["REUSE_PAST_RUNS"])
+
+        reuse_past_runs_str = properties.get("REUSE_PAST_RUNS", "true").lower()
+        assert reuse_past_runs_str in ['true', 'false']
+        reuse_past_runs = reuse_past_runs_str == "true"
+
         return AsyncDelegateExecClient(resources, properties['label'], config["WORKING_DIR"],
                                        config["S3_STAGING_URL"] + "/" + config["EXECUTION_ID"],
                                        config["S3_STAGING_URL"],
@@ -1295,6 +1314,6 @@ def create_client(name, config, properties):
                                        config.get("PYTHON_PATH", "python"), config["AWS_ACCESS_KEY_ID"],
                                        config["AWS_SECRET_ACCESS_KEY"], properties["CHECK_COMMAND_TEMPLATE"],
                                        properties["IS_RUNNING_PATTERN"], properties["TERMINATE_CMD_TEMPLATE"],
-                                       properties["JOB_ID_PATTERN"])
+                                       properties["JOB_ID_PATTERN"], reuse_past_runs)
     else:
         raise Exception("Unrecognized exec-profile 'type': {}".format(type))
