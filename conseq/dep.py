@@ -820,10 +820,18 @@ class Template:
 
         for q in self.foreach_queries + self.forall_queries:
             matched = True
-            for constraint in q.const_constraints.items():
-                if constraint not in key_value_pairs:
-                    matched = False
-                    break
+            for k, v in q.const_constraints.items():
+                if isinstance(v, str):
+                    if (k, v) not in key_value_pairs:
+                        matched = False
+                        break
+                else:
+                    if k not in obj.props:
+                        matched = False
+                        break
+                    if not v.match(obj.props[k]):
+                        matched = False
+                        break
             if matched:
                 return True
         return False

@@ -159,27 +159,22 @@ def test_stuff(tmpdir):
     templates = [
         dep.Template([dep.ForEach("contexts", dict(type="contexts"))],
                      [],
-                     "MakeContexts",
-                     expected=[dep.InstanceTemplate(dict(type="context"))]),
+                     "MakeContexts"),
 
         dep.Template([dep.ForEach("avana_lib", dict(type="crispr_dataset", library="Avana")),
                       dep.ForAll("gecko_libs", dict(library="Gecko"))],
                      [],
-                     "AvanaGeckoMerge",
-                     expected=[dep.InstanceTemplate(dict(type="crispr_dataset", library="Avana+Gecko"))]),
+                     "AvanaGeckoMerge"),
 
         dep.Template([dep.ForEach("dataset", dict(type="crispr_dataset")),
                       dep.ForEach("context", dict(type="context"))],
                      [],
-                     "CalculateEnrichment",
-                     expected=[dep.InstanceTemplate(dict(type="enrich_result"))]),
+                     "CalculateEnrichment"),
 
         dep.Template([dep.ForEach("dataset", dict(type="crispr_dataset")),
                       dep.ForEach("parameters", dict(type="atlantis_params"))],
                      [],
-                     "RunAtlantis",
-                     expected=[dep.InstanceTemplate(dict(type="atlantis_result"))]
-                     )
+                     "RunAtlantis")
     ]
 
     j = dep.open_job_db(jobdb)

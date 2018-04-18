@@ -268,8 +268,8 @@ def test_publish(tmpdir, monkeypatch):
         dictionary = dictionary['in']
         assert dictionary["finished"] == "true"
         assert dictionary["name"] == "bongo"
-        assert "$file_url" in dictionary["file"]
-        assert "$file_url" in dictionary["url"]
+        assert dictionary["file"].startswith("s3://")
+        assert dictionary["url"] == "s3://foo/key"
         assert location == "manifest-bongo.json"
         publish_called[0] = True
 
