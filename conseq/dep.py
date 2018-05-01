@@ -170,10 +170,16 @@ class ObjSet:
             objs.append(Obj(id, space, timestamp, json.loads(_json)))
         return iter(objs)
 
-    def get(self, id):
+    def get(self, id, must=True):
         c = get_cursor()
         c.execute("select id, space, timestamp, json from cur_obj where id = ?", [id])
-        id, space, timestamp, _json = c.fetchone()
+        rec = c.fetchone()
+        if rec is None:
+            if must:
+                raise Exception("Attempted to get object {}, but did not exist".format(id))
+            else:
+                return None
+        id, space, timestamp, _json = rec
         return Obj(id, space, timestamp, json.loads(_json))
 
     def remove(self, id):
@@ -270,6 +276,8 @@ class ObjSet:
                 ov = o.props[k]
                 if isinstance(ov, dict) and "$value" in ov:
                     ov = ov["$value"]
+                if isinstance(ov, dict) and "$filename" in ov:
+                    ov = ov["$filename"]
 
                 if hasattr(v, "match"):
                     matched = v.match(ov) != None
@@ -678,6 +686,10 @@ class ExecutionLog:
             obj_id = objs_to_explore[-1]
             del objs_to_explore[-1]
 
+            if obj_id is None:
+                print("Got missing obj_id")
+                continue
+
             objs_reached.add(obj_id)
 
             c.execute(
@@ -687,6 +699,9 @@ class ExecutionLog:
 
             for output_obj_id in output_obj_ids:
                 if output_obj_id in objs_reached:
+                    continue
+                if output_obj_id is None:
+                    print("dropped none obj_id")
                     continue
                 objs_to_explore.append(output_obj_id)
 
@@ -829,7 +844,11 @@ class Template:
                     if k not in obj.props:
                         matched = False
                         break
-                    if not v.match(obj.props[k]):
+                    
+                    ov = obj.props[k]
+                    if isinstance(ov, dict):
+                        ov = list(ov.values())[0]
+                    if not v.match(ov):
                         matched = False
                         break
             if matched:
@@ -1091,7 +1110,8 @@ class Jobs:
     def find_all_reachable_downstream_objs(self, obj_id):
         with transaction(self.db):
             obj_ids = self.log.find_all_reachable_downstream_objs(obj_id)
-            return [self.objects.get(obj_id) for obj_id in obj_ids]
+            result = [self.objects.get(obj_id, must=False) for obj_id in obj_ids]
+            return [x for x in result if x is not None]
 
     def remove_objects(self, obj_ids):
         with transaction(self.db):

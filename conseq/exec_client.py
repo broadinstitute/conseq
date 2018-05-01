@@ -664,7 +664,7 @@ def process_inputs_for_remote_exec(inputs):
 
 
 def create_publish_exec_client(config):
-    return PublishExecClient(config["S3_STAGING_URL"] + "/" + config["EXECUTION_ID"], config['AWS_ACCESS_KEY_ID'],
+    return PublishExecClient(config["S3_STAGING_URL"], config['AWS_ACCESS_KEY_ID'],
                              config['AWS_SECRET_ACCESS_KEY'])
 
 
