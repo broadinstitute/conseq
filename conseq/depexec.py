@@ -14,6 +14,7 @@ from conseq import debug_log
 from conseq import dep
 from conseq import exec_client
 from conseq import parser
+from conseq import xref
 
 log = logging.getLogger(__name__)
 
@@ -385,9 +386,6 @@ class Lazy:
         return self.result
 
 
-from conseq import xref
-
-
 def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, capture_output, req_confirm, maxfail,
               maxstart):
     from conseq.exec_client import create_publish_exec_client
@@ -593,32 +591,10 @@ def add_artifact_if_missing(j, obj):
     return j.add_obj(dep.DEFAULT_SPACE, timestamp.isoformat(), d, overwrite=False)
 
 
-def add_xref(j, xref, refresh):
-    timestamp = datetime.datetime.now()
-    d = dict(xref.obj)
-    d["$xref_url"] = xref.url
-    overwrite = False
-    if refresh:
-        existing = j.find_objs(dep.DEFAULT_SPACE, d)
-        if len(existing) > 0:
-            if len(existing) > 1:
-                raise Exception("Looking for xref {} resulted in multiple matches: {}".format(d, existing))
-            existing = existing[0]
-            # TODO: fix this to work with all xref types
-            if os.path.exists(xref.url):
-                file_mtime = datetime.datetime.fromtimestamp(os.path.getmtime(xref.url))
-                if file_mtime > _datetimefromiso(existing.timestamp):
-                    log.info("Xref %s has been updated", xref.url)
-                    overwrite = True
-
-    return j.add_obj(dep.DEFAULT_SPACE, timestamp.isoformat(), d, overwrite=overwrite)
-
-
 class Rules:
     def __init__(self):
         self.rule_by_name = {}
         self.vars = {}
-        self.xrefs = []
         self.objs = []
         self.types = {}
         self.exec_clients = {}
@@ -626,9 +602,6 @@ class Rules:
 
     def add_remember_executed(self, value):
         self.remember_executed.append(value)
-
-    def add_xref(self, xref):
-        self.xrefs.append(xref)
 
     def add_if_missing(self, obj):
         self.objs.append(obj)
@@ -669,7 +642,6 @@ class Rules:
         for name, rule in other.rule_by_name.items():
             self.set_rule(name, rule)
         self.vars.update(other.vars)
-        self.xrefs.extend(other.xrefs)
         self.objs.extend(other.objs)
         self.exec_clients.update(other.exec_clients)
         self.remember_executed.extend(other.remember_executed)
@@ -702,9 +674,7 @@ def read_deps(filename, initial_vars={}):
             rules.set_var(dec.name, dec.value)
 
     for dec in p:
-        if isinstance(dec, parser.XRef):
-            rules.add_xref(dec)
-        elif isinstance(dec, parser.RememberExecutedStmt):
+        if isinstance(dec, parser.RememberExecutedStmt):
             rules.add_remember_executed(dec)
         elif isinstance(dec, parser.AddIfMissingStatement):
             rules.add_if_missing(dec.json_obj)
@@ -1177,8 +1147,7 @@ def _load_initial_config(state_dir, depfile, config_file):
 
 
 def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_executions, capture_output, req_confirm,
-         config_file,
-         refresh_xrefs=False, maxfail=1, maxstart=None, force_no_targets=False):
+         config_file, maxfail=1, maxstart=None, force_no_targets=False):
     jinja2_env = create_jinja2_env()
 
     if not os.path.exists(state_dir):
@@ -1203,10 +1172,6 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
 
     for var, value in override_vars.items():
         rules.set_var(var, value)
-
-    # handle xrefs
-    for xref in rules.xrefs:
-        add_xref(j, expand_xref(jinja2_env, xref, rules.vars), refresh_xrefs)
 
     # handle the "add-if-missing" objects
     for obj in rules.objs:

@@ -8,7 +8,6 @@ squoted_string = /'[^']*'/ ;
 quoted_string = triple_dbl_quoted_string | dbl_quoted_string | squoted_string | triple_squoted_string ;
 
 identifier = /[A-Za-z]+[A-Za-z0-9_+-]*/ ;
-url = /\S+/ ;
 
 json_value = quoted_string | json_obj | json_array ;
 json_array = "[" json_value {"," json_value} * "]" | "[" "]" ;
@@ -49,8 +48,6 @@ rule_parameters = ("inputs" ":" input_specs |
 rule = "rule" identifier ":" { rule_parameters } * { run_statement } *
 ;
 
-xref = "xref" url json_obj ;
-
 add_if_missing = "add-if-missing" json_obj ;
 
 remember_executed_input = "input" quoted_string ":" {json_obj | json_array};
@@ -63,5 +60,5 @@ var_stmt = "let" identifier "=" quoted_string ;
 
 include_stmt = "include" quoted_string ;
 
-declarations =  { rule | xref | include_stmt | var_stmt | add_if_missing | exec_profile | remember_executed }+  $ ;
+declarations =  { rule | include_stmt | var_stmt | add_if_missing | exec_profile | remember_executed }+  $ ;
 

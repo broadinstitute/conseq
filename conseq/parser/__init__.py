@@ -1,7 +1,9 @@
-from collections import namedtuple
-from conseq.parser import depfile
 import re
+from collections import namedtuple
+
 import six
+
+from conseq.parser import depfile
 
 QueryVariable = namedtuple("QueryVariable", ["name"])
 RunStmt = namedtuple("RunStmt", ["exec_profile", "command", "script"])
@@ -14,10 +16,6 @@ ExpectKeyIs = namedtuple("ExpectKeyIs", "key value")
 ExpectKey = namedtuple("ExpectKey", "key")
 ExpectedTemplate = namedtuple("ExpectedTemplate", "predicates")
 
-class XRef:
-    def __init__(self, url, obj):
-        self.url = url
-        self.obj = obj
 
 class Rule:
     def __init__(self, name):
@@ -65,10 +63,12 @@ class Rule:
     def __repr__(self):
         return "<Rule {} inputs={} options={}>".format(self.name, self.inputs, self.options)
 
+
 InputSpec = namedtuple("InputSpec", ["variable", "json_obj", "for_all"])
 IncludeStatement = namedtuple("IncludeStatement", ["filename"])
 LetStatement = namedtuple("LetStatement", ["name", "value"])
 AddIfMissingStatement = namedtuple("AddIfMissingStatement", "json_obj")
+
 
 def unquote(s):
     # TODO: Handle escaped quotes
@@ -86,9 +86,10 @@ def unquote(s):
         return s[1:-1]
     raise Exception("{} does not look like a valid string".format(s))
 
+
 class Semantics(object):
     def rule_parameters(self, ast):
-        #print("rule_parameters", ast)
+        # print("rule_parameters", ast)
         return tuple(ast)
 
     def run_statement(self, ast):
@@ -140,10 +141,6 @@ class Semantics(object):
             pairs.append(x[1])
         return dict(pairs)
 
-    def xref(self, ast):
-        #print("xref ast", ast)
-        return XRef(ast[1],ast[2])
-
     def remember_executed(self, ast):
         return RememberExecutedStmt(transform=ast[3], inputs=ast[4], outputs=ast[5])
 
@@ -162,22 +159,22 @@ class Semantics(object):
         return QueryVariable(ast)
 
     def output_expected_key_value(self, ast):
-        #print("output_expected_key_value", ast)
+        # print("output_expected_key_value", ast)
         assert len(ast) == 2
         if len(ast[1][0]) != 0:
             value = ast[1][0][0][1]
-            #print("key", ast[0], "value", value)
+            # print("key", ast[0], "value", value)
             assert isinstance(value, str)
             return ExpectKeyIs(ast[0], value)
         else:
             return ExpectKey(ast[0])
 
     def output_expected_def(self, ast):
-        #print("outputs_expected_def", ast)
+        # print("outputs_expected_def", ast)
         predicates = [ast[1]]
         for x in ast[2]:
             predicates.append(x[1])
-        #print("predicates", predicates)
+        # print("predicates", predicates)
         return ExpectedTemplate(predicates)
 
     def outputs_expected_defs(self, ast):
@@ -187,7 +184,7 @@ class Semantics(object):
         return expectations
 
     def rule(self, ast):
-        #print("rule", repr(ast))
+        # print("rule", repr(ast))
         rule_name = ast[1]
         rule_parameters = ast[3]
         runs = ast[4]
@@ -198,20 +195,20 @@ class Semantics(object):
             elif statement[0] == "outputs":
                 rule.outputs = statement[2]
             elif statement[0] == "options":
-                #print("----> options", statement)
+                # print("----> options", statement)
                 options = [statement[2]]
                 rest = statement[3]
-                for i in range(0,len(rest),2):
+                for i in range(0, len(rest), 2):
                     options.append(rest[1])
                 rule.options = options
             elif statement[0] == "executor":
                 rule.executor = statement[2]
             elif statement[0] == "resources":
-                rule.resources = dict([ (k, float(v)) for k,v in statement[2].items() ])
+                rule.resources = dict([(k, float(v)) for k, v in statement[2].items()])
                 if "slots" not in rule.resources:
                     rule.resources["slots"] = 1
             elif statement[0] == "if-defined":
-                rule.if_defined.extend ( [statement[2]] + [x[1] for x in statement[3]] )
+                rule.if_defined.extend([statement[2]] + [x[1] for x in statement[3]])
             elif statement[0] == "outputs-expected":
                 rule.output_expectations = statement[2]
             elif statement[0] == "publish":
@@ -220,7 +217,7 @@ class Semantics(object):
             else:
                 raise Exception("unknown {}".format(statement[0]))
         rule.run_stmts.extend(runs)
-        #print("rule:", repr(rule))
+        # print("rule:", repr(rule))
         return rule
 
     def exec_profile(self, ast):
@@ -269,6 +266,7 @@ class Semantics(object):
         properties = [ast[4]] + ast[5]
         return TypeDefStmt(ast[1], properties)
 
+
 def parse_str(text, filename=None):
     parser = depfile.depfileParser(parseinfo=False)
     return parser.parse(
@@ -277,7 +275,8 @@ def parse_str(text, filename=None):
         filename=filename,
         trace=False,
         nameguard=None,
-        semantics = Semantics())
+        semantics=Semantics())
+
 
 def parse(filename):
     with open(filename) as f:
