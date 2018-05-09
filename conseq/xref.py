@@ -1,6 +1,8 @@
 import logging
 import os
+import sqlite3
 import tempfile
+import time
 
 import paramiko
 from six.moves.urllib import request
@@ -102,10 +104,6 @@ class Pull:
         for client in self.ssh_client_cache.values():
             client.close()
         self.ssh_client_cache = {}
-
-
-import time
-import sqlite3
 
 
 def open_cache_db(state_dir):

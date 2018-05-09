@@ -167,59 +167,6 @@ def dot(args):
     depexec.dot_cmd(args.dir, args.detailed)
 
 
-def add_export_conseq(sub):
-    parser = sub.add_parser("export-conseq", help="export artifacts as a conseq file")
-    parser.add_argument("--out", help="Name of file to write output to. Otherwise writes to stdout")
-    parser.add_argument("--upload",
-                        help="Path to upload files so that they will be accessible on a different machine.  Should be of the form s3://bucket/prefix/CAS")
-    parser.set_defaults(func=export_conseq)
-
-
-def export_conseq(args):
-    from conseq import export_cmd
-    export_cmd.export_conseq(args.dir, args.out, args.upload)
-
-    # export_meta
-
-
-def add_export(sub):
-    parser = sub.add_parser("export", help="export all artifacts to S3")
-    parser.add_argument("url", help="should be of the form s3://bucket/path")
-    parser.set_defaults(func=export)
-
-
-def export(args):
-    from conseq import export_cmd
-    export_cmd.export_artifacts(args.dir, args.url, args.config)
-
-
-def publish_cmd(args):
-    from conseq.export_cmd import publish_artifacts
-    publish_artifacts(args.dir, args.upload, [_parse_query(p.split(",")) for p in args.predicates], args.manifest,
-                      args.config)
-
-
-def add_publish(sub):
-    parser = sub.add_parser("publish", help="write artifacts and metadata to S3")
-    parser.add_argument("--upload",
-                        help="Path to upload files so that they will be accessible on a different machine.  Should be of the form s3://bucket/prefix/CAS")
-    parser.add_argument("--manifest",
-                        help="Path to upload the manifest of artifacts (example: s3://bucket/prefix/manifest.json)")
-    parser.add_argument('predicates', nargs='+', help="predicates to match in form 'key=value' ")
-    parser.set_defaults(func=publish_cmd)
-
-
-def add_import(sub):
-    parser = sub.add_parser("import", help="import artifacts from S3")
-    parser.add_argument("url", help="should be of the form s3://bucket/path")
-    parser.set_defaults(func=_import)
-
-
-def _import(args):
-    from conseq import export_cmd
-    export_cmd.import_artifacts(args.dir, args.url, args.config)
-
-
 def history_cmd(args):
     depexec.print_history(args.dir)
 

@@ -120,9 +120,16 @@ def format_inputs(inputs):
     return "".join(lines)
 
 
+def publish_manifest(location, dictionary, config):
+    from conseq import helper
+    accesskey = config['AWS_ACCESS_KEY_ID']
+    secretaccesskey = config['AWS_SECRET_ACCESS_KEY']
+    remote = helper.Remote(os.path.dirname(location), ".", accesskey=accesskey, secretaccesskey=secretaccesskey)
+    remote.upload_str(os.path.basename(location), json.dumps(dictionary, indent=2))
+
+
 def publish(jinja2_env, location_template, config, inputs):
     location = render_template(jinja2_env, location_template, config, inputs=inputs)
-    from conseq.export_cmd import publish_manifest
     log.info("publishing artifacts to %s", location)
     publish_manifest(location, inputs, config)
 

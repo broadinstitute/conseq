@@ -285,8 +285,8 @@ def test_publish(tmpdir, monkeypatch):
             # assert filenames == ["testfile"]
             # return {"testfile": "s3://foo/testfile"}
 
-    import conseq.export_cmd
-    monkeypatch.setattr(conseq.export_cmd, 'publish_manifest', mock_publish_manifest)
+    import conseq.depexec
+    monkeypatch.setattr(conseq.depexec, 'publish_manifest', mock_publish_manifest)
     import conseq.helper
     monkeypatch.setattr(conseq.helper, 'Remote', MockRemote)
 
