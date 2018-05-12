@@ -2,8 +2,6 @@ from conseq import depexec
 from conseq import parser
 
 pair_of_rules = """
-xref http://foo.org {"a": "b"}
-
 # ignore this comment
 
 rule create_numbers:
@@ -24,9 +22,9 @@ rule square:
 
 def test_parse_three_rules():
     decs = parser.parse_str(pair_of_rules)
-    assert len(decs) == 3
+    assert len(decs) == 2
 
-    r = decs[2]
+    r = decs[1]
     assert isinstance(r, parser.Rule)
 
     assert len(r.inputs) == 1
@@ -123,3 +121,61 @@ def test_publish_rule(monkeypatch):
     rule = decs[0]
     assert rule.is_publish_rule
     assert rule.publish_location == "sample{{inputs.a.other}}"
+
+
+from conseq.parser import Semantics
+from conseq.parser import depfile
+
+
+def _parse_exp(text, nonterminal):
+    parser = depfile.depfileParser(parseinfo=True)
+    return parser.parse(
+        text,
+        nonterminal,
+        trace=False,
+        nameguard=None,
+        semantics=Semantics())
+
+
+def test_parse_json():
+    value = _parse_exp("""
+    {"a": "b", "c": '1'}
+    """, "json_obj")
+    assert value == {"a": "b", "c": "1"}
+
+    value = _parse_exp("""
+    {"a": ["1", "2"]}
+    """, "json_obj")
+    assert value == {"a": ["1", "2"]}
+
+
+def test_parse_if():
+    from conseq.parser import IfStatement, LetStatement
+
+    value = _parse_exp("""
+    if 'x' == 'y':
+      let x='1'
+    else:
+      let x='2'
+    endif
+    """, "declarations")
+    print(value)
+    assert value == [IfStatement(["x", "==", "y"], [LetStatement("x", "1")], [LetStatement("x", "2")])]
+
+    # else:
+    #   let x='2'
+
+
+def test_eval_if():
+    rules = depexec.Rules()
+    # rules.set_var(name, value)
+
+    statements = parser.parse_str("""
+    if 'x' == 'y':
+      let a='1'
+    else:
+      let a='2'
+    endif
+    """)
+    depexec._eval_stmts(rules, statements, "none")
+    assert rules.vars["a"] == "2"

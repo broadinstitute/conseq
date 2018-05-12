@@ -15,6 +15,11 @@ RememberExecutedStmt = namedtuple("RememberExecutedStmt", "transform inputs outp
 ExpectKeyIs = namedtuple("ExpectKeyIs", "key value")
 ExpectKey = namedtuple("ExpectKey", "key")
 ExpectedTemplate = namedtuple("ExpectedTemplate", "predicates")
+InputSpec = namedtuple("InputSpec", ["variable", "json_obj", "for_all"])
+IncludeStatement = namedtuple("IncludeStatement", ["filename"])
+LetStatement = namedtuple("LetStatement", ["name", "value"])
+AddIfMissingStatement = namedtuple("AddIfMissingStatement", "json_obj")
+IfStatement = namedtuple("IfStatement", "condition when_true when_false")
 
 
 class Rule:
@@ -22,12 +27,10 @@ class Rule:
         self.name = name
         self.inputs = []
         self.outputs = None
-        self.options = []
         self.run_stmts = []
         self.executor = "default"
         assert self.name != "" and self.name != " "
         self.resources = {"slots": 1}
-        self.if_defined = []
         self.output_expectations = []
         self.publish_location = None
 
@@ -36,6 +39,7 @@ class Rule:
         return self.publish_location != None
 
     def output_matches_expectation(self, key_values):
+        print("output_matches_expectation", self.output_expectations)
         # if outputs were defined, then not checks needed
         if self.outputs is not None:
             return True
@@ -61,13 +65,7 @@ class Rule:
         return False
 
     def __repr__(self):
-        return "<Rule {} inputs={} options={}>".format(self.name, self.inputs, self.options)
-
-
-InputSpec = namedtuple("InputSpec", ["variable", "json_obj", "for_all"])
-IncludeStatement = namedtuple("IncludeStatement", ["filename"])
-LetStatement = namedtuple("LetStatement", ["name", "value"])
-AddIfMissingStatement = namedtuple("AddIfMissingStatement", "json_obj")
+        return "<Rule {} inputs={}>".format(self.name, self.inputs)
 
 
 def unquote(s):
@@ -114,17 +112,16 @@ class Semantics(object):
         return inspec
 
     def json_name_value_pair(self, ast):
-        return (ast[0], ast[2])
+        return (ast.name, ast.value)
 
     def json_array(self, ast):
         if len(ast) == 2:
             return []
-        return [ast[1]] + [x[1] for x in ast[2]]
+        return [ast.first] + [x[1] for x in ast.rest]
 
     def json_obj(self, ast):
-        pairs = [ast[1]]
-        rest = ast[2]
-        for x in rest:
+        pairs = [ast.first]
+        for x in ast.rest:
             pairs.append(x[1])
         return dict(pairs)
 
@@ -159,15 +156,11 @@ class Semantics(object):
         return QueryVariable(ast)
 
     def output_expected_key_value(self, ast):
-        # print("output_expected_key_value", ast)
-        assert len(ast) == 2
-        if len(ast[1][0]) != 0:
-            value = ast[1][0][0][1]
-            # print("key", ast[0], "value", value)
-            assert isinstance(value, str)
-            return ExpectKeyIs(ast[0], value)
+        if isinstance(ast, str):
+            return ExpectKey(ast)
         else:
-            return ExpectKey(ast[0])
+            assert isinstance(ast, list) and len(ast) == 3
+            return ExpectKeyIs(ast[0], ast[2])
 
     def output_expected_def(self, ast):
         # print("outputs_expected_def", ast)
@@ -207,8 +200,6 @@ class Semantics(object):
                 rule.resources = dict([(k, float(v)) for k, v in statement[2].items()])
                 if "slots" not in rule.resources:
                     rule.resources["slots"] = 1
-            elif statement[0] == "if-defined":
-                rule.if_defined.extend([statement[2]] + [x[1] for x in statement[3]])
             elif statement[0] == "outputs-expected":
                 rule.output_expectations = statement[2]
             elif statement[0] == "publish":
@@ -265,6 +256,14 @@ class Semantics(object):
     def type_def(self, ast):
         properties = [ast[4]] + ast[5]
         return TypeDefStmt(ast[1], properties)
+
+    def conditional(self, ast):
+        else_clause = []
+        if ast.else_clause != None:
+            else_clause = ast.else_clause[2]
+        for i in reversed(range(len(ast.elif_clauses))):
+            else_clause = IfStatement(ast.elif_clauses[i][1], ast.elif_clauses[i][3], else_clause)
+        return IfStatement(ast.condition, ast.true_body, else_clause)
 
 
 def parse_str(text, filename=None):

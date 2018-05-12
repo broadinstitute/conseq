@@ -1,6 +1,7 @@
 @@grammar :: depfile
 @@eol_comments :: /#.*?$/
 
+# different flavors of strings
 triple_dbl_quoted_string = /"""(?:[^"]|"{1,2}(?!"))+"""/ ;
 dbl_quoted_string = /"[^"]*"/ ;
 triple_squoted_string = /'''(?:[^']|'{1,2}(?!'))+'''/ ;
@@ -9,44 +10,72 @@ quoted_string = triple_dbl_quoted_string | dbl_quoted_string | squoted_string | 
 
 identifier = /[A-Za-z]+[A-Za-z0-9_+-]*/ ;
 
-json_value = quoted_string | json_obj | json_array ;
-json_array = "[" json_value {"," json_value} * "]" | "[" "]" ;
-json_name_value_pair = quoted_string ":" json_value ;
-json_obj = "{" json_name_value_pair { "," json_name_value_pair }* "}" ;
+# json grammar
+json_value =
+    quoted_string
+    | json_obj
+    | json_array
+    ;
 
-query_variable = identifier ;
-query_name_value_pair = quoted_string ":" ( json_value | query_variable ) |
-    quoted_string "~" quoted_string ;
-query_obj = "{" query_name_value_pair { "," query_name_value_pair }* "}" ;
+json_array =
+    "[" first:json_value rest:{"," value:json_value} * "]"
+    | "[" "]"
+    ;
+
+json_name_value_pair =
+    name:quoted_string ":" value:json_value
+    ;
+
+json_obj =
+    "{" first:json_name_value_pair rest:{ "," json_name_value_pair }* "}"
+    ;
+
+# artifact queries
+query_variable = identifier
+    ;
+
+query_name_value_pair =
+    quoted_string ":" ( json_value | query_variable ) |
+    quoted_string "~" quoted_string
+    ;
+
+query_obj =
+    "{" query_name_value_pair { "," query_name_value_pair }* "}"
+    ;
 
 input_spec_each = identifier "=" query_obj ;
 input_spec_all = identifier "=" "all" query_obj ;
 input_spec = input_spec_each | input_spec_all ;
 input_specs = input_spec { "," input_spec }* ;
 
+# outputs
 output_specs = json_obj { "," json_obj } ;
 
-run_statement = "run" quoted_string [ "with" quoted_string ] ;
+run_statement =
+    "run" quoted_string [ "with" quoted_string ]
+    ;
 
-requirement_def = identifier "=" /[0-9]+/ ;
-
-output_expected_key_value = quoted_string { { ":" quoted_string } | {} } ;
-output_expected_def = "{" output_expected_key_value { "," output_expected_key_value }* "}";
-outputs_expected_defs = output_expected_def { "," output_expected_def }* ;
+output_expected_key_value =
+    quoted_string ":" quoted_string
+    | quoted_string
+    ;
+output_expected_def =
+    "{" output_expected_key_value { "," output_expected_key_value }* "}"
+    ;
+outputs_expected_defs =
+    output_expected_def { "," output_expected_def }*
+    ;
 
 rule_parameters = ("inputs" ":" input_specs |
-  "if-defined" ":" identifier { "," identifier }* |
-  "outputs" ":" output_specs |
-  "outputs-expected" ":" outputs_expected_defs |
-  "options" ":" identifier { "," identifier }* |
-  "executor" ":" identifier |
-  "publish" ":" quoted_string |
-  "resources" ":" json_obj |
-  "requires" ":" requirement_def { "," requirement_def }* )
-  ;
+    "outputs" ":" output_specs |
+    "outputs-expected" ":" outputs_expected_defs |
+    "executor" ":" identifier |
+    "publish" ":" quoted_string |
+    "resources" ":" json_obj )
+    ;
 
 rule = "rule" identifier ":" { rule_parameters } * { run_statement } *
-;
+    ;
 
 add_if_missing = "add-if-missing" json_obj ;
 
@@ -60,5 +89,11 @@ var_stmt = "let" identifier "=" quoted_string ;
 
 include_stmt = "include" quoted_string ;
 
-declarations =  { rule | include_stmt | var_stmt | add_if_missing | exec_profile | remember_executed }+  $ ;
+conditional_expr = quoted_string "==" quoted_string
+    ;
 
+conditional = "if" condition:conditional_expr ":" true_body:declarations elif_clauses:{ "elif" conditional_expr ":" declarations }* else_clause:[ "else" ":" declarations ] "endif" ;
+
+declarations = { rule | include_stmt | var_stmt | add_if_missing | exec_profile | remember_executed | conditional }+ ;
+
+all_declarations = declarations $ ;

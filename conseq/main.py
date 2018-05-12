@@ -105,7 +105,6 @@ def add_run(sub):
     parser.add_argument("--maxstart", type=int, default=None)
     parser.add_argument("--nothing", action="store_true",
                         help="Don't run anything (useful when re-attaching existing jobs but you don't want to run downstream steps)")
-    parser.add_argument('--refresh_xrefs', help='refresh xrefs', action="store_true")
     parser.add_argument('targets', nargs='*')
     parser.set_defaults(func=run_cmd)
 
@@ -121,7 +120,7 @@ def run_cmd(args):
         config_file = None
 
     depexec.main(args.file, args.dir, args.targets, {}, concurrent, not args.nocapture, args.confirm, config_file,
-                 refresh_xrefs=args.refresh_xrefs, maxfail=args.maxfail, maxstart=args.maxstart,
+                 maxfail=args.maxfail, maxstart=args.maxstart,
                  force_no_targets=args.nothing)
 
 
@@ -219,13 +218,9 @@ def main():
     add_debugrun(sub)
     add_dot(sub)
     add_altdot(sub)
-    add_export(sub)
-    add_import(sub)
     add_space(sub)
-    add_export_conseq(sub)
     add_history_cmd(sub)
     add_localize(sub)
-    add_publish(sub)
     add_version(sub)
 
     args = parser.parse_args()

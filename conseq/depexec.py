@@ -662,25 +662,24 @@ def get_flock_statement(rule):
     return None
 
 
-def read_deps(filename, initial_vars={}):
-    rules = Rules()
-    for name, value in initial_vars.items():
-        rules.set_var(name, value)
+def _eval_if(rules, if_statement, filename):
+    assert if_statement.condition[1] == "=="
+    if if_statement.condition[0] == if_statement.condition[2]:
+        _eval_stmts(rules, if_statement.when_true, filename)
+    else:
+        _eval_stmts(rules, if_statement.when_false, filename)
 
-    p = parser.parse(filename)
 
-    for dec in p:
-        if isinstance(dec, parser.LetStatement):
-            rules.set_var(dec.name, dec.value)
-
-    for dec in p:
+def _eval_stmts(rules, statements, filename):
+    for dec in statements:
         if isinstance(dec, parser.RememberExecutedStmt):
             rules.add_remember_executed(dec)
+        elif isinstance(dec, parser.IfStatement):
+            _eval_if(rules, dec, filename)
         elif isinstance(dec, parser.AddIfMissingStatement):
             rules.add_if_missing(dec.json_obj)
         elif isinstance(dec, parser.LetStatement):
-            # these were handled above
-            pass
+            rules.set_var(dec.name, dec.value)
         elif isinstance(dec, parser.IncludeStatement):
             child_rules = read_deps(os.path.expanduser(dec.filename))
             rules.merge(child_rules)
@@ -694,6 +693,15 @@ def read_deps(filename, initial_vars={}):
             assert isinstance(dec, parser.Rule)
             dec.filename = filename
             rules.set_rule(dec.name, dec)
+
+
+def read_deps(filename, initial_vars={}):
+    rules = Rules()
+    for name, value in initial_vars.items():
+        rules.set_var(name, value)
+
+    statements = parser.parse(filename)
+    _eval_stmts(rules, statements, filename)
     return rules
 
 
@@ -1217,7 +1225,7 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
         else:
             pending_jobs = j.get_started_executions()
             for e in pending_jobs:
-                log.warn("Canceling {} which was started from earlier execution".format(e.id))
+                log.warning("Canceling {} which was started from earlier execution".format(e.id))
                 j.cancel_execution(e.id)
 
     # any jobs killed or other failures need to be removed so we'll attempt to re-run them
@@ -1228,22 +1236,11 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
     for dec in rules:
         assert (isinstance(dec, parser.Rule))
 
-        # if we have at least a single value for "if_defined", then assume we're not going add this rule
-        include_rule = len(dec.if_defined) == 0
-        # however, if we have one of the vars in if_defined defined, then we're okay to add the rule
-        for varname in dec.if_defined:
-            if varname in rules.vars:
-                include_rule = True
-
-        if not include_rule:
-            log.warning(
-                "Skipping {} because none of the following were set: {}".format(dec.name, ", ".join(dec.if_defined)))
-        else:
-            try:
-                j.add_template(to_template(jinja2_env, dec, rules.vars))
-            except MissingTemplateVar as ex:
-                log.error("Could not load rule {}: {}".format(dec.name, ex.get_error()))
-                return -1
+        try:
+            j.add_template(to_template(jinja2_env, dec, rules.vars))
+        except MissingTemplateVar as ex:
+            log.error("Could not load rule {}: {}".format(dec.name, ex.get_error()))
+            return -1
 
     # now check the rules we requested exist
     for rule_name in forced_rule_names:
