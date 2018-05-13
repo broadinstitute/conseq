@@ -59,9 +59,11 @@ output_expected_key_value =
     quoted_string ":" quoted_string
     | quoted_string
     ;
+
 output_expected_def =
     "{" output_expected_key_value { "," output_expected_key_value }* "}"
     ;
+
 outputs_expected_defs =
     output_expected_def { "," output_expected_def }*
     ;
@@ -92,8 +94,10 @@ include_stmt = "include" quoted_string ;
 conditional_expr = quoted_string "==" quoted_string
     ;
 
+eval_statement = "eval" quoted_string ;
+
 conditional = "if" condition:conditional_expr ":" true_body:declarations elif_clauses:{ "elif" conditional_expr ":" declarations }* else_clause:[ "else" ":" declarations ] "endif" ;
 
-declarations = { rule | include_stmt | var_stmt | add_if_missing | exec_profile | remember_executed | conditional }+ ;
+declarations = { rule | include_stmt | var_stmt | add_if_missing | exec_profile | remember_executed | conditional | eval_statement }+ ;
 
 all_declarations = declarations $ ;

@@ -20,6 +20,7 @@ IncludeStatement = namedtuple("IncludeStatement", ["filename"])
 LetStatement = namedtuple("LetStatement", ["name", "value"])
 AddIfMissingStatement = namedtuple("AddIfMissingStatement", "json_obj")
 IfStatement = namedtuple("IfStatement", "condition when_true when_false")
+EvalStatement = namedtuple("EvalStatement", "body")
 
 
 class Rule:
@@ -264,6 +265,9 @@ class Semantics(object):
         for i in reversed(range(len(ast.elif_clauses))):
             else_clause = IfStatement(ast.elif_clauses[i][1], ast.elif_clauses[i][3], else_clause)
         return IfStatement(ast.condition, ast.true_body, else_clause)
+
+    def eval_statement(self, ast):
+        return EvalStatement(ast[1])
 
 
 def parse_str(text, filename=None):

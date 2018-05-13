@@ -167,7 +167,8 @@ def test_parse_if():
 
 
 def test_eval_if():
-    rules = depexec.Rules()
+    from conseq.config import Rules, _eval_stmts
+    rules = Rules()
     # rules.set_var(name, value)
 
     statements = parser.parse_str("""
@@ -177,5 +178,5 @@ def test_eval_if():
       let a='2'
     endif
     """)
-    depexec._eval_stmts(rules, statements, "none")
+    _eval_stmts(rules, statements, "none")
     assert rules.vars["a"] == "2"

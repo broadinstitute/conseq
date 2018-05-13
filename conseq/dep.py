@@ -7,6 +7,8 @@ import sqlite3
 
 import six
 
+from conseq.timeit import timeblock
+
 log = logging.getLogger(__name__)
 
 DISABLE_AUTO_CREATE_RULES = False
@@ -805,9 +807,6 @@ class PropsMatch:
         return True
 
 
-from conseq.timeit import timeblock
-
-
 class Template:
     def __init__(self, queries, predicates, transform, output_matches_expectation=lambda x: True):
         self.foreach_queries = []
@@ -844,7 +843,7 @@ class Template:
                     if k not in obj.props:
                         matched = False
                         break
-                    
+
                     ov = obj.props[k]
                     if isinstance(ov, dict):
                         ov = list(ov.values())[0]
