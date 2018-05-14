@@ -536,14 +536,6 @@ def convert_input_spec_to_queries(jinja2_env, rule, config):
     return queries, predicates
 
 
-def print_rules(state_dir, depfile, config_file):
-    rules = read_rules(state_dir, depfile, config_file)
-    names = [rule.name for rule in rules]
-    names.sort()
-    for name in names:
-        print(name)
-
-
 def _rules_to_dot(rules):
     """
     :return: a graphviz graph in dot syntax approximating the execution DAG

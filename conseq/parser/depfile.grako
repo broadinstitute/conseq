@@ -39,8 +39,14 @@ query_name_value_pair =
     quoted_string "~" quoted_string
     ;
 
-query_obj =
-    "{" query_name_value_pair { "," query_name_value_pair }* "}"
+pattern_based_query_obj = "{" query_name_value_pair { "," query_name_value_pair }* "}"
+    ;
+
+fileref_query_obj = "fileref" "(" filename:quoted_string ")"
+    ;
+
+query_obj = pattern_based_query_obj
+    | fileref_query_obj
     ;
 
 input_spec_each = identifier "=" query_obj ;

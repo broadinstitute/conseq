@@ -200,7 +200,7 @@ class depfileParser(Parser):
             self._error('no available options')
 
     @tatsumasu()
-    def _query_obj_(self):  # noqa
+    def _pattern_based_query_obj_(self):  # noqa
         self._token('{')
         self._query_name_value_pair_()
 
@@ -209,6 +209,27 @@ class depfileParser(Parser):
             self._query_name_value_pair_()
         self._closure(block0)
         self._token('}')
+
+    @tatsumasu()
+    def _fileref_query_obj_(self):  # noqa
+        self._token('fileref')
+        self._token('(')
+        self._quoted_string_()
+        self.name_last_node('filename')
+        self._token(')')
+        self.ast._define(
+            ['filename'],
+            []
+        )
+
+    @tatsumasu()
+    def _query_obj_(self):  # noqa
+        with self._choice():
+            with self._option():
+                self._pattern_based_query_obj_()
+            with self._option():
+                self._fileref_query_obj_()
+            self._error('no available options')
 
     @tatsumasu()
     def _input_spec_each_(self):  # noqa
@@ -399,6 +420,11 @@ class depfileParser(Parser):
         self._quoted_string_()
 
     @tatsumasu()
+    def _eval_statement_(self):  # noqa
+        self._token('eval')
+        self._quoted_string_()
+
+    @tatsumasu()
     def _conditional_(self):  # noqa
         self._token('if')
         self._conditional_expr_()
@@ -444,6 +470,8 @@ class depfileParser(Parser):
                     self._remember_executed_()
                 with self._option():
                     self._conditional_()
+                with self._option():
+                    self._eval_statement_()
                 self._error('no available options')
         self._positive_closure(block0)
 
@@ -488,6 +516,12 @@ class depfileSemantics(object):
         return ast
 
     def query_name_value_pair(self, ast):  # noqa
+        return ast
+
+    def pattern_based_query_obj(self, ast):  # noqa
+        return ast
+
+    def fileref_query_obj(self, ast):  # noqa
         return ast
 
     def query_obj(self, ast):  # noqa
@@ -548,6 +582,9 @@ class depfileSemantics(object):
         return ast
 
     def conditional_expr(self, ast):  # noqa
+        return ast
+
+    def eval_statement(self, ast):  # noqa
         return ast
 
     def conditional(self, ast):  # noqa

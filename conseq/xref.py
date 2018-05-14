@@ -5,8 +5,11 @@ import tempfile
 import time
 
 import paramiko
+from boto.s3.connection import S3Connection
 from six.moves.urllib import request
 from six.moves.urllib.parse import urlparse
+
+from conseq.patched_resumable_download_handler import ResumableDownloadHandler
 
 log = logging.getLogger(__name__)
 
@@ -16,10 +19,6 @@ def http_fetch(url, dest):
         fd = request.urlopen(url)
         for chunk in iter(lambda: fd.read(10000), b""):
             fdo.write(chunk)
-
-
-from boto.s3.connection import S3Connection
-from conseq.patched_resumable_download_handler import ResumableDownloadHandler
 
 
 def s3_fetch(bucket_name, path, destination_filename, config):
@@ -84,7 +83,7 @@ class Pull:
         return client
 
     def pull(self, url, dest_path):
-        log.warn("Downloading {} -> {}".format(url, dest_path))
+        log.warning("Downloading {} -> {}".format(url, dest_path))
 
         parts = urlparse(url)
         if parts.scheme == "ssh":
@@ -158,9 +157,6 @@ class Resolver:
     def resolve(self, url):
         if os.path.exists(url):
             return dict(filename=os.path.abspath(url))
-        elif url.startswith("taiga://"):
-            dataset_id = url.replace("taiga://", "")
-            return dict(dataset_id=dataset_id)
         else:
             url_rec = self.cache.get(url)
             dest_filename = None
@@ -177,13 +173,3 @@ class Resolver:
                 self.cache.put(url, dest_filename, etag, time.time())
 
             return dict(filename=dest_filename, etag=etag)
-
-    def is_stale(self, url, obj):
-        if os.path.exists(url):
-            return False
-        elif url.startswith("taiga://"):
-            dataset_id = url.replace("taiga://", "")
-            return obj["dataset_id"]["$value"] == dataset_id
-        else:
-            etag = self.puller.get_etag(url)
-            return etag != obj["etag"]["$value"]

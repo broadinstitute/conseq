@@ -11,6 +11,14 @@ from conseq.util import indent_str
 log = logging.getLogger(__name__)
 
 
+def print_rules(state_dir, depfile, config_file):
+    rules = read_rules(state_dir, depfile, config_file)
+    names = [rule.name for rule in rules]
+    names.sort()
+    for name in names:
+        print(name)
+
+
 def print_history(state_dir):
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
     for exec_ in j.get_all_executions():

@@ -132,6 +132,19 @@ def _eval_stmts(rules, statements, filename):
             exec(dec.body, env, env)
         else:
             assert isinstance(dec, parser.Rule)
+
+            # rewrite any filerefs
+            inputs = []
+            for input in dec.inputs:
+                if isinstance(input.json_obj, parser.FileRef):
+                    new_json_obj = {"type": "fileref", "name": input.json_obj.filename,
+                                    "filename": {"$filename": input.json_obj.filename}}
+                    rules.add_if_missing(new_json_obj)
+                    new_query_obj = {"type": "fileref", "name": input.json_obj.filename}
+                    input = parser.InputSpec(input.variable, new_query_obj, input.for_all)
+                inputs.append(input)
+            dec.inputs = inputs
+
             dec.filename = filename
             rules.set_rule(dec.name, dec)
 

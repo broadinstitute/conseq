@@ -1,3 +1,5 @@
+import jinja2
+
 from conseq import depexec
 from conseq import parser
 
@@ -36,7 +38,6 @@ rule a:
     inputs: a={"type": "number", "value": value}, b={"type": "other", "value": value}
     run "bash"
 """
-import jinja2
 
 
 def test_parse_constrained_query():
@@ -180,3 +181,21 @@ def test_eval_if():
     """)
     _eval_stmts(rules, statements, "none")
     assert rules.vars["a"] == "2"
+
+
+def test_file_ref():
+    from conseq.config import Rules, _eval_stmts
+    rules = Rules()
+    # rules.set_var(name, value)
+
+    statements = parser.parse_str("""
+    rule a:
+        inputs: x=fileref("xyz")
+    """)
+    _eval_stmts(rules, statements, "none")
+    a = rules.get_rule("a")
+    assert a is not None
+    print(a.inputs)
+    a.inputs[0].json_obj["name"] == "xyz"
+    a.inputs[0].json_obj["type"] == "fileref"
+    assert len(rules.objs) == 1

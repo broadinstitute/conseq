@@ -4,6 +4,8 @@ import logging
 import os
 import re
 import sqlite3
+import threading
+from contextlib import contextmanager
 
 import six
 
@@ -37,9 +39,6 @@ class DefaultSpace:
 
 PUBLIC_SPACE = "public"
 DEFAULT_SPACE = DefaultSpace()
-
-from contextlib import contextmanager
-import threading
 
 current_db_cursor_state = threading.local()
 

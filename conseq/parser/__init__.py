@@ -21,6 +21,7 @@ LetStatement = namedtuple("LetStatement", ["name", "value"])
 AddIfMissingStatement = namedtuple("AddIfMissingStatement", "json_obj")
 IfStatement = namedtuple("IfStatement", "condition when_true when_false")
 EvalStatement = namedtuple("EvalStatement", "body")
+FileRef = namedtuple("FileRef", "filename")
 
 
 class Rule:
@@ -132,7 +133,7 @@ class Semantics(object):
         else:
             return (ast[0], ast[2])
 
-    def query_obj(self, ast):
+    def pattern_based_query_obj(self, ast):
         pairs = [ast[1]]
         rest = ast[2]
         for x in rest:
@@ -215,19 +216,6 @@ class Semantics(object):
     def exec_profile(self, ast):
         return ExecProfileStmt(ast[1], ast[2])
 
-    def r_flock_file(self, ast):
-        if type(ast) == list:
-            assert ast[0] == 'include'
-            return IncludeStatement(ast[1])
-        else:
-            return ast
-
-    def r_flock_files(self, ast):
-        scripts = [ast[0]]
-        for x in ast[1]:
-            scripts.append(x[1])
-        return scripts
-
     def quoted_string(self, ast):
         return unquote(ast)
 
@@ -268,6 +256,9 @@ class Semantics(object):
 
     def eval_statement(self, ast):
         return EvalStatement(ast[1])
+
+    def fileref_query_obj(self, ast):
+        return FileRef(ast.filename)
 
 
 def parse_str(text, filename=None):
