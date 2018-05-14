@@ -277,3 +277,38 @@ def test_publish(tmpdir, monkeypatch):
     """)
 
     assert publish_called[0]
+
+
+def test_commands(tmpdir):
+    # don't actually test any of the functionality of these commands, only that they execute error free
+    # to catch trivial mistakes in setting up parameter passing to these commands
+
+    config = """
+        rule a:
+            outputs: {"type":"x", "value":"y"}, {"type":"y", "value": "x"}
+    """
+    config_file = str(tmpdir.join("t.conseq"))
+    with open(config_file, "wt") as fd:
+        fd.write(config)
+
+    state_dir = str(tmpdir.join("state"))
+
+    commands = [
+        ["--dir", state_dir, "run", config_file],
+        ["--dir", state_dir, "ls"],
+        ["--dir", state_dir, "gc"],
+        ["--dir", state_dir, "rm", "type=x"],
+        ["--dir", state_dir, "rules", config_file],
+        ["--dir", state_dir, "debugrun", config_file, "a"],
+        ["--dir", state_dir, "dot"],
+        ["--dir", state_dir, "altdot", config_file],
+        ["--dir", state_dir, "history"],
+        ["--dir", state_dir, "localize", config_file, "type=x"],
+        ["version"]
+    ]
+
+    from conseq.main import main
+
+    for command in commands:
+        print("running: {}".format(command))
+        main(command)

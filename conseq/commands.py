@@ -1,11 +1,13 @@
 import collections
 import logging
 import os
+import shutil
 
 from conseq import dep
 from conseq import xref
 from conseq.config import read_rules
-from conseq.depexec import convert_input_spec_to_queries
+from conseq.depexec import convert_input_spec_to_queries, get_job_dir
+from conseq.parser import ExpectKeyIs
 from conseq.util import indent_str
 
 log = logging.getLogger(__name__)
@@ -159,4 +161,86 @@ def debugrun(state_dir, depfile, target, override_vars, config_file):
         log.info("{} matches for {}".format(len(applications), q))
 
     applications = j.query_template(dep.Template(queries, predicates, rule.name))
-    log.info("{} matches for entire rule".format(len(applications), q))
+    log.info("{} matches for entire rule".format(len(applications)))
+
+
+def gc(state_dir):
+    db_path = os.path.join(state_dir, "db.sqlite3")
+    j = dep.open_job_db(db_path)
+
+    def rm_job_dir(job_id):
+        job_dir = get_job_dir(state_dir, job_id)
+        if os.path.exists(job_dir):
+            log.warn("Removing unused directory: %s", job_dir)
+            shutil.rmtree(job_dir)
+
+    j.gc(rm_job_dir)
+
+
+def _rules_to_dot(rules):
+    """
+    :return: a graphviz graph in dot syntax approximating the execution DAG
+    """
+    stmts = []
+    objs = {}
+    rule_nodes = {}
+
+    def add_obj(type):
+        if type in objs:
+            return objs[type]['id']
+        id = len(objs)
+        objs[type] = dict(id=id, type=type)
+        return id
+
+    def add_rule(rule_name, filename):
+        if rule_name in rule_nodes:
+            return rule_nodes[rule_name]['id']
+        id = len(rule_nodes)
+        rule_nodes[rule_name] = dict(id=id, name=rule_name, filename=filename)
+        return id
+
+    for rule in rules:
+
+        rule_id = add_rule(rule.name, rule.filename)
+        for input in rule.inputs:
+            # print(input)
+            obj_id = add_obj(input.json_obj.get("type", "unknown"))
+
+            #            stmts.append("o{} -> r{} [label=\"{}\"]".format(obj_id, rule_id, input.variable))
+            stmts.append("o{} -> r{}".format(obj_id, rule_id))
+
+        outputs = []
+        if rule.outputs is not None:
+            outputs.extend(rule.outputs)
+
+        for expectation in rule.output_expectations:
+            const_key_vals = {}
+            for predicate in expectation.predicates:
+                if isinstance(predicate, ExpectKeyIs):
+                    const_key_vals[predicate.key] = predicate.value
+            outputs.append(const_key_vals)
+
+        for output in outputs:
+            obj_id = add_obj(output.get("type", "unknown"))
+            stmts.append("r{} -> o{}".format(rule_id, obj_id))
+
+            # color=state_color[self.get_rule_state(rule.id)]
+            #        color="gray"
+            #        stmts.append("r{} [shape=box, label=\"{}\", style=\"filled\" fillcolor=\"{}\"]".format(rule_id, rule.name, color))
+
+    for node in rule_nodes.values():
+        stmts.append(
+            "r{} [shape=box, style=\"filled\", fillcolor=\"gray\", label=\"{}\n{}\"]".format(node['id'], node['name'],
+                                                                                             node['filename']))
+
+    for obj in objs.values():
+        prop_values = ["type=" + obj['type']]
+        label = "\\n".join(prop_values)
+        stmts.append("o{} [label=\"{}\"]".format(obj['id'], label))
+
+    return "digraph { " + (";\n".join(set(stmts))) + " } "
+
+
+def alt_dot(state_dir, depfile, config_file):
+    rules = read_rules(state_dir, depfile, config_file)
+    print(_rules_to_dot(rules))

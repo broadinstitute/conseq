@@ -96,6 +96,13 @@ def add_rm(sub):
     parser.set_defaults(func=rm)
 
 
+def _get_config_file_path(args):
+    import os
+    config_file = os.path.expanduser(args.config)
+    if not os.path.exists(config_file):
+        config_file = None
+
+
 def add_run(sub):
     parser = sub.add_parser("run", help="Run rules in the specified file")
     parser.add_argument('file', metavar="FILE", help="the input file to parse")
@@ -113,12 +120,8 @@ def add_run(sub):
         if args.nocapture:
             concurrent = 1
 
-        import os
-        config_file = os.path.expanduser(args.config)
-        if not os.path.exists(config_file):
-            config_file = None
-
-        depexec.main(args.file, args.dir, args.targets, {}, concurrent, not args.nocapture, args.confirm, config_file,
+        depexec.main(args.file, args.dir, args.targets, {}, concurrent, not args.nocapture, args.confirm,
+                     _get_config_file_path(args),
                      maxfail=args.maxfail, maxstart=args.maxstart,
                      force_no_targets=args.nothing)
 
@@ -130,7 +133,7 @@ def add_rules(sub):
     parser.add_argument('file', metavar="FILE", help="the input file to parse")
 
     def rules(args):
-        commands.print_rules(args.file)
+        commands.print_rules(args.dir, args.file, _get_config_file_path(args))
 
     parser.set_defaults(func=rules)
 
@@ -140,14 +143,14 @@ def add_altdot(sub):
     parser.add_argument('file', metavar="FILE", help="the input file to parse")
 
     def altdot(args):
-        commands.alt_dot(args.file)
+        commands.alt_dot(args.dir, args.file, _get_config_file_path(args))
 
     parser.set_defaults(func=altdot)
 
 
 def add_debugrun(sub):
     def debugrun(args):
-        depexec.debugrun(args.dir, args.file, args.target, {}, args.config)
+        commands.debugrun(args.dir, args.file, args.target, {}, args.config)
 
     parser = sub.add_parser("debugrun",
                             help="perform query associated with a given target and report what matched (for debugging why rule doesn't run)")
@@ -194,7 +197,7 @@ def add_localize(sub):
     parser.set_defaults(func=localize_cmd)
 
 
-def main():
+def main(args=None):
     from conseq import trace_on_demand
     trace_on_demand.install()
 
@@ -219,7 +222,7 @@ def main():
     add_localize(sub)
     add_version(sub)
 
-    args = parser.parse_args()
+    args = parser.parse_args(args)
     if args.verbose:
         level = logging.DEBUG
     else:
