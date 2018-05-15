@@ -101,6 +101,7 @@ def _get_config_file_path(args):
     config_file = os.path.expanduser(args.config)
     if not os.path.exists(config_file):
         config_file = None
+    return config_file
 
 
 def _parse_define(txt):
@@ -114,7 +115,7 @@ def _parse_define(txt):
 def add_run(sub):
     parser = sub.add_parser("run", help="Run rules in the specified file")
     parser.add_argument('file', metavar="FILE", help="the input file to parse")
-    parser.add_argument('--define', "-D", action="append", type=_parse_define, target="overrides")
+    parser.add_argument('--define', "-D", action="append", type=_parse_define, dest="overrides")
     parser.add_argument("--concurrent", type=int, default=1)
     parser.add_argument("--nocapture", action="store_true")
     parser.add_argument("--confirm", action="store_true")
