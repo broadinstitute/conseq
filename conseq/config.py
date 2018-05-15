@@ -1,7 +1,9 @@
 import os
+import textwrap
 
 from conseq import parser
-from conseq.template import create_jinja2_env
+from conseq.template import LazyConfig
+from conseq.template import create_jinja2_env, render_template
 
 
 class Rules:
@@ -108,19 +110,28 @@ def _load_initial_config(state_dir, depfile, config_file):
     return initial_config
 
 
-def _eval_stmts(rules, statements, filename):
+def _eval_stmts(rules, statements, filename, eval_context=None):
+    if eval_context is None:
+        # circular reference needed
+        __render_template = [None]
+        _render_template = lambda x: __render_template[0](x)
+        config = LazyConfig(_render_template, rules.vars)
+        __render_template[0] = lambda x: render_template(rules.jinja2_env, x, rules.vars)
+        eval_context = dict(rules=rules, config=config)
+
     for dec in statements:
         if isinstance(dec, parser.RememberExecutedStmt):
             rules.add_remember_executed(dec)
         elif isinstance(dec, parser.IfStatement):
-            _eval_if(rules, dec, filename)
+            _eval_if(rules, dec, filename, eval_context)
         elif isinstance(dec, parser.AddIfMissingStatement):
             rules.add_if_missing(dec.json_obj)
         elif isinstance(dec, parser.LetStatement):
             rules.set_var(dec.name, dec.value)
         elif isinstance(dec, parser.IncludeStatement):
-            child_rules = read_deps(os.path.expanduser(dec.filename))
-            rules.merge(child_rules)
+            _filename = os.path.expanduser(dec.filename)
+            statements = parser.parse(_filename)
+            _eval_stmts(rules, statements, _filename, eval_context=eval_context)
         elif isinstance(dec, parser.TypeDefStmt):
             rules.add_type(dec)
         elif isinstance(dec, parser.ExecProfileStmt):
@@ -128,8 +139,7 @@ def _eval_stmts(rules, statements, filename):
             # do this after config is fully initialized
             rules.add_client(dec.name, dec.properties)
         elif isinstance(dec, parser.EvalStatement):
-            env = dict(rules=rules, config=rules.vars)
-            exec(dec.body, env, env)
+            exec(textwrap.dedent(dec.body), eval_context, eval_context)
         else:
             assert isinstance(dec, parser.Rule)
 
@@ -149,9 +159,9 @@ def _eval_stmts(rules, statements, filename):
             rules.set_rule(dec.name, dec)
 
 
-def _eval_if(rules, if_statement, filename):
-    assert if_statement.condition[1] == "=="
-    if if_statement.condition[0] == if_statement.condition[2]:
+def _eval_if(rules, if_statement, filename, eval_context):
+    condition_result = eval(if_statement.condition, eval_context, eval_context)
+    if condition_result:
         _eval_stmts(rules, if_statement.when_true, filename)
     else:
         _eval_stmts(rules, if_statement.when_false, filename)

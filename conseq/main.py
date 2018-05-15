@@ -103,9 +103,18 @@ def _get_config_file_path(args):
         config_file = None
 
 
+def _parse_define(txt):
+    m = re.match("([^=]+)=(.*)", txt)
+    if m is None:
+        raise argparse.ArgumentTypeError(
+            "Expected variable assigment of the form \"var=value\" but got: {}".format(repr(txt)))
+    return (m.group(1), m.group(2))
+
+
 def add_run(sub):
     parser = sub.add_parser("run", help="Run rules in the specified file")
     parser.add_argument('file', metavar="FILE", help="the input file to parse")
+    parser.add_argument('--define', "-D", action="append", type=_parse_define, target="overrides")
     parser.add_argument("--concurrent", type=int, default=1)
     parser.add_argument("--nocapture", action="store_true")
     parser.add_argument("--confirm", action="store_true")
@@ -120,7 +129,11 @@ def add_run(sub):
         if args.nocapture:
             concurrent = 1
 
-        depexec.main(args.file, args.dir, args.targets, {}, concurrent, not args.nocapture, args.confirm,
+        overrides = {}
+        if args.overrides is not None:
+            overrides.update(args.overrides)
+
+        depexec.main(args.file, args.dir, args.targets, overrides, concurrent, not args.nocapture, args.confirm,
                      _get_config_file_path(args),
                      maxfail=args.maxfail, maxstart=args.maxstart,
                      force_no_targets=args.nothing)

@@ -97,7 +97,7 @@ var_stmt = "let" identifier "=" quoted_string ;
 
 include_stmt = "include" quoted_string ;
 
-conditional_expr = quoted_string "==" quoted_string
+conditional_expr = quoted_string
     ;
 
 eval_statement = "eval" quoted_string ;

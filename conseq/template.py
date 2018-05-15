@@ -16,6 +16,12 @@ class LazyConfig:
         else:
             return v
 
+    def __getattr__(self, item):
+        return self.__getitem__(item)
+
+    def __repr__(self):
+        return "<LazyConfig {}>".format(repr(self._config_dict))
+
 
 class MissingTemplateVar(Exception):
     def __init__(self, message, variables, template):

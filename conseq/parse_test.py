@@ -173,7 +173,7 @@ def test_eval_if():
     # rules.set_var(name, value)
 
     statements = parser.parse_str("""
-    if 'x' == 'y':
+    if "'x' == 'y'":
       let a='1'
     else:
       let a='2'
@@ -181,6 +181,30 @@ def test_eval_if():
     """)
     _eval_stmts(rules, statements, "none")
     assert rules.vars["a"] == "2"
+
+
+def test_generic_eval():
+    from conseq.config import Rules, _eval_stmts
+    rules = Rules()
+    # rules.set_var(name, value)
+
+    statements = parser.parse_str("""
+    eval \"\"\"
+        print('here')
+        rules.set_var('x', 'y')
+        print(config['x'])
+        print(rules.vars)
+        print(config)
+        \"\"\"
+
+    if "config.x == 'y'":
+      let a='1'
+    else:
+      let a='2'
+    endif
+    """)
+    _eval_stmts(rules, statements, "none")
+    assert rules.vars["a"] == "1"
 
 
 def test_file_ref():

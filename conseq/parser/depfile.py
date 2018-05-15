@@ -416,8 +416,6 @@ class depfileParser(Parser):
     @tatsumasu()
     def _conditional_expr_(self):  # noqa
         self._quoted_string_()
-        self._token('==')
-        self._quoted_string_()
 
     @tatsumasu()
     def _eval_statement_(self):  # noqa

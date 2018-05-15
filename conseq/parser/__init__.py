@@ -246,6 +246,10 @@ class Semantics(object):
         properties = [ast[4]] + ast[5]
         return TypeDefStmt(ast[1], properties)
 
+    def conditional_expr(self, ast):
+        exp = compile(ast, "<conseq-config>", "eval")
+        return exp
+
     def conditional(self, ast):
         else_clause = []
         if ast.else_clause != None:
