@@ -113,6 +113,7 @@ def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, captu
                                            resolver_state,
                                            rule.resources)
         elif outputs != None:
+            log.warning("No commands to run for rule %s", name)
             # fast path when there's no need to spawn an external process.  (mostly used by tests)
             execution = exec_client.SuccessfulExecutionStub(id, outputs)
         else:
@@ -395,6 +396,7 @@ def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, c
                         break
 
                 if rule.is_publish_rule:
+                    print("publishing...")
                     publish(jinja2_env, rule.publish_location, rules.get_vars(), inputs)
 
                 # maybe record_started and update_exec_xref should be merged so anything started
@@ -605,6 +607,54 @@ def force_execution_of_rules(j, forced_targets):
     return rule_names
 
 
+def reconcile_add_if_missing(j, objs):
+    unseen_objs = {}
+    for obj in j.find_objs(dep.DEFAULT_SPACE, {"$manually-added": "true"}):
+        unseen_objs[obj.id] = obj
+
+
+    new_objs = []
+    for obj in objs:
+        existing_id = j.get_existing_id(dep.DEFAULT_SPACE, obj)
+        if existing_id is None:
+            new_objs.append(obj)
+        else:
+            if existing_id in unseen_objs:
+                del unseen_objs[existing_id]
+
+    return new_objs, unseen_objs.values()
+
+
+def remove_obj_and_children(j, root_obj_ids, dry_run):
+    all_objs = j.find_all_reachable_downstream_objs(root_obj_ids)
+    for obj in all_objs:
+        log.warning("rm %s", obj)
+
+    if not dry_run:
+        j.remove_objects([obj.id for obj in all_objs])
+
+
+def process_add_if_missing(j, jinja2_env, objs, vars, force=False):
+    # rewrite the objects, expanding templates and marking this as one which was manually added from the config file
+    processed = []
+    for obj in objs:
+        obj = dict(obj)
+        obj["$manually-added"] = {"$value": "true"}
+        processed.append(expand_dict(jinja2_env, obj, vars))
+
+    new_objs, missing_objs = reconcile_add_if_missing(j, processed)
+
+    if len(missing_objs) > 0:
+        print("The following objects were not specified in the conseq file:")
+        for obj in missing_objs:
+            print("   {}".format(obj))
+        if force or ui.ask_y_n("do you wish to remove them?"):
+            remove_obj_and_children(j, [o.id for o in missing_objs], False)
+
+    for obj in new_objs:
+        add_artifact_if_missing(j, obj)
+
+
 def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_executions, capture_output, req_confirm,
          config_file, maxfail=1, maxstart=None, force_no_targets=False):
     if not os.path.exists(state_dir):
@@ -619,7 +669,7 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
     else:
         forced_rule_names = []
 
-    rules = read_rules(state_dir, depfile, config_file)
+    rules = read_rules(state_dir, depfile, config_file, initial_config={})
     jinja2_env = rules.jinja2_env
 
     if rules.get_client("default", must=False) is None:
@@ -631,8 +681,7 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
         rules.set_var(var, value)
 
     # handle the "add-if-missing" objects
-    for obj in rules.objs:
-        add_artifact_if_missing(j, expand_dict(jinja2_env, obj, rules.vars))
+    process_add_if_missing(j, jinja2_env, rules.objs, rules.vars)
 
     # handle the remember-executed statements
     with j.transaction():

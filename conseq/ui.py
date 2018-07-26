@@ -1,5 +1,8 @@
 import contextlib
+import logging
 import signal
+
+log = logging.getLogger(__name__)
 
 
 @contextlib.contextmanager
@@ -49,6 +52,15 @@ def ask_user_to_cancel(j, executing):
     if answer == 'y':
         for e in executing:
             e.cancel()
+
+
+def ask_y_n(msg):
+    while True:
+        answer = input(
+            "{} (y/n): ".format(msg))
+        if (answer in ["y", "n"]):
+            return answer == 'y'
+        print("Invalid input")
 
 
 def user_says_we_should_stop(failure_count, executing):

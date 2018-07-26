@@ -224,6 +224,7 @@ class ObjSet:
             space = self.default_space
 
         # first check to see if this already exists
+        assert len(props) > 0
         match = self.find_by_key(space, props)
 
         if match != None:
@@ -1078,6 +1079,13 @@ class Jobs:
                     self._add_rule(*rule)
                     # log.info("Refreshed the following templates: %s, refresh_count=%s, added=%s", pending_rules_to_evaluate, refresh_count, add_executions)
 
+    def get_existing_id(self, space, obj_props):
+        with transaction(self.db):
+            existing = self.objects.find_by_key(space, obj_props)
+            if existing is not None:
+                return existing.id
+            return None
+
     def add_obj(self, space, timestamp, obj_props, overwrite=True):
         """
         Used to record the creation of an object with a given timestamp
@@ -1085,12 +1093,13 @@ class Jobs:
         :param obj_props: either a dict or sequence of (key, value) tuples
         :param timestamp:
         """
+        assert len(obj_props) > 0
 
         with transaction(self.db):
             if not overwrite:
-                existing = self.objects.find_by_key(space, obj_props)
-                if existing != None:
-                    return existing.id
+                existing_id = self.get_existing_id(space, obj_props)
+                if existing_id is not None:
+                    return existing_id
 
             return self.objects.add(space, timestamp, obj_props)
 
@@ -1183,6 +1192,7 @@ class Jobs:
                 for output in outputs:
                     space, output = get_space(output)
 
+                    assert len(output.keys()) > 0
                     obj_id = self.add_obj(space, timestamp, output)
                     interned_outputs.append(self.objects.get(obj_id))
                 return self._record_completed(execution_id, new_status, interned_outputs)

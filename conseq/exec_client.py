@@ -7,6 +7,7 @@ import subprocess
 
 import six
 
+from conseq import debug_log
 from conseq import dep
 from conseq import helper
 
@@ -563,6 +564,8 @@ def push_to_cas_with_pullmap(remote, source_and_dest, url_and_dest):
     for rec in mapping:
         if rec["local"].startswith("/"):
             rec['local'] = os.path.relpath(rec['local'], remote.local_dir)
+
+    debug_log.log_pullmap(mapping)
 
     mapping_str = json.dumps(dict(mapping=mapping), sort_keys=True)
     log.debug("Mapping str: %s", mapping_str)

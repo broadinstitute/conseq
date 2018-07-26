@@ -151,17 +151,19 @@ def test_parse_json():
 
 
 def test_parse_if():
-    from conseq.parser import IfStatement, LetStatement
+    from conseq.config import Rules, _eval_stmts
+    rules = Rules()
+    # from conseq.parser import IfStatement, LetStatement
 
-    value = _parse_exp("""
-    if 'x' == 'y':
-      let x='1'
+    statements = parser.parse_str("""
+    if "'x' == 'y'":
+      let a='1'
     else:
-      let x='2'
+      let a='2'
     endif
     """, "declarations")
-    print(value)
-    assert value == [IfStatement(["x", "==", "y"], [LetStatement("x", "1")], [LetStatement("x", "2")])]
+    _eval_stmts(rules, statements, "none")
+    assert rules.vars["a"] == "2"
 
     # else:
     #   let x='2'

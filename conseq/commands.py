@@ -6,7 +6,7 @@ import shutil
 from conseq import dep
 from conseq import xref
 from conseq.config import read_rules
-from conseq.depexec import convert_input_spec_to_queries, get_job_dir
+from conseq.depexec import convert_input_spec_to_queries, get_job_dir, remove_obj_and_children
 from conseq.parser import ExpectKeyIs
 from conseq.util import indent_str
 
@@ -125,12 +125,8 @@ def rm_cmd(state_dir, dry_run, space, query):
 
     root_objs = j.find_objs(space, query)
     root_obj_ids = [o.id for o in root_objs]
-    all_objs = j.find_all_reachable_downstream_objs(root_obj_ids)
-    for obj in all_objs:
-        log.warning("rm %s", obj)
 
-    if not dry_run:
-        j.remove_objects([obj.id for obj in all_objs])
+    remove_obj_and_children(j, root_obj_ids, dry_run)
 
 
 def dot_cmd(state_dir, detailed):
@@ -200,7 +196,6 @@ def _rules_to_dot(rules):
         return id
 
     for rule in rules:
-
         rule_id = add_rule(rule.name, rule.filename)
         for input in rule.inputs:
             # print(input)
@@ -223,10 +218,6 @@ def _rules_to_dot(rules):
         for output in outputs:
             obj_id = add_obj(output.get("type", "unknown"))
             stmts.append("r{} -> o{}".format(rule_id, obj_id))
-
-            # color=state_color[self.get_rule_state(rule.id)]
-            #        color="gray"
-            #        stmts.append("r{} [shape=box, label=\"{}\", style=\"filled\" fillcolor=\"{}\"]".format(rule_id, rule.name, color))
 
     for node in rule_nodes.values():
         stmts.append(

@@ -269,7 +269,7 @@ def parse_str(text, filename=None):
     parser = depfile.depfileParser(parseinfo=False)
     return parser.parse(
         text,
-        "declarations",
+        "all_declarations",
         filename=filename,
         trace=False,
         nameguard=None,

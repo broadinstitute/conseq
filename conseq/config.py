@@ -177,8 +177,8 @@ def read_deps(filename, initial_vars={}):
     return rules
 
 
-def read_rules(state_dir, depfile, config_file):
-    initial_config = _load_initial_config(state_dir, depfile, config_file)
-
-    rules = read_deps(depfile, initial_vars=initial_config)
+def read_rules(state_dir, depfile, config_file, initial_config={}):
+    _initial_config = _load_initial_config(state_dir, depfile, config_file)
+    _initial_config.update(initial_config)
+    rules = read_deps(depfile, initial_vars=_initial_config)
     return rules
