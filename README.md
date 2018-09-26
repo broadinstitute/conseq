@@ -10,6 +10,9 @@ Conseq is a tool for running sequences of transformations or other operations.
 More on the motivation and details seen this slide deck: https://docs.google.com/a/broadinstitute.com/presentation/d/1LsRymTEKmqDxACDnMIx1z_Y2dQtY7TNpb5PAFyK0OQM/edit?usp=sharing
 or this poster https://drive.google.com/file/d/1FF8ESVbo_LXs4BBfEGAgkbq77ABXyzKu/view?usp=sharing
 
+## Installation
+Check out the repo, then `python3 setup.py install`
+
 <a name="conseq-config-reference"/>
 # Conseq Config Reference
 
