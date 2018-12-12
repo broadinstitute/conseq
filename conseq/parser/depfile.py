@@ -311,6 +311,15 @@ class depfileParser(Parser):
         self._closure(block0)
 
     @tatsumasu()
+    def _file_list_(self):  # noqa
+        self._quoted_string_()
+
+        def block0():
+            self._token(',')
+            self._quoted_string_()
+        self._closure(block0)
+
+    @tatsumasu()
     def _rule_parameters_(self):  # noqa
         with self._group():
             with self._choice():
@@ -338,6 +347,10 @@ class depfileParser(Parser):
                     self._token('resources')
                     self._token(':')
                     self._json_obj_()
+                with self._option():
+                    self._token('uses')
+                    self._token(':')
+                    self._file_list_()
                 self._error('no available options')
 
     @tatsumasu()
@@ -550,6 +563,9 @@ class depfileSemantics(object):
         return ast
 
     def outputs_expected_defs(self, ast):  # noqa
+        return ast
+
+    def file_list(self, ast):  # noqa
         return ast
 
     def rule_parameters(self, ast):  # noqa

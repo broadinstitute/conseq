@@ -182,6 +182,16 @@ def add_dot(sub):
     parser.set_defaults(func=dot)
 
 
+def add_export(sub):
+    def export(args):
+        commands.export_cmd(args.dir, args.file, args.config, args.dest)
+
+    parser = sub.add_parser("export", help="Write all artifacts to S3 so that they can be imported somewhere else")
+    parser.add_argument("file", help="the conseq config to use")
+    parser.add_argument("dest", help="the s3 path to write the index json file to")
+    parser.set_defaults(func=export)
+
+
 def history_cmd(args):
     commands.print_history(args.dir)
 
@@ -235,6 +245,7 @@ def main(args=None):
     add_history_cmd(sub)
     add_localize(sub)
     add_version(sub)
+    add_export(sub)
 
     args = parser.parse_args(args)
     if args.verbose:

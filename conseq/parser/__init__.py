@@ -35,6 +35,7 @@ class Rule:
         self.resources = {"slots": 1}
         self.output_expectations = []
         self.publish_location = None
+        self.uses_files = []
 
     @property
     def is_publish_rule(self):
@@ -207,6 +208,8 @@ class Semantics(object):
             elif statement[0] == "publish":
                 rule.publish_location = statement[2]
                 assert rule.is_publish_rule
+            elif statement[0] == "uses":
+                rule.uses_files = statement[2]
             else:
                 raise Exception("unknown {}".format(statement[0]))
         rule.run_stmts.extend(runs)
@@ -263,6 +266,9 @@ class Semantics(object):
 
     def fileref_query_obj(self, ast):
         return FileRef(ast.filename)
+
+    def file_list(self, ast):
+        raise Exception("prob:" + str(ast))
 
 
 def parse_str(text, filename=None):

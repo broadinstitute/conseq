@@ -235,7 +235,7 @@ class Execution:
                 if isinstance(value, dict) and "$filename" in value:
                     files_written.append(value["$filename"])
         if len(files_written):
-            log.warn("Rule %s wrote the following files:\n%s", self.transform,
+            log.warning("Rule %s wrote the following files:\n%s", self.transform,
                      "\n".join(["\t" + x for x in files_written]))
 
         return None, outputs

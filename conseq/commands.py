@@ -1,7 +1,11 @@
+from io import StringIO
+from conseq.dep import Obj, DEFAULT_SPACE
+from conseq import helper
 import collections
 import logging
 import os
 import shutil
+import json
 
 from conseq import dep
 from conseq import xref
@@ -41,7 +45,8 @@ def print_history(state_dir):
                 for k, v in value.props.items():
                     lines.append("    {}: {}".format(k, v))
 
-        print("rule {}: (execution id: {}, status: {})".format(exec_.transform, exec_.id, exec_.status))
+        print("rule {}: (execution id: {}, status: {})".format(
+            exec_.transform, exec_.id, exec_.status))
         for line in lines:
             print(line)
 
@@ -83,8 +88,10 @@ def ls_cmd(state_dir, space, predicates, groupby, columns):
             common_keys, variable_keys = depquery.split_props_by_counts(counts)
             common_table = [[subset[0][k] for k in common_keys]]
             if len(common_keys) > 0:
-                print(indent_str("Properties shared by all {} rows:".format(len(subset)), indent))
-                print(indent_str(tabulate(common_table, common_keys, tablefmt="simple"), indent + 2))
+                print(indent_str(
+                    "Properties shared by all {} rows:".format(len(subset)), indent))
+                print(indent_str(tabulate(common_table,
+                                          common_keys, tablefmt="simple"), indent + 2))
 
         elif columns != None:
             variable_keys = columns
@@ -103,7 +110,8 @@ def ls_cmd(state_dir, space, predicates, groupby, columns):
                         v = {"$filename": cache_rec[0]}
                 full_row.append(str(v))
             variable_table.append(full_row)
-        print(indent_str(tabulate(variable_table, variable_keys, tablefmt="simple"), indent))
+        print(indent_str(tabulate(variable_table,
+                                  variable_keys, tablefmt="simple"), indent))
 
     if groupby == None:
         print_table(subset, 0)
@@ -139,6 +147,81 @@ def list_cmd(state_dir):
     j.dump()
 
 
+def export_cmd(state_dir, depfile, config_file, dest_s3_path):
+    out = StringIO()
+
+    rules = read_rules(state_dir, depfile, config_file)
+    j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
+
+    objs = j.find_objs(DEFAULT_SPACE, {})
+    print(len(objs))
+    vars = rules.vars
+
+    cas_remote = helper.Remote(vars["S3_STAGING_URL"], '.', vars['AWS_ACCESS_KEY_ID'],
+                               vars['AWS_SECRET_ACCESS_KEY'])
+
+    def process_value(value):
+        if isinstance(value, dict):
+            if '$filename' in value:
+                url = cas_remote.upload_to_cas(value['$filename'])
+                value = {"$file_url": url}
+        return value
+
+    def process_filenames(obj: Obj):
+        translated = {}
+        for key, value in obj.props.items():
+            if isinstance(value, list) or isinstance(value, tuple):
+                value = [process_value(x) for x in value]
+            else:
+                value = process_value(value)
+            translated[key] = value
+
+        if "$manually-added" not in translated:
+            translated["$manually-added"] = {'$value': 'false'}
+
+        return translated
+
+    def reindent(s, ident):
+        indent_str = " " * ident
+        lines = s.split("\n")
+
+        return "\n".join([lines[0]] + [indent_str + x for x in lines[1:]])
+
+    for obj in objs:
+        props = process_filenames(obj)
+        out.write("add-if-missing {}\n\n".format(reindent(json.dumps(props), 3)))
+
+    def get_key_props(obj):
+        props = {}
+        for key, value in obj.props.items():
+            if isinstance(value, dict) and (("$filename" in value) or ("$file_url" in value) or ("$value" in value)):
+                continue
+            props[key] = value
+        return props
+
+    def value_as_json(value):
+        if isinstance(value, tuple):
+            return json.dumps([get_key_props(x) for x in value], indent=3)
+        else:
+            return json.dumps(get_key_props(value), indent=3)
+
+    executions = j.get_all_executions()
+    for execution in executions:
+        # if execution.status == "complete":
+        out.write(
+            "remember-executed transform : \"{}\"\n".format(execution.transform))
+        for input in execution.inputs:
+            out.write("   input \"{}\" : {}\n".format(
+                input[0], reindent(value_as_json(input[1]), 3)))
+        for output in execution.outputs:
+            out.write("   output : {}\n".format(
+                reindent(value_as_json(output), 3)))
+        out.write("\n")
+
+    log.info("Uploading artifact metadata to %s", dest_s3_path)
+    cas_remote.upload_str(dest_s3_path, out.getvalue())
+
+
 def debugrun(state_dir, depfile, target, override_vars, config_file):
     db_path = os.path.join(state_dir, "db.sqlite3")
     print("opening", db_path)
@@ -150,13 +233,15 @@ def debugrun(state_dir, depfile, target, override_vars, config_file):
         rules.set_var(var, value)
 
     rule = rules.get_rule(target)
-    queries, predicates = convert_input_spec_to_queries(rules.jinja2_env, rule, rules.vars)
+    queries, predicates = convert_input_spec_to_queries(
+        rules.jinja2_env, rule, rules.vars)
     for q in queries:
         t = dep.Template([q], [], rule.name)
         applications = j.query_template(t)
         log.info("{} matches for {}".format(len(applications), q))
 
-    applications = j.query_template(dep.Template(queries, predicates, rule.name))
+    applications = j.query_template(
+        dep.Template(queries, predicates, rule.name))
     log.info("{} matches for entire rule".format(len(applications)))
 
 

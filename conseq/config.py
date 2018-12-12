@@ -147,12 +147,28 @@ def _eval_stmts(rules, statements, filename, eval_context=None):
             inputs = []
             for input in dec.inputs:
                 if isinstance(input.json_obj, parser.FileRef):
-                    new_json_obj = {"type": "fileref", "name": input.json_obj.filename,
+                    new_json_obj = {"type": "$fileref", "name": input.json_obj.filename,
                                     "filename": {"$filename": input.json_obj.filename}}
                     rules.add_if_missing(new_json_obj)
-                    new_query_obj = {"type": "fileref", "name": input.json_obj.filename}
+                    new_query_obj = {"type": "$fileref", "name": input.json_obj.filename}
                     input = parser.InputSpec(input.variable, new_query_obj, input.for_all)
                 inputs.append(input)
+
+            # filerefs was a first attempt at making it easier to use scripts
+            # attempt #2: uses_files. Process these in a similar way.
+            for filename in dec.uses_files:
+                # create a $fileref which has the destination field set
+                new_json_obj = {"type": "$fileref",
+                                "name": filename,
+                                "filename": {"$filename": filename},
+                                "destination": {"$value": filename}}
+                rules.add_if_missing(new_json_obj)
+
+                # mark this rule as dependant on this fileref
+                new_query_obj = {"type": "$fileref",
+                                 "name": filename}
+                input = parser.InputSpec(input.variable, new_query_obj, input.for_all)
+
             dec.inputs = inputs
 
             dec.filename = filename

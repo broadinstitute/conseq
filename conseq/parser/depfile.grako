@@ -74,12 +74,16 @@ outputs_expected_defs =
     output_expected_def { "," output_expected_def }*
     ;
 
+file_list = quoted_string { "," quoted_string }*
+    ;
+
 rule_parameters = ("inputs" ":" input_specs |
     "outputs" ":" output_specs |
     "outputs-expected" ":" outputs_expected_defs |
     "executor" ":" identifier |
     "publish" ":" quoted_string |
-    "resources" ":" json_obj )
+    "resources" ":" json_obj |
+    "uses" ":" file_list )
     ;
 
 rule = "rule" identifier ":" { rule_parameters } * { run_statement } *
