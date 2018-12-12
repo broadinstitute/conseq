@@ -1,0 +1,26 @@
+include "../docker-local-exec.conseq"
+
+rule a:
+  outputs: {"type": "a-out", "filename": {"$filename": "a-out.txt"}}
+  run "python" with """
+    with open("a-out.txt", "wt") as fd:
+      fd.write("hello\n")
+  """
+
+rule b:
+  inputs: in={"type": "a-out"}
+  outputs: {"type": "b-out", "filename": {"$filename": "b-out.txt"}}
+  executor: docker-local
+  run "python" with """
+    with open("b-out.txt", "wt") as fd:
+      fd.write("hello2\n")
+  """
+
+rule c:
+  inputs: in={"type": "b-out"}
+  outputs: {"type": "c-out", "filename": {"$filename": "c-out.txt"}}
+  executor: docker-local
+  run "python" with """
+    with open("c-out.txt", "wt") as fd:
+      fd.write("hello2 {{ inputs.in.filename}} \n")
+  """

@@ -108,26 +108,6 @@ class Pull:
         self.ssh_client_cache = {}
 
 
-def open_cache_db(state_dir: str) -> DownloadCacheDb:
-    filename = os.path.join(state_dir, "cache.sqlite3")
-    needs_create = not os.path.exists(filename)
-
-    db = sqlite3.connect(filename)
-
-    stmts = []
-    if needs_create:
-        stmts.extend([
-            "create table downloaded (url string PRIMARY KEY, filename string, etag string, fetched_time integer)",
-            "create table settings (schema_version integer)",
-            "insert into settings (schema_version) values (1)",
-        ])
-
-    for stmt in stmts:
-        db.execute(stmt)
-
-    return DownloadCacheDb(db)
-
-
 class DownloadCacheDb:
     def __init__(self, db: Connection) -> None:
         self.db = db
@@ -149,6 +129,26 @@ class DownloadCacheDb:
         finally:
             c.close()
         return result
+
+
+def open_cache_db(state_dir: str) -> DownloadCacheDb:
+    filename = os.path.join(state_dir, "cache.sqlite3")
+    needs_create = not os.path.exists(filename)
+
+    db = sqlite3.connect(filename)
+
+    stmts = []
+    if needs_create:
+        stmts.extend([
+            "create table downloaded (url string PRIMARY KEY, filename string, etag string, fetched_time integer)",
+            "create table settings (schema_version integer)",
+            "insert into settings (schema_version) values (1)",
+        ])
+
+    for stmt in stmts:
+        db.execute(stmt)
+
+    return DownloadCacheDb(db)
 
 
 class Resolver:

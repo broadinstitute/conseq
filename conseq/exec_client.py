@@ -21,6 +21,28 @@ _basestring = str
 log = logging.getLogger(__name__)
 
 
+class PidProcStub:
+    def __init__(self, pid: int) -> None:
+        self.pid = pid
+
+    def __repr__(self):
+        return "<PidProcStub pid:{}>".format(self.pid)
+
+    def poll(self) -> int:
+        # this is really just to cope with testing, normally the process was created by a different process
+        try:
+            os.waitpid(self.pid, os.WNOHANG)
+        except OSError:
+            pass
+
+        # now do the actual test to see if the process exists
+        try:
+            os.kill(self.pid, 0)
+            return None
+        except OSError:
+            return 0
+
+
 def is_valid_value(v):
     if isinstance(v, dict):
         return len(v) == 1 and (("$filename" in v) or ("$value" in v))
@@ -485,28 +507,6 @@ class ExternProc:
         subprocess.check_call(terminate_cmd, shell=True)
 
 
-class PidProcStub:
-    def __init__(self, pid: int) -> None:
-        self.pid = pid
-
-    def __repr__(self):
-        return "<PidProcStub pid:{}>".format(self.pid)
-
-    def poll(self) -> int:
-        # this is really just to cope with testing, normally the process was created by a different process
-        try:
-            os.waitpid(self.pid, os.WNOHANG)
-        except OSError:
-            pass
-
-        # now do the actual test to see if the process exists
-        try:
-            os.kill(self.pid, 0)
-            return None
-        except OSError:
-            return 0
-
-
 # class ReportSuccessProcStub:
 #     def __init__(self):
 #         self.pid = 10000000
@@ -865,6 +865,15 @@ class AsyncDelegateExecClient:
         return file_fetcher
 
 
+class RemoteResolveState(ResolveState):
+    def __init__(self, files_to_upload_and_download: List[Tuple[str, str]], files_to_download: List[Any]) -> None:
+        self.files_to_upload_and_download = files_to_upload_and_download
+        self.files_to_download = files_to_download
+
+    def add_script(self, filename):
+        self.files_to_upload_and_download.append((filename, os.path.basename(filename)))
+
+
 class DelegateExecClient:
     def __init__(self, resources: Dict[str, float], label: str, local_workdir: str, remote_url: str,
                  cas_remote_url: str, helper_path: str, command_template: str,
@@ -984,15 +993,6 @@ class DelegateExecClient:
             remote.download(name, destination, ignoreMissing=True, skipExisting=False)
 
         return file_fetcher
-
-
-class RemoteResolveState(ResolveState):
-    def __init__(self, files_to_upload_and_download: List[Tuple[str, str]], files_to_download: List[Any]) -> None:
-        self.files_to_upload_and_download = files_to_upload_and_download
-        self.files_to_download = files_to_download
-
-    def add_script(self, filename):
-        self.files_to_upload_and_download.append((filename, os.path.basename(filename)))
 
 
 def _resolve_filenames(remote: Remote, artifact: Dict[str, Union[str, Dict[str, str]]]) -> Dict[
