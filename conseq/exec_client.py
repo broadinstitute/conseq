@@ -6,17 +6,17 @@ import os
 import re
 import shutil
 import subprocess
-
-import six
+from subprocess import Popen
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from conseq import debug_log
 from conseq import dep
 from conseq import helper
+from conseq.dep import Jobs, Obj
+from conseq.helper import Remote
+from conseq.xref import Resolver
 
-if six.PY2:
-    _basestring = (str, unicode)
-else:
-    _basestring = str
+_basestring = str
 
 log = logging.getLogger(__name__)
 
@@ -129,7 +129,9 @@ def validate_result_json_obj(obj, types):
 
 
 class Execution:
-    def __init__(self, transform, id, job_dir, proc, outputs, captured_stdouts, desc_name):
+    def __init__(self, transform: str, id: int, job_dir: str, proc: Union[PidProcStub, Popen],
+                 outputs: List[Dict[str, Union[str, Dict[str, str]]]],
+                 captured_stdouts: Union[List[str], Tuple[str, str]], desc_name: str) -> None:
         self.transform = transform
         self.id = id
         self.proc = proc
@@ -151,10 +153,10 @@ class Execution:
             props_copy[k] = v
         return props_copy
 
-    def get_state_label(self):
+    def get_state_label(self) -> str:
         return "local-run"
 
-    def get_external_id(self):
+    def get_external_id(self) -> str:
         d = dict(transform=self.transform, id=self.id, job_dir=self.job_dir, pid=self.proc.pid, outputs=self.outputs,
                  captured_stdouts=self.captured_stdouts, desc_name=self.desc_name)
         return json.dumps(d)
@@ -171,13 +173,14 @@ class Execution:
         log.error("Task failed %s: %s", self.desc_name, failure)
         _log_local_failure(self.captured_stdouts)
 
-    def get_completion(self):
+    def get_completion(self) -> Union[
+        Tuple[None, List[Dict[str, Union[str, Dict[str, str]]]]], Tuple[None, List[Any]], Tuple[None, None]]:
         failure, outputs = self._get_completion()
         if failure is not None:
             self._log_failure(failure)
         return failure, outputs
 
-    def _get_completion(self):
+    def _get_completion(self) -> Union[Tuple[None, List[Any]], Tuple[None, None]]:
         retcode = self.proc.poll()
 
         if retcode == None:
@@ -244,18 +247,21 @@ class Execution:
 
 
 class DelegateExecution(Execution):
-    def __init__(self, transform, id, job_dir, proc, outputs, captured_stdouts, desc_name, remote, file_fetcher, label,
-                 results_path):
+    def __init__(self, transform: str, id: int, job_dir: str, proc: Union[PidProcStub, Popen],
+                 outputs: List[Dict[str, Union[str, Dict[str, str]]]],
+                 captured_stdouts: Union[List[str], Tuple[str, str]], desc_name: str, remote: Remote,
+                 file_fetcher: Callable, label: str,
+                 results_path: str) -> None:
         super(DelegateExecution, self).__init__(transform, id, job_dir, proc, outputs, captured_stdouts, desc_name)
         self.remote = remote
         self.file_fetcher = file_fetcher
         self.label = label
         self._results_path = results_path
 
-    def get_state_label(self):
+    def get_state_label(self) -> str:
         return self.label
 
-    def get_external_id(self):
+    def get_external_id(self) -> str:
         d = dict(transform=self.transform, id=self.id,
                  outputs=self.outputs,
                  captured_stdouts=self.captured_stdouts,
@@ -276,7 +282,7 @@ class DelegateExecution(Execution):
         _log_remote_failure(self.file_fetcher, msg)
         _log_local_failure(self.captured_stdouts)
 
-    def _get_completion(self):
+    def _get_completion(self) -> Union[Tuple[None, List[Dict[str, Union[str, Dict[str, str]]]]], Tuple[None, None]]:
         retcode = self.proc.poll()
         # print("_get_completion -> {}".format(retcode))
         if retcode == None:
@@ -310,7 +316,8 @@ class DelegateExecution(Execution):
         return None, outputs
 
 
-def write_wrapper_script(wrapper_path, job_dir, prologue, run_stmts, retcode_path):
+def write_wrapper_script(wrapper_path: str, job_dir: Optional[str], prologue: str, run_stmts: List[str],
+                         retcode_path: Optional[str]) -> None:
     with open(wrapper_path, "wt") as fd:
         fd.write("set -ex\n")
         if job_dir is not None:
@@ -337,7 +344,8 @@ def write_wrapper_script(wrapper_path, job_dir, prologue, run_stmts, retcode_pat
             fd.write("echo $EXIT_STATUS > {retcode_path}\n".format(**locals()))
 
 
-def local_exec_script(name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name):
+def local_exec_script(name: str, id: int, job_dir: str, run_stmts: List[str], outputs: List[Any], capture_output: bool,
+                      prologue: str, desc_name: str) -> Execution:
     stdout_path = os.path.join(job_dir, "stdout.txt")
     stderr_path = os.path.join(job_dir, "stderr.txt")
     # results_path = os.path.join(job_dir, "results.json")
@@ -370,7 +378,7 @@ def local_exec_script(name, id, job_dir, run_stmts, outputs, capture_output, pro
     return Execution(name, id, job_dir, proc, outputs, captured_stdouts, desc_name)
 
 
-def fetch_urls(obj, resolver):
+def fetch_urls(obj: Dict[str, Union[str, Dict[str, str]]], resolver: Resolver) -> Dict[str, str]:
     assert isinstance(obj, dict)
     new_obj = {}
     for k, v in obj.items():
@@ -383,7 +391,7 @@ def fetch_urls(obj, resolver):
     return new_obj
 
 
-def needs_resolution(obj):
+def needs_resolution(obj: Dict[str, Union[str, Dict[str, str]]]) -> bool:
     if not ("$xref_url" in obj):
         return False
     # Just noticed this.  weird, isn't it?  I think this should _probably_ be removed.
@@ -393,7 +401,7 @@ def needs_resolution(obj):
     return True
 
 
-def flatten_value(v):
+def flatten_value(v: Union[Dict[str, str], str]) -> str:
     if isinstance(v, dict) and len(v) == 1 and "$value" in v:
         v = v["$value"]
     elif isinstance(v, dict) and len(v) == 1 and "$filename" in v:
@@ -401,7 +409,7 @@ def flatten_value(v):
     return v
 
 
-def flatten_parameters(d):
+def flatten_parameters(d: Dict[str, str]) -> Dict[str, str]:
     "make dictionary into simple (string, string) pairs by handling $value and $filename special cases"
     pairs = []
     for k, v in d.items():
@@ -410,7 +418,7 @@ def flatten_parameters(d):
     return dict(pairs)
 
 
-def preprocess_xref_inputs(j, resolver, inputs):
+def preprocess_xref_inputs(j: Jobs, resolver: Resolver, inputs: Tuple[Tuple[str, Obj]]) -> bool:
     xrefs_resolved = [False]
 
     def resolve(obj_):
@@ -441,8 +449,12 @@ def preprocess_xref_inputs(j, resolver, inputs):
     return xrefs_resolved[0]
 
 
-class NullResolveState:
-    def __init__(self, files_to_copy):
+class ResolveState:
+    pass
+
+
+class NullResolveState(ResolveState):
+    def __init__(self, files_to_copy: List[Any]) -> None:
         self.files_to_copy = files_to_copy
 
     def add_script(self, script):
@@ -474,13 +486,13 @@ class ExternProc:
 
 
 class PidProcStub:
-    def __init__(self, pid):
+    def __init__(self, pid: int) -> None:
         self.pid = pid
 
     def __repr__(self):
         return "<PidProcStub pid:{}>".format(self.pid)
 
-    def poll(self):
+    def poll(self) -> int:
         # this is really just to cope with testing, normally the process was created by a different process
         try:
             os.waitpid(self.pid, os.WNOHANG)
@@ -505,7 +517,7 @@ class PidProcStub:
 
 
 class LocalExecClient:
-    def __init__(self, resources):
+    def __init__(self, resources: Dict[Any, Any]) -> None:
         self.resources = resources
 
     def reattach(self, external_ref):
@@ -513,7 +525,8 @@ class LocalExecClient:
         return Execution(d['transform'], d['id'], d['job_dir'], PidProcStub(d['pid']), d['outputs'],
                          d['captured_stdouts'], d['desc_name'])
 
-    def preprocess_inputs(self, resolver, inputs):
+    def preprocess_inputs(self, resolver: Resolver, inputs: Tuple[Tuple[str, Obj]]) -> Tuple[
+        Dict[str, Dict[str, str]], NullResolveState]:
         files_to_copy = []
 
         def resolve(obj_: dep.Obj):
@@ -541,8 +554,9 @@ class LocalExecClient:
 
         return result, NullResolveState(files_to_copy)
 
-    def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name, resolve_state,
-                    resources):
+    def exec_script(self, name: str, id: int, job_dir: str, run_stmts: List[str], outputs: List[Any],
+                    capture_output: bool, prologue: str, desc_name: str, resolve_state: NullResolveState,
+                    resources: Dict[str, int]) -> Execution:
 
         for src, dst in resolve_state.files_to_copy:
             shutil.copy(src, os.path.join(job_dir, dst))
@@ -566,7 +580,7 @@ def drop_prefix(prefix, value):
     return value[len(prefix):]
 
 
-def push_to_cas_with_pullmap(remote, source_and_dest, url_and_dest):
+def push_to_cas_with_pullmap(remote: Remote, source_and_dest: List[Tuple[str, str]], url_and_dest: List[Any]) -> str:
     source_and_dest = [(os.path.abspath(source), dest) for source, dest in source_and_dest]
     log.debug("push_to_cas_with_pullmap, filenames: %s", source_and_dest)
     name_mapping = helper.push_to_cas(remote, [source for source, dest in source_and_dest])
@@ -633,7 +647,8 @@ def process_inputs_for_publishing(cas_remote, inputs):
     return result
 
 
-def process_inputs_for_remote_exec(inputs):
+def process_inputs_for_remote_exec(inputs: Tuple[Tuple[str, Obj]]) -> Tuple[
+    List[Any], List[Tuple[str, str]], Dict[str, Dict[str, str]]]:
     log.debug("preprocess_inputs, before inputs: %s", inputs)
     files_to_upload_and_download = []
     files_to_download = []
@@ -701,7 +716,7 @@ def create_publish_exec_client(config):
                              config['AWS_SECRET_ACCESS_KEY'])
 
 
-def make_results_path(cas_remote_url, pull_map_url):
+def make_results_path(cas_remote_url: str, pull_map_url: str) -> str:
     import hashlib
     hash = hashlib.sha256(pull_map_url.encode("utf-8")).hexdigest()
     return os.path.join(cas_remote_url, "results", hash)
@@ -851,8 +866,9 @@ class AsyncDelegateExecClient:
 
 
 class DelegateExecClient:
-    def __init__(self, resources, label, local_workdir, remote_url, cas_remote_url, helper_path, command_template,
-                 python_path, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, recycle_past_runs):
+    def __init__(self, resources: Dict[str, float], label: str, local_workdir: str, remote_url: str,
+                 cas_remote_url: str, helper_path: str, command_template: str,
+                 python_path: str, AWS_ACCESS_KEY_ID: str, AWS_SECRET_ACCESS_KEY: str, recycle_past_runs: bool) -> None:
         self.resources = resources
         self.helper_path = helper_path
         self.local_workdir = local_workdir
@@ -865,7 +881,7 @@ class DelegateExecClient:
         self.label = label
         self.recycle_past_runs = recycle_past_runs
 
-    def reattach(self, external_ref):
+    def reattach(self, external_ref: str) -> DelegateExecution:
         print("reattach", repr(external_ref))
         d = json.loads(external_ref)
         remote = helper.Remote(d['remote_url'], d['local_job_dir'], self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
@@ -874,12 +890,15 @@ class DelegateExecClient:
                                  d['captured_stdouts'], d['desc_name'], remote, file_fetcher, d['label'],
                                  d['results_path'])
 
-    def preprocess_inputs(self, resolver, inputs):
+    def preprocess_inputs(self, resolver: Resolver, inputs: Tuple[Tuple[str, Obj]]) -> Tuple[
+        Dict[str, Dict[str, str]], RemoteResolveState]:
         files_to_download, files_to_upload_and_download, result = process_inputs_for_remote_exec(inputs)
         return result, RemoteResolveState(files_to_upload_and_download, files_to_download)
 
-    def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name, resolver_state,
-                    resources):
+    def exec_script(self, name: str, id: int, job_dir: str, run_stmts: List[str],
+                    outputs: List[Dict[str, Union[str, Dict[str, str]]]], capture_output: bool, prologue: str,
+                    desc_name: str, resolver_state: RemoteResolveState,
+                    resources: Dict[str, int]) -> DelegateExecution:
         mem_in_mb = resources.get("mem", 1000)
         assert job_dir[:len(self.local_workdir)] == self.local_workdir
         rel_job_dir = job_dir[len(self.local_workdir) + 1:]
@@ -960,224 +979,15 @@ class DelegateExecClient:
         return DelegateExecution(name, id, job_dir, proc, outputs, captured_stdouts, desc_name, remote, file_fetcher,
                                  self.label, results_path)
 
-    def _mk_file_fetcher(self, remote):
+    def _mk_file_fetcher(self, remote: Remote) -> Callable:
         def file_fetcher(name, destination):
             remote.download(name, destination, ignoreMissing=True, skipExisting=False)
 
         return file_fetcher
 
 
-# class SgeExecClient:
-#     def __init__(self, host, sge_prologue, local_workdir, remote_workdir, remote_url, cas_remote_url, helper_path,
-#                  sge_cmd_prologue, resources, stage_dir, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY):
-#         assert "{{" not in cas_remote_url
-#         self.ssh_host = host
-#         self.sge_prologue = sge_prologue
-#         self.remote_workdir = remote_workdir
-#         self.remote_url = remote_url
-#         self.cas_remote_url = cas_remote_url
-#         self.local_workdir = local_workdir
-#         self.helper_path = helper_path
-#         self.resources = resources
-#         self.AWS_ACCESS_KEY_ID = AWS_ACCESS_KEY_ID
-#         self.AWS_SECRET_ACCESS_KEY = AWS_SECRET_ACCESS_KEY
-#
-#         self.ssh = SimpleSSH()
-#
-#         self.status_cache_expiry = 5
-#         self.job_completion_delay = 6
-#         self.last_status_refresh = None
-#         self.last_refresh_id = 1
-#         self.sge_cmd_prologue = sge_cmd_prologue
-#
-#         # map of sge_job_id to sge status
-#         self.last_status = {}
-#
-#         self.stage_dir = stage_dir
-#
-#     def reattach(self, external_ref):
-#         d = json.loads(external_ref)
-#         remote_job_dir = d['remote_job_dir']
-#         remote = helper.Remote(d['remote_url'], d['local_job_dir'], self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
-#         sge_job_id = d['sge_job_id']
-#         self._saw_job_id(sge_job_id, SGE_STATUS_SUBMITTED)
-#         return SGEExecution(d['name'], d['id'], d['job_dir'], sge_job_id, d['desc_name'], self, remote, d,
-#                             self._mk_file_fetcher(remote_job_dir))
-#
-#     def _saw_job_id(self, sge_job_id, status):
-#         self.last_status[sge_job_id] = SgeState(time.time(), status, self.last_refresh_id)
-#
-#     def _refresh_job_statuses(self):
-#         qstat_command = "qstat -xml"
-#         if self.sge_cmd_prologue is not None:
-#             qstat_command = self.sge_cmd_prologue + " ; " + qstat_command
-#
-#         stdout = self.ssh.exec_cmd(self.ssh_host, qstat_command, logger=log.debug)
-#
-#         self.last_refresh_id += 1
-#
-#         doc = ETree.fromstring(stdout)
-#         job_list = doc.findall(".//job_list")
-#
-#         for job in job_list:
-#             job_id = job.find("JB_job_number").text
-#
-#             state = job.attrib['state']
-#             if state == "running":
-#                 self._saw_job_id(job_id, SGE_STATUS_RUNNING)
-#             elif state == "pending":
-#                 self._saw_job_id(job_id, SGE_STATUS_PENDING)
-#             else:
-#                 self._saw_job_id(job_id, SGE_STATUS_UNKNOWN)
-#
-#     def get_status(self, sge_job_id):
-#         now = time.time()
-#         if self.last_status_refresh is None or (now - self.last_status_refresh) > self.status_cache_expiry:
-#             self._refresh_job_statuses()
-#             self.last_status_refresh = now
-#
-#         status_obj = self.last_status[sge_job_id]
-#         if status_obj.refresh_id != self.last_refresh_id:
-#             # this job was missing the last time we refreshed
-#             if now - status_obj.update_timestamp > self.job_completion_delay:
-#                 return SGE_STATUS_COMPLETE
-#
-#         return status_obj.status
-#
-#     def preprocess_inputs(self, resolver, inputs):
-#         files_to_download, files_to_upload_and_download, result = process_inputs_for_remote_exec(inputs)
-#         return result, SGEResolveState(files_to_upload_and_download, files_to_download)
-#
-#     def add_script(self, resolver_state, filename):
-#         # assert not filename[0] == "/"
-#         resolver_state.files_to_upload_and_download.append((filename, os.path.basename(filename)))
-#
-#     def _exec_qsub(self, stdout, stderr, script_path, mem_in_mb, name):
-#         qsub_command = "qsub -N {name} -l h_vmem={mem_in_mb}M -terse -o {stdout} -e {stderr} {script_path}".format(
-#             name=name, stdout=stdout, stderr=stderr, script_path=script_path, mem_in_mb=mem_in_mb)
-#
-#         if self.sge_cmd_prologue is not None:
-#             qsub_command = self.sge_cmd_prologue + " ; " + qsub_command
-#
-#         sge_job_id = self.ssh.exec_cmd(self.ssh_host, qsub_command).strip()
-#         assert re.match("\\d+", sge_job_id) is not None
-#         self._saw_job_id(sge_job_id, SGE_STATUS_SUBMITTED)
-#
-#         return sge_job_id
-#
-#     def exec_generic_command(self, rel_job_dir, command, mem_in_mb, name):
-#         remote_job_dir = "{}/{}".format(self.remote_workdir, rel_job_dir)
-#
-#         docker_launch_script = "{}/run.sh".format(remote_job_dir)
-#         script = "#!/bin/bash\n{}\n".format(" ".join(command))
-#         self.ssh.put_string(self.ssh_host, script, docker_launch_script)
-#
-#         self._exec_qsub(remote_job_dir + "/stdout.txt", remote_job_dir + "/stderr.txt", docker_launch_script, mem_in_mb,
-#                         name)
-#
-#     def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name, resolver_state,
-#                     resources):
-#         mem_in_mb = resources.get("mem", 1000)
-#         assert job_dir[:len(self.local_workdir)] == self.local_workdir
-#         rel_job_dir = job_dir[len(self.local_workdir) + 1:]
-#
-#         remote_url = "{}/{}".format(self.remote_url, rel_job_dir)
-#         remote_job_dir = "{}/{}".format(self.remote_workdir, rel_job_dir)
-#         local_job_dir = "{}/{}".format(self.local_workdir, rel_job_dir)
-#         local_wrapper_path = os.path.join(local_job_dir, "wrapper.sh")
-#         remote_wrapper_path = os.path.join(remote_job_dir, "wrapper.sh")
-#
-#         source_and_dest = list(resolver_state.files_to_upload_and_download)
-#
-#         if outputs is not None:
-#             local_write_results_path = os.path.join(local_job_dir, 'write_results.py')
-#             source_and_dest += [(local_write_results_path, "write_results.py")]
-#             run_stmts += ["python write_results.py"]
-#             with open(local_write_results_path, "wt") as fd:
-#                 fd.write("import json\n"
-#                          "results = {}\n"
-#                          "fd = open('results.json', 'wt')\n"
-#                          "fd.write(json.dumps(results))\n"
-#                          "fd.close()\n".format(repr(dict(outputs=outputs))))
-#
-#         remote = helper.Remote(remote_url, local_job_dir, self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
-#         cas_remote = helper.Remote(self.cas_remote_url, local_job_dir, self.AWS_ACCESS_KEY_ID,
-#                                    self.AWS_SECRET_ACCESS_KEY)
-#         for _, dest in source_and_dest:
-#             assert dest[0] != '/'
-#
-#         pull_map = push_to_cas_with_pullmap(cas_remote, source_and_dest, resolver_state.files_to_download)
-#         results_path = make_results_path(self.cas_remote_url, pull_map)
-#         if remote.exists(results_path):
-#             return load_existing_results(id, remote, results_path)
-#
-#         self.ssh.exec_cmd(self.ssh_host, "mkdir -p {}".format(remote_job_dir))
-#         helper_script = "cd {remote_job_dir}\n" \
-#                         "{helper_path} exec --uploadresults {results_path} " \
-#                         "-u retcode.json " \
-#                         "-u stdout.txt " \
-#                         "-u stderr.txt " \
-#                         "-o stdout.txt " \
-#                         "-e stderr.txt " \
-#                         "-r retcode.json " \
-#                         "-f {pull_map} " \
-#                         "--stage {stage_dir} " \
-#                         "{remote_url} . " \
-#                         "bash wrapper.sh\n".format(results_path,
-#                                                    helper_path=self.helper_path,
-#                                                    remote_url=remote_url,
-#                                                    remote_job_dir=remote_job_dir,
-#                                                    pull_map=pull_map,
-#                                                    stage_dir=self.stage_dir)
-#
-#         if self.sge_prologue is not None:
-#             helper_script = self.sge_prologue + "\n" + helper_script
-#
-#         pull_and_run_script = "{}/pull_and_run.sh".format(remote_job_dir)
-#         self.ssh.put_string(self.ssh_host, helper_script, pull_and_run_script)
-#
-#         write_wrapper_script(local_wrapper_path, remote_job_dir, prologue, run_stmts, None)
-#
-#         log.debug("put %s %s", local_wrapper_path, remote_wrapper_path)
-#         self.ssh.put(self.ssh_host, local_wrapper_path, remote_wrapper_path)
-#
-#         sge_job_id = self._exec_qsub(remote_job_dir + "/helper_stdout.txt", remote_job_dir + "/helper_stderr.txt",
-#                                      pull_and_run_script, mem_in_mb, rel_job_dir)
-#
-#         extern_ref = dict(remote_url=remote_url,
-#                           local_job_dir=local_job_dir,
-#                           name=name,
-#                           id=id, job_dir=rel_job_dir,
-#                           sge_job_id=sge_job_id,
-#                           desc_name=desc_name,
-#                           remote_job_dir=remote_job_dir)
-#
-#         return SGEExecution(name, id, job_dir, sge_job_id, desc_name, self, remote, extern_ref,
-#                             self._mk_file_fetcher(remote_job_dir))
-#
-#     def _mk_file_fetcher(self, dir):
-#         def fetch(filename, destination):
-#             path = os.path.join(dir, filename)
-#             try:
-#                 self.ssh.get(self.ssh_host, path, destination)
-#                 return "{}:{}".format(self.ssh_host, path)
-#             except FileNotFoundError:
-#                 log.warning("No file at {}:{}".format(self.ssh_host, path))
-#
-#         return fetch
-#
-#     def cancel(self, sge_job_id):
-#         qdel_command = "qdel {}".format(sge_job_id)
-#         if self.sge_cmd_prologue is not None:
-#             qdel_command = self.sge_cmd_prologue + " ; " + qdel_command
-#
-#         # qdel may fail if job terminates while waiting for input, so just hope for the best
-#         # if we got an error
-#         self.ssh.exec_cmd(self.ssh_host, qdel_command, assert_success=False)
-
-
-class RemoteResolveState:
-    def __init__(self, files_to_upload_and_download, files_to_download):
+class RemoteResolveState(ResolveState):
+    def __init__(self, files_to_upload_and_download: List[Tuple[str, str]], files_to_download: List[Any]) -> None:
         self.files_to_upload_and_download = files_to_upload_and_download
         self.files_to_download = files_to_download
 
@@ -1185,7 +995,8 @@ class RemoteResolveState:
         self.files_to_upload_and_download.append((filename, os.path.basename(filename)))
 
 
-def _resolve_filenames(remote, artifact):
+def _resolve_filenames(remote: Remote, artifact: Dict[str, Union[str, Dict[str, str]]]) -> Dict[
+    str, Union[str, Dict[str, str]]]:
     new_artifact = dict()
     for k, v in artifact.items():
         if type(v) == dict and "$filename" in v:
@@ -1222,70 +1033,8 @@ def _log_remote_failure(file_fetch, msg):
                            stderr_path_to_print=stderr_path)
 
 
-# class SGEExecution:
-#     def __init__(self, transform, id, job_dir, sge_job_id, desc_name, client, remote, extern_ref, file_fetch):
-#         self.transform = transform
-#         self.id = id
-#         self.job_dir = job_dir
-#         self.sge_job_id = sge_job_id
-#         self.desc_name = desc_name
-#         self.client = client
-#         self.remote = remote
-#         self.extern_ref = extern_ref
-#         self.file_fetch = file_fetch
-#
-#     def cancel(self):
-#         log.warn("Executing qdel to delete job %s (%s)", self.sge_job_id, self.desc_name)
-#         self.client.cancel(self.sge_job_id)
-#
-#     def get_state_label(self):
-#         return "SGE-" + self.client.get_status(self.sge_job_id)
-#
-#     def get_external_id(self):
-#         return json.dumps(self.extern_ref)
-#
-#     def _log_failure(self, msg):
-#         _log_remote_failure(self.file_fetch, msg)
-#
-#     def get_completion(self):
-#         failure, outputs = self._get_completion()
-#         if failure is not None:
-#             log.error("SGE Job {} running {} failed".format(self.sge_job_id, self.desc_name))
-#             self._log_failure(failure)
-#         return failure, outputs
-#
-#     def _get_completion(self):
-#         status = self.client.get_status(self.sge_job_id)
-#
-#         if status != SGE_STATUS_COMPLETE:
-#             return None, None
-#
-#         log.debug("About to download retcode.json")
-#
-#         retcode_content = self.remote.download_as_str("retcode.json")
-#         if retcode_content is not None:
-#             retcode = json.loads(retcode_content)['retcode']
-#         else:
-#             log.debug("got no retcode")
-#             retcode = None
-#
-#         if retcode != 0:
-#             return ("shell command failed with {}".format(repr(retcode)), None)
-#
-#         results_str = self.remote.download_as_str("results.json")
-#         if results_str is None:
-#             return ("script reported success but results.json is missing!", None)
-#
-#         results = json.loads(results_str)
-#
-#         log.info("Rule {} completed ({}). Results: {}".format(self.desc_name, self.job_dir, results))
-#         assert type(results['outputs']) == list
-#         outputs = [_resolve_filenames(self.remote, o) for o in results['outputs']]
-#
-#         return None, outputs
-
-
-def assert_has_only_props(properties, names, optional=[]):
+def assert_has_only_props(properties: Dict[str, Union[str, Dict[str, str]]], names: List[str],
+                          optional: List[str] = []) -> None:
     keys = set(properties.keys())
     keys.difference_update(optional)
     assert keys == set(names), "Expected properties: {}, but got {}".format(names, properties.keys())
@@ -1296,24 +1045,7 @@ def create_client(name, config, properties):
     for k, v in properties.get("resources", {}).items():
         resources[k] = float(v)
     type = properties.get('type')
-    # if type == 'sge':
-    #     resources['mem'] = 1e20
-    #     expected_props = ["type", "SGE_HOST", "SGE_PROLOGUE", "SGE_REMOTE_WORKDIR", "SGE_HELPER_PATH",
-    #                       "SGE_CMD_PROLOGUE", "resources"]
-    #     assert_has_only_props(properties, expected_props)
-    #     return SgeExecClient(properties["SGE_HOST"],
-    #                          properties["SGE_PROLOGUE"],
-    #                          config["WORKING_DIR"],
-    #                          properties["SGE_REMOTE_WORKDIR"] + "/" + config["EXECUTION_ID"],
-    #                          config["S3_STAGING_URL"] + "/" + config["EXECUTION_ID"],
-    #                          config["S3_STAGING_URL"],
-    #                          properties["SGE_HELPER_PATH"],
-    #                          properties["SGE_CMD_PROLOGUE"],
-    #                          resources,
-    #                          properties["SGE_REMOTE_WORKDIR"] + "/CAS",
-    #                          config["AWS_ACCESS_KEY_ID"],
-    #                          config["AWS_SECRET_ACCESS_KEY"]
-    #                          )
+
     if type == "local":
         assert_has_only_props(properties, ["type", "resources"])
         return LocalExecClient(resources)

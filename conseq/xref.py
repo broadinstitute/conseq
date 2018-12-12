@@ -3,6 +3,8 @@ import os
 import sqlite3
 import tempfile
 import time
+from sqlite3 import Connection
+from typing import Dict, Union
 
 import paramiko
 from boto.s3.connection import S3Connection
@@ -21,7 +23,8 @@ def http_fetch(url, dest):
             fdo.write(chunk)
 
 
-def s3_fetch(bucket_name, path, destination_filename, config):
+def s3_fetch(bucket_name: str, path: str, destination_filename: str,
+             config: Dict[str, Union[str, Dict[str, str]]]) -> None:
     # retry_count = 0
     # max_retries = 10
     #
@@ -60,7 +63,7 @@ def s3_fetch(bucket_name, path, destination_filename, config):
 
 
 class Pull:
-    def __init__(self, config):
+    def __init__(self, config: Dict[str, Union[str, Dict[str, str]]]) -> None:
         self.ssh_client_cache = {}
         self.config = config
 
@@ -82,7 +85,7 @@ class Pull:
         self.ssh_client_cache[host] = client
         return client
 
-    def pull(self, url, dest_path):
+    def pull(self, url: str, dest_path: str) -> str:
         log.warning("Downloading {} -> {}".format(url, dest_path))
 
         parts = urlparse(url)
@@ -105,7 +108,7 @@ class Pull:
         self.ssh_client_cache = {}
 
 
-def open_cache_db(state_dir):
+def open_cache_db(state_dir: str) -> DownloadCacheDb:
     filename = os.path.join(state_dir, "cache.sqlite3")
     needs_create = not os.path.exists(filename)
 
@@ -126,22 +129,22 @@ def open_cache_db(state_dir):
 
 
 class DownloadCacheDb:
-    def __init__(self, db):
+    def __init__(self, db: Connection) -> None:
         self.db = db
 
-    def put(self, url, filename, etag, fetched_time):
+    def put(self, url: str, filename: str, etag: str, fetched_time: float) -> None:
         c = self.db.cursor()
         try:
-            c.execute("insert into downloaded (url, filename, etag, fetched_time) values (?, ?, ?, ?)",
+            c.execute("INSERT INTO downloaded (url, filename, etag, fetched_time) VALUES (?, ?, ?, ?)",
                       [url, filename, etag, fetched_time])
             self.db.commit()
         finally:
             c.close()
 
-    def get(self, url):
+    def get(self, url: str) -> None:
         c = self.db.cursor()
         try:
-            c.execute("select filename, etag, fetched_time from downloaded where url = ?", [url])
+            c.execute("SELECT filename, etag, fetched_time FROM downloaded WHERE url = ?", [url])
             result = c.fetchone()
         finally:
             c.close()
@@ -149,12 +152,12 @@ class DownloadCacheDb:
 
 
 class Resolver:
-    def __init__(self, state_dir, config):
+    def __init__(self, state_dir: str, config: Dict[str, Union[str, Dict[str, str]]]) -> None:
         self.puller = Pull(config)
         self.config = config
         self.cache = open_cache_db(state_dir)
 
-    def resolve(self, url):
+    def resolve(self, url: str) -> Dict[str, str]:
         if os.path.exists(url):
             return dict(filename=os.path.abspath(url))
         else:

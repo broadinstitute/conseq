@@ -1,0 +1,14 @@
+let S3_STAGING_URL = "s3://broad-datasci/conseq/test-conseq"
+
+rule a:
+    outputs: {"name": "foo", "file": {"$filename": "sample"}}
+    run "bash" with "echo hello > sample"
+
+rule b:
+    inputs: in={"name": "foo"}
+    outputs: {"name": "foo2"}
+    run "bash" with "echo bye"
+
+rule pub:
+    inputs: in={"name": "foo"}
+    publish: "s3://broad-datasci/conseq-test/something"

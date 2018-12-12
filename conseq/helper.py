@@ -5,14 +5,17 @@ import logging
 import os
 import re
 import subprocess
+from typing import Dict, List, Optional, Tuple
 
+from boto.s3.bucket import Bucket
 from boto.s3.connection import S3Connection
 from boto.s3.key import Key
 
 log = logging.getLogger(__name__)
 
 
-def parse_remote(path, accesskey=None, secretaccesskey=None):
+def parse_remote(path: str, accesskey: Optional[str] = None, secretaccesskey: Optional[str] = None) -> Tuple[
+    Bucket, str]:
     m = re.match("^s3://([^/]+)/(.*)$", path)
     assert m != None, "invalid remote path: {}".format(path)
     bucket_name = m.group(1)
@@ -37,12 +40,13 @@ def download_s3_as_string(remote):
 
 
 class Remote:
-    def __init__(self, remote_url, local_dir, accesskey=None, secretaccesskey=None):
+    def __init__(self, remote_url: str, local_dir: str, accesskey: Optional[str] = None,
+                 secretaccesskey: Optional[str] = None) -> None:
         self.remote_url = remote_url
         self.local_dir = local_dir
         self.bucket, self.remote_path = parse_remote(remote_url, accesskey, secretaccesskey)
 
-    def exists(self, remote):
+    def exists(self, remote: str) -> bool:
         if remote.startswith("s3:"):
             bucket, remote_path = parse_remote(remote)
         else:
@@ -158,7 +162,7 @@ class Remote:
 
         return uploaded_url
 
-    def download_as_str(self, remote, timeout=5):
+    def download_as_str(self, remote: str, timeout: int = 5) -> str:
         if remote.startswith("s3:"):
             bucket, remote_path = parse_remote(remote)
         else:
@@ -191,7 +195,7 @@ def drop_prefix(prefix, value):
     return value[len(prefix):]
 
 
-def calc_hash(filename):
+def calc_hash(filename: str) -> str:
     h = hashlib.sha256()
     with open(filename, "rb") as fd:
         for chunk in iter(lambda: fd.read(10000), b''):
@@ -211,7 +215,7 @@ def push_str_to_cas(remote, content, filename="<unknown>"):
     return remote_name
 
 
-def push_to_cas(remote, filenames, return_full_url=False):
+def push_to_cas(remote: Remote, filenames: List[str], return_full_url: bool = False) -> Dict[str, str]:
     "upload multiple files to CAS and return mapping of filename to url"
     name_mapping = {}
 

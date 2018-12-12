@@ -5,18 +5,25 @@ import logging
 import os
 import textwrap
 import time
+from typing import Any, Callable, Dict, List, Tuple, Union
 
 import six
+from jinja2.environment import Environment
 
 from conseq import debug_log
 from conseq import dep
 from conseq import exec_client
 from conseq import ui
 from conseq import xref
+from conseq.config import Rules
 from conseq.config import read_rules
+from conseq.dep import ForEach, Jobs, RuleExecution, Template
+from conseq.exec_client import DelegateExecClient, DelegateExecution, Execution, LocalExecClient, ResolveState
 from conseq.parser import QueryVariable
+from conseq.parser import Rule, RunStmt
 from conseq.template import MissingTemplateVar, render_template
 from conseq.util import indent_str
+from conseq.xref import Resolver
 
 log = logging.getLogger(__name__)
 
@@ -29,12 +36,16 @@ class JobFailedError(FatalUserError):
     pass
 
 
-def to_template(jinja2_env, rule, config):
+def to_template(jinja2_env: Environment, rule: Rule, config: Dict[str, Union[str, Dict[str, str]]]) -> Template:
     queries, predicates = convert_input_spec_to_queries(jinja2_env, rule, config)
     return dep.Template(queries, predicates, rule.name, output_matches_expectation=rule.output_matches_expectation)
 
 
-def generate_run_stmts(job_dir, command_and_bodies, jinja2_env, config, inputs, resolver_state):
+ConfigType = Dict[str, Union[str, Dict[str, str]]]
+
+
+def generate_run_stmts(job_dir: str, command_and_bodies: List[RunStmt], jinja2_env: Environment, config: ConfigType,
+                       inputs: Dict[str, Dict[str, str]], resolver_state: ResolveState) -> List[str]:
     run_stmts = []
     for i, x in enumerate(command_and_bodies):
         exec_profile, command, script_body = x
@@ -52,7 +63,7 @@ def generate_run_stmts(job_dir, command_and_bodies, jinja2_env, config, inputs, 
     return run_stmts
 
 
-def format_inputs(inputs):
+def format_inputs(inputs: Dict[str, Dict[str, str]]) -> str:
     lines = []
 
     def append_kv(v):
@@ -85,7 +96,10 @@ def publish(jinja2_env, location_template, config, inputs):
     publish_manifest(location, inputs, config)
 
 
-def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, capture_output, resolver_state, client):
+def execute(name: str, resolver: Resolver, jinja2_env: Environment, id: int, job_dir: str,
+            inputs: Dict[str, Dict[str, str]], rule: Rule, config: Dict[str, Union[str, Dict[str, str]]],
+            capture_output: bool, resolver_state: ResolveState,
+            client: Union[DelegateExecClient, LocalExecClient]) -> Execution:
     try:
         prologue = render_template(jinja2_env, config["PROLOGUE"], config)
 
@@ -126,7 +140,7 @@ def execute(name, resolver, jinja2_env, id, job_dir, inputs, rule, config, captu
         return exec_client.FailedExecutionStub(id, ex.get_error())
 
 
-def reattach(j, rules, pending_jobs):
+def reattach(j: Jobs, rules: Rules, pending_jobs: List[Execution]) -> List[DelegateExecution]:
     executing = []
     for e in pending_jobs:
         if e.exec_xref != None:
@@ -141,11 +155,12 @@ def reattach(j, rules, pending_jobs):
     return executing
 
 
-def get_job_dir(state_dir, job_id):
+def get_job_dir(state_dir: str, job_id: int) -> str:
     return os.path.join(state_dir, "r" + str(job_id))
 
 
-def get_long_execution_summary(executing, pending):
+def get_long_execution_summary(executing: Union[List[Execution], List[DelegateExecution]],
+                               pending: List[RuleExecution]) -> str:
     from tabulate import tabulate
     counts = collections.defaultdict(lambda: dict(count=0, dirs=[]))
     for e in executing:
@@ -169,7 +184,7 @@ def get_long_execution_summary(executing, pending):
     return indent_str(tabulate(rows, ["state", "transform", "count", "dirs"], tablefmt="simple"), 4)
 
 
-def get_execution_summary(executing):
+def get_execution_summary(executing: Union[List[Execution], List[DelegateExecution]]) -> str:
     counts = collections.defaultdict(lambda: 0)
     for e in executing:
         counts[e.get_state_label()] += 1
@@ -178,7 +193,9 @@ def get_execution_summary(executing):
     return ", ".join(["%s:%d" % (k, counts[k]) for k in keys])
 
 
-def get_satisfiable_jobs(rules, resources_per_client, pending_jobs, executions):
+def get_satisfiable_jobs(rules: Rules, resources_per_client: Dict[str, Dict[str, Union[float, int]]],
+                         pending_jobs: List[RuleExecution],
+                         executions: Union[List[Execution], List[DelegateExecution]]) -> List[RuleExecution]:
     # print("get_satisfiable_jobs", len(pending_jobs), executions)
     ready = []
 
@@ -221,7 +238,7 @@ def get_satisfiable_jobs(rules, resources_per_client, pending_jobs, executions):
 
 
 class TimelineLog:
-    def __init__(self, filename):
+    def __init__(self, filename: str) -> None:
         if filename is not None:
             import csv
             is_new = not os.path.exists(filename)
@@ -234,7 +251,7 @@ class TimelineLog:
             self.fd = None
             self.w = None
 
-    def log(self, job_id, status):
+    def log(self, job_id: int, status: str) -> None:
         if self.fd is None:
             return
         self.w.writerow([datetime.datetime.now().isoformat(), job_id, status])
@@ -247,7 +264,7 @@ class TimelineLog:
 
 
 class Lazy:
-    def __init__(self, fn):
+    def __init__(self, fn: Callable) -> None:
         self.evaled = False
         self.fn = fn
 
@@ -258,8 +275,9 @@ class Lazy:
         return self.result
 
 
-def main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, capture_output, req_confirm, maxfail,
-              maxstart):
+def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, rules: Rules, state_dir: str,
+              executing: List[DelegateExecution], capture_output: bool, req_confirm: bool, maxfail: int,
+              maxstart: None) -> None:
     from conseq.exec_client import create_publish_exec_client
     _client_for_publishing = Lazy(lambda: create_publish_exec_client(rules.get_vars()))
 
@@ -458,20 +476,22 @@ def _datetimefromiso(isostr):
     return datetime.datetime.strptime(isostr, "%Y-%m-%dT%H:%M:%S.%f")
 
 
-def add_artifact_if_missing(j, obj):
+def add_artifact_if_missing(j: Jobs, obj: Dict[str, Union[str, Dict[str, str]]]) -> int:
     timestamp = datetime.datetime.now()
     d = dict(obj)
     return j.add_obj(dep.DEFAULT_SPACE, timestamp.isoformat(), d, overwrite=False)
 
 
-def expand_run(jinja2_env, command, script_body, config, inputs):
+def expand_run(jinja2_env: Environment, command: str, script_body: None, config: Dict[str, Union[str, Dict[str, str]]],
+               inputs: Dict[str, Dict[str, str]]) -> Tuple[str, None]:
     command = render_template(jinja2_env, command, config, inputs=inputs)
     if script_body != None:
         script_body = render_template(jinja2_env, script_body, config, inputs=inputs)
     return (command, script_body)
 
 
-def expand_dict(jinja2_env, d, config, **kwargs):
+def expand_dict(jinja2_env: Environment, d: Dict[str, Union[str, Dict[str, str]]],
+                config: Dict[str, Union[str, Dict[str, str]]], **kwargs) -> Dict[str, Union[str, Dict[str, str]]]:
     assert isinstance(d, dict)
     assert isinstance(config, dict)
 
@@ -490,11 +510,13 @@ def expand_dict(jinja2_env, d, config, **kwargs):
     return new_output
 
 
-def expand_outputs(jinja2_env, output, config, **kwargs):
+def expand_outputs(jinja2_env: Environment, output: Dict[str, Union[str, Dict[str, str]]],
+                   config: Dict[str, Union[str, Dict[str, str]]], **kwargs) -> Dict[str, Union[str, Dict[str, str]]]:
     return expand_dict(jinja2_env, output, config, **kwargs)
 
 
-def expand_input_spec(jinja2_env, spec, config):
+def expand_input_spec(jinja2_env: Environment, spec: Dict[str, str], config: Dict[str, Union[str, Dict[str, str]]]) -> \
+        Dict[str, str]:
     spec = dict(spec)
     regexps = {}
     for k, v in spec.items():
@@ -510,7 +532,8 @@ def expand_input_spec(jinja2_env, spec, config):
     return expanded
 
 
-def convert_input_spec_to_queries(jinja2_env, rule, config):
+def convert_input_spec_to_queries(jinja2_env: Environment, rule: Rule, config: Dict[str, Union[str, Dict[str, str]]]) -> \
+        Tuple[List[ForEach], List[Any]]:
     queries = []
     predicates = []
     pairs_by_var = collections.defaultdict(lambda: [])
@@ -612,7 +635,6 @@ def reconcile_add_if_missing(j, objs):
     for obj in j.find_objs(dep.DEFAULT_SPACE, {"$manually-added": "true"}):
         unseen_objs[obj.id] = obj
 
-
     new_objs = []
     for obj in objs:
         existing_id = j.get_existing_id(dep.DEFAULT_SPACE, obj)
@@ -634,7 +656,8 @@ def remove_obj_and_children(j, root_obj_ids, dry_run):
         j.remove_objects([obj.id for obj in all_objs])
 
 
-def process_add_if_missing(j, jinja2_env, objs, vars, force=False):
+def process_add_if_missing(j: Jobs, jinja2_env: Environment, objs: List[Dict[str, Union[str, Dict[str, str]]]],
+                           vars: Dict[str, Union[str, Dict[str, str]]], force: bool = False) -> None:
     # rewrite the objects, expanding templates and marking this as one which was manually added from the config file
     processed = []
     for obj in objs:
@@ -655,8 +678,9 @@ def process_add_if_missing(j, jinja2_env, objs, vars, force=False):
         add_artifact_if_missing(j, obj)
 
 
-def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_executions, capture_output, req_confirm,
-         config_file, maxfail=1, maxstart=None, force_no_targets=False):
+def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars: Dict[Any, Any],
+         max_concurrent_executions: int, capture_output: bool, req_confirm: bool,
+         config_file: str, maxfail: int = 1, maxstart: None = None, force_no_targets: bool = False) -> int:
     if not os.path.exists(state_dir):
         os.makedirs(state_dir)
 
@@ -685,8 +709,8 @@ def main(depfile, state_dir, forced_targets, override_vars, max_concurrent_execu
 
     # handle the remember-executed statements
     with j.transaction():
-        for exec in rules.remember_executed:
-            j.remember_executed(exec)
+        for exec_ in rules.remember_executed:
+            j.remember_executed(exec_)
 
     # finish initializing exec clients
     for name, props in list(rules.exec_clients.items()):
