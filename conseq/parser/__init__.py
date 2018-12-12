@@ -230,6 +230,9 @@ class Semantics(object):
         return specs
 
     def output_specs(self, ast):
+        if ast == "none":
+            return []
+
         specs = [ast[0]]
         rest = ast[1]
         for x in rest:
@@ -268,7 +271,10 @@ class Semantics(object):
         return FileRef(ast.filename)
 
     def file_list(self, ast):
-        raise Exception("prob:" + str(ast))
+        files = [ast[0]]
+        for x in ast[1]:
+            files.append(x[1])
+        return files
 
 
 def parse_str(text, filename=None):

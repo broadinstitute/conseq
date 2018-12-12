@@ -1,0 +1,12 @@
+include "../docker-local-exec.conseq"
+
+rule a:
+    executor: docker-local
+    uses: "file1" 
+    outputs: {'type': 'a-out', 'filename': {"$filename": "file2"}}
+    run "cp file1 file2"
+
+rule check:
+    inputs: in={'type': 'a-out'}
+    outputs: none
+    run "test -e {{inputs.in.filename}}"

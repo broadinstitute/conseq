@@ -1,8 +1,10 @@
+import collections
 import datetime
 import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 
 import six
@@ -236,7 +238,7 @@ class Execution:
                     files_written.append(value["$filename"])
         if len(files_written):
             log.warning("Rule %s wrote the following files:\n%s", self.transform,
-                     "\n".join(["\t" + x for x in files_written]))
+                        "\n".join(["\t" + x for x in files_written]))
 
         return None, outputs
 
@@ -440,6 +442,9 @@ def preprocess_xref_inputs(j, resolver, inputs):
 
 
 class NullResolveState:
+    def __init__(self, files_to_copy):
+        self.files_to_copy = files_to_copy
+
     def add_script(self, script):
         pass
 
@@ -498,6 +503,7 @@ class PidProcStub:
 #         return 0
 
 
+
 class LocalExecClient:
     def __init__(self, resources):
         self.resources = resources
@@ -508,12 +514,21 @@ class LocalExecClient:
                          d['captured_stdouts'], d['desc_name'])
 
     def preprocess_inputs(self, resolver, inputs):
-        def resolve(obj_):
+        files_to_copy = []
+
+        def resolve(obj_: dep.Obj):
             assert isinstance(obj_, dep.Obj)
+
             obj = obj_.props
             assert isinstance(obj, dict)
+
             obj = fetch_urls(obj, resolver)
-            return flatten_parameters(obj)
+            obj = flatten_parameters(obj)
+            if obj.get("type") == "$fileref":
+                destination = obj.get("destination")
+                if destination:
+                    files_to_copy.append((destination, destination))
+            return obj
 
         result = {}
         for bound_name, obj_or_list in inputs:
@@ -523,14 +538,17 @@ class LocalExecClient:
             else:
                 obj_ = obj_or_list
                 result[bound_name] = resolve(obj_)
-        return result, NullResolveState()
+
+        return result, NullResolveState(files_to_copy)
 
     def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name, resolve_state,
                     resources):
+
+        for src, dst in resolve_state.files_to_copy:
+            shutil.copy(src, os.path.join(job_dir, dst))
+
         return local_exec_script(name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name)
 
-
-import collections
 
 SgeState = collections.namedtuple("SgeState", ["update_timestamp", "status", "refresh_id"])
 
@@ -629,17 +647,29 @@ def process_inputs_for_remote_exec(inputs):
         obj = obj_.props
         assert isinstance(obj, dict)
 
+        # temporarily using dest prop for filerefs. This works because filerefs only have one file
+        # probably need to clean this up eventually
+        destination = None
+        if obj.get("type") == "$fileref":
+            destination = flatten_value(obj.get("destination"))
+
         new_obj = {}
         for k, v in obj.items():
             if type(v) == dict and "$filename" in v:
                 cur_name = v["$filename"]
                 # Need to do something to avoid collisions.  Store under working dir?  maybe temp/filename-v
-                new_name = "temp/{}.{}".format(os.path.basename(cur_name), next_file_index())
+                if destination is None:
+                    new_name = "temp/{}.{}".format(os.path.basename(cur_name), next_file_index())
+                else:
+                    new_name = destination
                 files_to_upload_and_download.append((cur_name, new_name))
                 v = new_name
             elif isinstance(v, dict) and "$file_url" in v:
                 cur_name = v["$file_url"]
-                new_name = "temp/{}.{}".format(os.path.basename(cur_name), next_file_index())
+                if destination is None:
+                    new_name = "temp/{}.{}".format(os.path.basename(cur_name), next_file_index())
+                else:
+                    new_name = destination
                 files_to_download.append((cur_name, new_name))
                 v = new_name
             elif isinstance(v, dict) and len(v) == 1 and "$value" in v:

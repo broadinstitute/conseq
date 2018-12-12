@@ -167,7 +167,8 @@ def _eval_stmts(rules, statements, filename, eval_context=None):
                 # mark this rule as dependant on this fileref
                 new_query_obj = {"type": "$fileref",
                                  "name": filename}
-                input = parser.InputSpec(input.variable, new_query_obj, input.for_all)
+                input = parser.InputSpec("$fileref/{}".format(filename), new_query_obj, False)
+                inputs.append(input)
 
             dec.inputs = inputs
 

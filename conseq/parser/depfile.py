@@ -264,12 +264,17 @@ class depfileParser(Parser):
 
     @tatsumasu()
     def _output_specs_(self):  # noqa
-        self._json_obj_()
+        with self._choice():
+            with self._option():
+                self._json_obj_()
 
-        def block0():
-            self._token(',')
-            self._json_obj_()
-        self._closure(block0)
+                def block0():
+                    self._token(',')
+                    self._json_obj_()
+                self._closure(block0)
+            with self._option():
+                self._token('none')
+            self._error('no available options')
 
     @tatsumasu()
     def _run_statement_(self):  # noqa
