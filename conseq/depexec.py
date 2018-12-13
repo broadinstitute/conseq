@@ -662,7 +662,8 @@ def process_add_if_missing(j: Jobs, jinja2_env: Environment, objs: List[Dict[str
     processed = []
     for obj in objs:
         obj = dict(obj)
-        obj["$manually-added"] = {"$value": "true"}
+        if "$manually-added" not in obj:
+            obj["$manually-added"] = {"$value": "true"}
         processed.append(expand_dict(jinja2_env, obj, vars))
 
     new_objs, missing_objs = reconcile_add_if_missing(j, processed)

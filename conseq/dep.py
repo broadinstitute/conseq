@@ -287,8 +287,11 @@ class ObjSet:
                     ov = ov["$value"]
                 if isinstance(ov, dict) and "$filename" in ov:
                     ov = ov["$filename"]
+                if isinstance(ov, dict) and "$file_url" in ov:
+                    ov = ov["$file_url"]
 
                 if hasattr(v, "match"):
+                    assert isinstance(ov, str), "checking match of {} against ov={} for key {}".format(repr(v), repr(ov), k)
                     matched = v.match(ov) != None
                 else:
                     matched = (ov == v)
