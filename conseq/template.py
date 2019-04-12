@@ -9,6 +9,15 @@ class LazyConfig:
         self._config_dict = config_dict
         self._render_template = render_template
 
+    def get(self, name, default=None):
+        if name in self:
+            return self[name]
+        else:
+            return default
+
+    def __contains__(self, name):
+        return name in self._config_dict
+
     def __getitem__(self, name):
         v = self._config_dict[name]
         if isinstance(v, str):
