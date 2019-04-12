@@ -10,9 +10,6 @@ Conseq is a tool for running sequences of transformations or other operations.
 More on the motivation and details seen this slide deck: https://docs.google.com/a/broadinstitute.com/presentation/d/1LsRymTEKmqDxACDnMIx1z_Y2dQtY7TNpb5PAFyK0OQM/edit?usp=sharing
 or this poster https://drive.google.com/file/d/1FF8ESVbo_LXs4BBfEGAgkbq77ABXyzKu/view?usp=sharing
 
-## Installation
-Check out the repo, then `python3 setup.py install`
-
 <a name="conseq-config-reference"/>
 # Conseq Config Reference
 
@@ -225,4 +222,70 @@ Update run syntax:
 
 Should I make helper.py into a go binary?  Would enable me to get/exec/put with no extra deps.  Would likely have to bake binary into image for execution on kubernettes. (On second thought, can accomplish this by having two containers, one with bin and the target container and share the bin volume)
 
+
+
+
+# Conseq Example
+## List artefacts
+
+```
+conseq ls
+conseq ls type=dep-matrix
+conseq ls type=dep-matrix library=avana
+```
+
+## Remove artefacts
+
+```
+conseq rm
+conseq rm type=dep-matrix
+conseq rm type=dep-matrix library=avana
+```
+To delete all artefacts, delete the ```state/``` directory
+
+## Add artefacts
+* Add to the ```xrefs.conseq``` file before running
+
+## Run conseq pipeline
+Run all possible rules, without asking
+
+```
+conseq run run-example.conseq
+```
+
+Run all possible rules, asking before each rule
+
+```
+conseq run run-example.conseq --confirm
+```
+
+Run possible combinations of artefacts for rank_scale_deps, and all downstream rules
+
+```
+conseq run run-example.conseq rank_scale_deps
+```
+
+Run only avana rank_scale_deps, and all downstream
+
+```
+conseq run run-example.conseq rank_scale_deps:dep.library=avana
+```
+
+Run avana and gecko rank_scale_deps, and all downstream
+
+```
+conseq run run-example.conseq rank_scale_deps:dep.library=avana rank_scale_deps:dep.library=gecko
+```
+
+Run correlation for the combination of avana and expression
+
+```
+conseq run run-example.conseq correlation:dep.library=avana,biomarker.category=expression --confirm
+```
+
+
+## Generate artefacts and rules diagram
+* ```conseq altdot release_3_vbox.conseq > dag.dot```
+* Open dag.dot in Graphviz
+* Export to pdf if desired
 
