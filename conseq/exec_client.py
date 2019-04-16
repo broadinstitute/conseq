@@ -1058,7 +1058,7 @@ def create_client(name, config, properties):
         reuse_past_runs = reuse_past_runs_str == "true"
 
         return DelegateExecClient(resources, properties['label'], config["WORKING_DIR"],
-                                  config["S3_STAGING_URL"] + "/" + config["EXECUTION_ID"], config["S3_STAGING_URL"],
+                                  config["S3_STAGING_URL"] + "/exec-results/" + config["EXECUTION_ID"], config["S3_STAGING_URL"],
                                   properties["HELPER_PATH"], properties["COMMAND_TEMPLATE"],
                                   config.get("PYTHON_PATH", "python"), config["AWS_ACCESS_KEY_ID"],
                                   config["AWS_SECRET_ACCESS_KEY"], reuse_past_runs)
@@ -1073,7 +1073,7 @@ def create_client(name, config, properties):
         reuse_past_runs = reuse_past_runs_str == "true"
 
         return AsyncDelegateExecClient(resources, properties['label'], config["WORKING_DIR"],
-                                       config["S3_STAGING_URL"] + "/" + config["EXECUTION_ID"],
+                                       config["S3_STAGING_URL"] + "/exec-results/" + config["EXECUTION_ID"],
                                        config["S3_STAGING_URL"],
                                        properties["HELPER_PATH"], properties["COMMAND_TEMPLATE"],
                                        config.get("PYTHON_PATH", "python"), config["AWS_ACCESS_KEY_ID"],

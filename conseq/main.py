@@ -121,6 +121,8 @@ def add_run(sub):
     parser.add_argument("--confirm", action="store_true")
     parser.add_argument("--maxfail", type=int, default=1)
     parser.add_argument("--maxstart", type=int, default=None)
+    parser.add_argument("--no-reattach", help="On startup, don't re-attach existing jobs", action="store_const", const=False, dest="reattach_existing")
+    parser.add_argument("--reattach", help="On startup, re-attach existing jobs", action="store_const", const=True, dest="reattach_existing")
     parser.add_argument("--nothing", action="store_true",
                         help="Don't run anything (useful when re-attaching existing jobs but you don't want to run downstream steps)")
     parser.add_argument('targets', nargs='*')
@@ -137,7 +139,8 @@ def add_run(sub):
         depexec.main(args.file, args.dir, args.targets, overrides, concurrent, not args.nocapture, args.confirm,
                      _get_config_file_path(args),
                      maxfail=args.maxfail, maxstart=args.maxstart,
-                     force_no_targets=args.nothing)
+                     force_no_targets=args.nothing,
+                     reattach_existing=args.reattach_existing)
 
     parser.set_defaults(func=run_cmd)
 

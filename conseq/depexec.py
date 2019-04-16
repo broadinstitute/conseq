@@ -289,7 +289,6 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
 
     prev_msg = None
     abort = False
-    interrupted = False
     success_count = 0
     failure_count = 0
     start_count = 0
@@ -470,6 +469,9 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
     if failure_count > 0:
         # maybe also show summary of which jobs failed?
         log.warning("%d jobs failed", failure_count)
+        return -1
+
+    return 0
 
 
 def _datetimefromiso(isostr):
@@ -681,7 +683,7 @@ def process_add_if_missing(j: Jobs, jinja2_env: Environment, objs: List[Dict[str
 
 def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars: Dict[Any, Any],
          max_concurrent_executions: int, capture_output: bool, req_confirm: bool,
-         config_file: str, maxfail: int = 1, maxstart: None = None, force_no_targets: bool = False) -> int:
+         config_file: str, maxfail: int = 1, maxstart: None = None, force_no_targets: bool = False, reattach_existing=None) -> int:
     if not os.path.exists(state_dir):
         os.makedirs(state_dir)
 
@@ -741,7 +743,8 @@ def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars:
             "Reattaching jobs that were started in a previous invocation of conseq, but had not terminated before conseq exited: %s",
             pending_jobs)
 
-        reattach_existing = ui.user_wants_reattach()
+        if reattach_existing is None:
+            reattach_existing = ui.user_wants_reattach()
 
         if reattach_existing:
             executing = reattach(j, rules, pending_jobs)
@@ -773,10 +776,10 @@ def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars:
         j.add_obj(timestamp, obj)
 
     try:
-        main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, capture_output, req_confirm, maxfail,
-                  maxstart)
+        ret = main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, capture_output, req_confirm, maxfail,
+                        maxstart)
     except FatalUserError as e:
         print("Error: {}".format(e))
         return -1
 
-    return 0
+    return ret
