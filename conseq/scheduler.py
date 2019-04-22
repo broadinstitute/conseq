@@ -1,5 +1,17 @@
 from collections import defaultdict
+from typing import Dict, Tuple, Union
 from typing import Sequence
+from typing import Set
+
+FOR_EACH = "for_each"
+FOR_ALL = "for_all"
+
+
+class Wildcard:
+    pass
+
+
+ANY_VALUE = Wildcard()
 
 START = "__start__"
 
@@ -121,6 +133,112 @@ class Scheduler:
         return ready
 
 
+class Input:
+    def __init__(self, name: str, type: str, fixed_attributes: Dict[str, str], other_attributes: Sequence[str]):
+        self.type = type
+        self.name = name
+        self.fixed_attributes = fixed_attributes
+        self.other_attributes = other_attributes
+
+
+class Output:
+    def __init__(self, fixed_attributes: Dict[str, str], other_attributes: Sequence[str]):
+        self.fixed_attributes = fixed_attributes
+        self.other_attributes = other_attributes
+
+
+class Rule:
+    def __init__(self, name: str, inputs: Sequence[Input], outputs: Sequence[Output]):
+        self.name = name
+        self.inputs = list(inputs)
+        self.outputs = list(outputs)
+
+
+def compute_deps_from_rules(rules: Sequence[Rule]) -> Sequence[Deps]:
+    result = []
+
+    by_output = PartialKeyIndex()
+    for rule in rules:
+        for output in rule.outputs:
+            by_output.add(output.fixed_attributes, output.other_attributes, rule.name)
+
+    for rule in rules:
+        if len(rule.inputs) == 0:
+            result.append(Deps(rule.name, [START], []))
+        else:
+            foreach = []
+            forall = []
+            for input in rule.inputs:
+                pred_rule_names = by_output.get(input.fixed_attributes, input.other_attributes)
+                assert len(pred_rule_names) > 0
+                if rule.type == FOR_EACH:
+                    foreach.extend(pred_rule_names)
+                else:
+                    assert rule.type == FOR_ALL
+                    forall.extend(pred_rule_names)
+
+            result.append(Deps(rule.name, foreach, forall))
+
+    return result
+
+
+def _is_compatible_with(fixed_attributes: Sequence[Tuple[str, str]], attribute_names: Set[str],
+                        _fixed_attributes: Sequence[Tuple[str, str]], _attribute_names: Set[str]):
+    if not attribute_names.issubset(_attribute_names):
+        return False
+
+    f_d = dict(_fixed_attributes)
+    for key, value in fixed_attributes:
+        if key in f_d:
+            if f_d[key] != value:
+                return False
+
+    return True
+
+
+def _split_attributes(attributes):
+    fixed_attributes = set()
+    all_attributes = set()
+    for name, value in attributes:
+        if value != ANY_VALUE:
+            fixed_attributes.add((name, value))
+        all_attributes.add(name)
+    return fixed_attributes, all_attributes
+
+
+class PartialKeyIndex:
+    def __init__(self):
+        self.d = defaultdict(lambda: [])
+
+    def add(self, attributes: Sequence[Tuple[str, Union[str, Wildcard]]], value):
+        fixed_attributes, all_attributes = _split_attributes(attributes)
+
+        entry = (fixed_attributes, all_attributes, value)
+        for component in fixed_attributes:
+            self.d[component].append(entry)
+
+    def get(self, attributes: Sequence[Tuple[str, Union[str, Wildcard]]]):
+        fixed_attributes, all_attributes = _split_attributes(attributes)
+
+        single_component_matches = []
+        for component in fixed_attributes:
+            matches = self.d[component]
+            if len(matches) == 0:
+                return []
+            single_component_matches.append(matches)
+
+        # use the component that is most selective to minimize the number of other keys we need to check
+        single_component_matches.sort(key=lambda x: len(x))
+        smallest = single_component_matches[0]
+
+        result = []
+        for _fixed_attributes, _other_attributes, value in smallest:
+            if _is_compatible_with(fixed_attributes, all_attributes, _fixed_attributes, _other_attributes):
+                result.append(value)
+
+        return result
+
+
 def test_linear():
     s = Scheduler([
         Deps("A", after_each=[START], after_all=[]),
@@ -228,126 +346,6 @@ def test_fork_join_with_for_All():
     assert len(next_rules) == 0
 
 
-from typing import Set
-from typing import Dict, Tuple, Union
-
-FOR_EACH = "for_each"
-FOR_ALL = "for_all"
-
-
-class Input:
-    def __init__(self, name: str, type: str, fixed_attributes: Dict[str, str], other_attributes: Sequence[str]):
-        self.type = type
-        self.name = name
-        self.fixed_attributes = fixed_attributes
-        self.other_attributes = other_attributes
-
-
-class Output:
-    def __init__(self, fixed_attributes: Dict[str, str], other_attributes: Sequence[str]):
-        self.fixed_attributes = fixed_attributes
-        self.other_attributes = other_attributes
-
-
-class Rule:
-    def __init__(self, name: str, inputs: Sequence[Input], outputs: Sequence[Output]):
-        self.name = name
-        self.inputs = list(inputs)
-        self.outputs = list(outputs)
-
-
-def compute_deps_from_rules(rules: Sequence[Rule]) -> Sequence[Deps]:
-    result = []
-
-    by_output = PartialKeyIndex()
-    for rule in rules:
-        for output in rule.outputs:
-            by_output.add(output.fixed_attributes, output.other_attributes, rule.name)
-
-    for rule in rules:
-        if len(rule.inputs) == 0:
-            result.append(Deps(rule.name, [START], []))
-        else:
-            foreach = []
-            forall = []
-            for input in rule.inputs:
-                pred_rule_names = by_output.get(input.fixed_attributes, input.other_attributes)
-                assert len(pred_rule_names) > 0
-                if rule.type == FOR_EACH:
-                    foreach.extend(pred_rule_names)
-                else:
-                    assert rule.type == FOR_ALL
-                    forall.extend(pred_rule_names)
-
-            result.append(Deps(rule.name, foreach, forall))
-
-    return result
-
-
-def _is_compatible_with(fixed_attributes: Sequence[Tuple[str, str]], attribute_names: Set[str],
-                        _fixed_attributes: Sequence[Tuple[str, str]], _attribute_names: Set[str]):
-    if not attribute_names.issubset(_attribute_names):
-        return False
-
-    f_d = dict(_fixed_attributes)
-    for key, value in fixed_attributes:
-        if key in f_d:
-            if f_d[key] != value:
-                return False
-
-    return True
-
-
-class Wildcard:
-    pass
-
-
-ANY_VALUE = Wildcard()
-
-
-def _split_attributes(attributes):
-    fixed_attributes = set()
-    all_attributes = set()
-    for name, value in attributes:
-        if value != ANY_VALUE:
-            fixed_attributes.add((name, value))
-        all_attributes.add(name)
-    return fixed_attributes, all_attributes
-
-
-class PartialKeyIndex:
-    def __init__(self):
-        self.d = defaultdict(lambda: [])
-
-    def add(self, attributes: Sequence[Tuple[str, Union[str, Wildcard]]], value):
-        fixed_attributes, all_attributes = _split_attributes(attributes)
-
-        entry = (fixed_attributes, all_attributes, value)
-        for component in fixed_attributes:
-            self.d[component].append(entry)
-
-    def get(self, attributes: Sequence[Tuple[str, Union[str, Wildcard]]]):
-        fixed_attributes, all_attributes = _split_attributes(attributes)
-
-        single_component_matches = []
-        for component in fixed_attributes:
-            matches = self.d[component]
-            if len(matches) == 0:
-                return []
-            single_component_matches.append(matches)
-
-        # use the component that is most selective to minimize the number of other keys we need to check
-        single_component_matches.sort(key=lambda x: len(x))
-        smallest = single_component_matches[0]
-
-        result = []
-        for _fixed_attributes, _other_attributes, value in smallest:
-            if _is_compatible_with(fixed_attributes, all_attributes, _fixed_attributes, _other_attributes):
-                result.append(value)
-
-        return result
-
-
 def test_satisfies():
     assert _is_compatible_with([("A", "a")], set(["A", "B"]),
                                [("A", "a")], set(["A", "B"]))
@@ -372,32 +370,99 @@ def test_partial_key_index():
     assert set(p.get([("A", "a")])) == set(["1", "2", "3"])
     assert p.get([("A", "a"), ("B", "b2")]) == ["2"]
 
-# import time
-#
-#
-# def trigger_downstream_rules(rule_name):
-#     # generate applications of rules based on previous completion
-#     while True:
-#         for rule_name in rules_to_check:
-#             applications = rules.get_applications(rule_name)
-#             applications = filter_applications_by_existing(applications, skipped, db)
-#
-#         # after we've determined all our applications that we can make, notify the scheduler these rules are in use
-#         new_application_rules = set([a.rule_name for a in applications])
-#         rules_to_check = scheduler.start(new_application_rules)
-#
-#         if len(rules_to_check) == 0:
-#             break
-#
-#
-# def main_loop(scheduler: Scheduler, rules):
-#     trigger_downstream_rules(START)
-#
-#     while True:
-#         completed_executions = get_completed()
-#         if len(completed_executions) == 0:
-#             time.sleep(5)
-#             continue
-#
-#         for completed_execution in completed_executions:
-#             trigger_downstream_rules(completed_execution.rule_name)
+
+AbstractArtifact = Sequence[Tuple[str, str]]
+
+
+class RuleModel:
+    def __init__(self, rule_name: str, inputs: Dict[str, AbstractArtifact], outputs: Sequence[AbstractArtifact]):
+        self.rule_name = rule_name
+        self.inputs = inputs
+        self.outputs = outputs
+
+
+class ExecutionGraph:
+    def __init__(self):
+        self.rules = {}
+        self.next_artifact_id = 0
+        self.artifact_model_to_id = {}
+        self.artifact_id_to_model = {}
+        self.artifact_index = PartialKeyIndex()
+        self.rule_id_to_outputs = {}
+        self.rule_id_to_inputs = {}
+
+    def add_artifact(self, artifact: AbstractArtifact):
+        artifact = tuple(artifact)
+        if artifact not in self.artifact_model_to_id:
+            artifact_model_id = self.next_artifact_id
+            self.artifact_model_to_id[artifact] = artifact_model_id
+            self.artifact_id_to_model[artifact_model_id] = artifact
+            self.next_artifact_id += 1
+            self.artifact_index.add(artifact, artifact_model_id)
+        else:
+            artifact_model_id = self.artifact_model_to_id[artifact]
+        return artifact_model_id
+
+    def add_rule(self, rule: RuleModel):
+        self.rules[id(rule)] = rule
+        outputs = []
+        for output in rule.outputs:
+            artifact_model_id = self.add_artifact(output)
+            outputs.append(artifact_model_id)
+        self.rule_id_to_outputs[id(rule)] = outputs
+
+    def resolve_inputs(self):
+        for rule in self.rules.values():
+            inputs = {}
+            for name, artifact_model in rule.inputs.items():
+                inputs[name] = self.artifact_index.get(artifact_model)
+            self.rule_id_to_inputs[id(rule)] = inputs
+
+    def get_artifacts(self):
+        return self.artifact_id_to_model.items()
+
+    def get_rules(self):
+        return self.rules.items()
+
+
+def test_execution_graph():
+    g = ExecutionGraph()
+    g.add_rule(RuleModel("Mill", {"in": [("type", "tree"), ("height", ANY_VALUE)]}, [[("type", "lumber")]]))
+    g.add_rule(RuleModel("Factory", {"in": [("type", "lumber")]}, [[("type", "chairs")]]))
+    g.add_artifact([("type", "tree"), ("height", "10ft")])
+    g.resolve_inputs()
+
+    assert len(g.get_artifacts()) == 3
+    assert len(g.get_rules()) == 2
+
+    # for visualization of execution profile we want a list of Rule1 -> output, output -> Rule2 and a definition for output
+
+    # import time
+    #
+    #
+    # def trigger_downstream_rules(rule_name):
+    #     # generate applications of rules based on previous completion
+    #     while True:
+    #         for rule_name in rules_to_check:
+    #             applications = rules.get_applications(rule_name)
+    #             applications = filter_applications_by_existing(applications, skipped, db)
+    #
+    #         # after we've determined all our applications that we can make, notify the scheduler these rules are in use
+    #         new_application_rules = set([a.rule_name for a in applications])
+    #         rules_to_check = scheduler.start(new_application_rules)
+    #
+    #         if len(rules_to_check) == 0:
+    #             break
+    #
+    #
+    # def main_loop(scheduler: Scheduler, rules):
+    #     trigger_downstream_rules(START)
+    #
+    #     while True:
+    #         completed_executions = get_completed()
+    #         if len(completed_executions) == 0:
+    #             time.sleep(5)
+    #             continue
+    #
+    #         for completed_execution in completed_executions:
+    #             trigger_downstream_rules(completed_execution.rule_name)
