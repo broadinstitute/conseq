@@ -136,11 +136,11 @@ def add_run(sub):
         if args.overrides is not None:
             overrides.update(args.overrides)
 
-        depexec.main(args.file, args.dir, args.targets, overrides, concurrent, not args.nocapture, args.confirm,
-                     _get_config_file_path(args),
-                     maxfail=args.maxfail, maxstart=args.maxstart,
-                     force_no_targets=args.nothing,
-                     reattach_existing=args.reattach_existing)
+        return depexec.main(args.file, args.dir, args.targets, overrides, concurrent, not args.nocapture, args.confirm,
+                            _get_config_file_path(args),
+                            maxfail=args.maxfail, maxstart=args.maxstart,
+                            force_no_targets=args.nothing,
+                            reattach_existing=args.reattach_existing)
 
     parser.set_defaults(func=run_cmd)
 
@@ -224,6 +224,17 @@ def add_localize(sub):
     parser.set_defaults(func=localize_cmd)
 
 
+def conseq_command_entry():
+    # disable stdout/stderr buffering to work better when run non-interactively
+    import sys, io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, line_buffering=True)
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, line_buffering=True)
+
+    ret = main()
+    if ret is not None:
+        sys.exit(ret)
+
+
 def main(args=None):
     from conseq import trace_on_demand
     trace_on_demand.install()
@@ -263,6 +274,6 @@ def main(args=None):
     root.setLevel(level)
 
     if args.func != None:
-        args.func(args)
+        return args.func(args)
     else:
         parser.print_help()
