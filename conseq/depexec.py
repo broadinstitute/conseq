@@ -413,7 +413,6 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
                         break
 
                 if rule.is_publish_rule:
-                    print("publishing...")
                     publish(jinja2_env, rule.publish_location, rules.get_vars(), inputs)
 
                 # maybe record_started and update_exec_xref should be merged so anything started
