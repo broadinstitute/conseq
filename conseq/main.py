@@ -125,6 +125,7 @@ def add_run(sub):
     parser.add_argument("--reattach", help="On startup, re-attach existing jobs", action="store_const", const=True, dest="reattach_existing")
     parser.add_argument("--nothing", action="store_true",
                         help="Don't run anything (useful when re-attaching existing jobs but you don't want to run downstream steps)")
+    parser.add_argument("--remove-unknown-artifacts", action="store_true", help="If set, don't ask before deleting artifacts which are not in the current conseq file.")
     parser.add_argument('targets', nargs='*')
 
     def run_cmd(args):
@@ -140,7 +141,8 @@ def add_run(sub):
                             _get_config_file_path(args),
                             maxfail=args.maxfail, maxstart=args.maxstart,
                             force_no_targets=args.nothing,
-                            reattach_existing=args.reattach_existing)
+                            reattach_existing=args.reattach_existing,
+                            remove_unknown_artifacts=args.remove_unknown_artifacts)
 
     parser.set_defaults(func=run_cmd)
 

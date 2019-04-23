@@ -682,7 +682,9 @@ def process_add_if_missing(j: Jobs, jinja2_env: Environment, objs: List[Dict[str
 
 def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars: Dict[Any, Any],
          max_concurrent_executions: int, capture_output: bool, req_confirm: bool,
-         config_file: str, maxfail: int = 1, maxstart: None = None, force_no_targets: bool = False, reattach_existing=None) -> int:
+         config_file: str, maxfail: int = 1, maxstart: None = None, force_no_targets: bool = False,
+         reattach_existing=None,
+         remove_unknown_artifacts=False) -> int:
     if not os.path.exists(state_dir):
         os.makedirs(state_dir)
 
@@ -707,7 +709,7 @@ def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars:
         rules.set_var(var, value)
 
     # handle the "add-if-missing" objects
-    process_add_if_missing(j, jinja2_env, rules.objs, rules.vars)
+    process_add_if_missing(j, jinja2_env, rules.objs, rules.vars, force=remove_unknown_artifacts)
 
     # handle the remember-executed statements
     with j.transaction():
