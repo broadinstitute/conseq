@@ -33,10 +33,20 @@ you run can be put into "~/.conseq"
 Individual scripts should only define new lowercase variables.  Variables in uppercase 
 are used by conseq for configuration and are defined under special variables below. 
 
-Special variables:
+The variable **SCRIPT_DIR** is defined at startup and often is used in conseq rules. This variable contains
+ the absolute path to the directory containing the conseq script being run. 
+ 
+This is frequently needed as each task runs in its own unique directory. This variable is useful
+ for generating relative paths to files which are not artifacts. You can prefix your path with this 
+  variable and providing a path relative to the conseq config being executed.
+
+For example, assuming "process.py" is in the same directory as the conseq file, you can 
+execute that script from a `run` statement such as:  `run 'python {{ SCRIPT_DIR }}/process.py'`
+
+
+Additional variables defined at start up:
 
 * **DL_CACHE_DIR** The directory that remote files are cached in after downloading.
-* **SCRIPT_DIR** The directory containing the conseq script being run.
 * **PROLOGUE** Text which is preprended to each shell script that's generated for executing a rule.  Useful for configuring the environment before the command runs.
 * **S3_STAGING_URL** Location where files will be staged and then later pulled from when executing remote jobs
 * **AWS_ACCESS_KEY_ID** AWS key ID used for reading/writing to S3
