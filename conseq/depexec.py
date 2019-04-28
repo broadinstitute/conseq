@@ -666,7 +666,7 @@ def remove_obj_and_children(j, root_obj_ids, dry_run):
 
 
 def process_add_if_missing(j: Jobs, jinja2_env: Environment, objs: List[Dict[str, Union[str, Dict[str, str]]]],
-                           vars: Dict[str, Union[str, Dict[str, str]]], force: bool = False) -> None:
+                           vars: Dict[str, Union[str, Dict[str, str]]], force: bool = None) -> None:
     # rewrite the objects, expanding templates and marking this as one which was manually added from the config file
     processed = []
     for obj in objs:
@@ -681,7 +681,9 @@ def process_add_if_missing(j: Jobs, jinja2_env: Environment, objs: List[Dict[str
         print("The following objects were not specified in the conseq file:")
         for obj in missing_objs:
             print("   {}".format(obj))
-        if force or ui.ask_y_n("do you wish to remove them?"):
+        if force is None:
+            force = ui.ask_y_n("do you wish to remove them?")
+        if force:
             remove_obj_and_children(j, [o.id for o in missing_objs], False)
 
     for obj in new_objs:
@@ -692,7 +694,7 @@ def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars:
          max_concurrent_executions: int, capture_output: bool, req_confirm: bool,
          config_file: str, maxfail: int = 1, maxstart: None = None, force_no_targets: bool = False,
          reattach_existing=None,
-         remove_unknown_artifacts=False) -> int:
+         remove_unknown_artifacts=None) -> int:
     if not os.path.exists(state_dir):
         os.makedirs(state_dir)
 

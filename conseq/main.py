@@ -125,7 +125,8 @@ def add_run(sub):
     parser.add_argument("--reattach", help="On startup, re-attach existing jobs", action="store_const", const=True, dest="reattach_existing")
     parser.add_argument("--nothing", action="store_true",
                         help="Don't run anything (useful when re-attaching existing jobs but you don't want to run downstream steps)")
-    parser.add_argument("--remove-unknown-artifacts", action="store_true", help="If set, don't ask before deleting artifacts which are not in the current conseq file.")
+    parser.add_argument("--remove-unknown-artifacts", action="store_const", const=True, help="If set, don't ask before deleting artifacts which are not in the current conseq file.")
+    parser.add_argument("--keep-unknown-artifacts", action="store_const", const=False, dest='remove_unknown_artifacts', help="If set, don't ask before deleting artifacts which are not in the current conseq file.")
     parser.add_argument('targets', nargs='*')
 
     def run_cmd(args):
@@ -165,6 +166,16 @@ def add_altdot(sub):
         commands.alt_dot(args.dir, args.file, _get_config_file_path(args))
 
     parser.set_defaults(func=altdot)
+
+
+def add_superdot(sub):
+    parser = sub.add_parser("superdot", help="Print the names all rules in the file")
+    parser.add_argument('file', metavar="FILE", help="the input file to parse")
+
+    def superdot(args):
+        commands.superdot(args.dir, args.file, _get_config_file_path(args))
+
+    parser.set_defaults(func=superdot)
 
 
 def add_debugrun(sub):
@@ -258,6 +269,7 @@ def main(args=None):
     add_debugrun(sub)
     add_dot(sub)
     add_altdot(sub)
+    add_superdot(sub)
     add_history_cmd(sub)
     add_localize(sub)
     add_version(sub)

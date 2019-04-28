@@ -184,7 +184,7 @@ def _eval_if(rules, if_statement, filename, eval_context):
         _eval_stmts(rules, if_statement.when_false, filename)
 
 
-def read_deps(filename, initial_vars={}):
+def read_deps(filename, initial_vars={}) -> Rules:
     rules = Rules()
     for name, value in initial_vars.items():
         rules.set_var(name, value)
@@ -194,7 +194,7 @@ def read_deps(filename, initial_vars={}):
     return rules
 
 
-def read_rules(state_dir, depfile, config_file, initial_config={}):
+def read_rules(state_dir: str, depfile: str, config_file: str, initial_config={}) -> Rules:
     _initial_config = _load_initial_config(state_dir, depfile, config_file)
     _initial_config.update(initial_config)
     rules = read_deps(depfile, initial_vars=_initial_config)

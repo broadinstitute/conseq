@@ -199,6 +199,7 @@ def _is_compatible_with(fixed_attributes: Sequence[Tuple[str, str]], attribute_n
 def _split_attributes(attributes):
     fixed_attributes = set()
     all_attributes = set()
+    print("attributes", attributes)
     for name, value in attributes:
         if value != ANY_VALUE:
             fixed_attributes.add((name, value))
@@ -376,9 +377,9 @@ AbstractArtifact = Sequence[Tuple[str, str]]
 
 class RuleModel:
     def __init__(self, rule_name: str, inputs: Dict[str, AbstractArtifact], outputs: Sequence[AbstractArtifact]):
-        self.rule_name = rule_name
-        self.inputs = inputs
-        self.outputs = outputs
+        self.name = rule_name
+        self.inputs = dict([(k, tuple(v)) for k, v in inputs.items()])
+        self.outputs = [tuple(output) for output in outputs]
 
 
 class ExecutionGraph:
@@ -392,6 +393,7 @@ class ExecutionGraph:
         self.rule_id_to_inputs = {}
 
     def add_artifact(self, artifact: AbstractArtifact):
+        assert not isinstance(artifact, dict)
         artifact = tuple(artifact)
         if artifact not in self.artifact_model_to_id:
             artifact_model_id = self.next_artifact_id
@@ -423,6 +425,119 @@ class ExecutionGraph:
 
     def get_rules(self):
         return self.rules.items()
+
+
+from .config import Rules
+from collections import namedtuple
+
+FileRef = namedtuple("FileRef", "path")
+
+from .parser import InputSpec
+
+
+def construct_graph(rules: Rules):
+    def to_value(v: Union[Dict[str, str], str]) -> Union[FileRef, str]:
+        if isinstance(v, dict):
+            assert "$filename" in v and len(v) == 1
+            return FileRef(v['$filename'])
+        return v
+
+    def artifact_to_model(artifact):
+        return [(k, to_value(v)) for k, v in artifact.items()]
+
+    g = ExecutionGraph()
+    for rule in rules.rule_by_name.values():
+        inputs = dict()
+        for input in rule.inputs:
+            assert isinstance(input, InputSpec)
+            inputs[input.variable] = artifact_to_model(input.json_obj)
+            print("input", input)
+
+        outputs = []
+        for output in rule.outputs:
+            print("output", output)
+            assert isinstance(output, dict)
+            outputs.append(artifact_to_model(output))
+
+            # InputSpec = namedtuple("InputSpec", ["variable", "json_obj", "for_all"])
+            # IncludeStatement = namedtuple("IncludeStatement", ["filename"])
+            # LetStatement = namedtuple("LetStatement", ["name", "value"])
+            # AddIfMissingStatement = namedtuple("AddIfMissingStatement", "json_obj")
+            # IfStatement = namedtuple("IfStatement", "condition when_true when_false")
+            # EvalStatement = namedtuple("EvalStatement", "body")
+            # FileRef = namedtuple("FileRef", "filename")
+            #
+            # class Rule:
+            #     def __init__(self, name):
+            #         self.name = name
+            #         self.inputs = []
+            #         self.outputs = None
+            #         self.run_stmts = []
+            #         self.executor = "default"
+            #         assert self.name != "" and self.name != " "
+            #         self.resources = {"slots": 1}
+            #         self.output_expectations = []
+            #         self.publish_location = None
+            #         self.uses_files = []
+
+        model = RuleModel(rule.name, inputs, outputs)
+        g.add_rule(model)
+
+    for obj in rules.objs:
+        g.add_artifact(artifact_to_model(obj))
+
+    g.resolve_inputs()
+
+    print(g.get_artifacts())
+    print(g.get_rules())
+
+    # now turn into JSON dicts
+
+    return g
+
+    # self.vars = {}
+    # self.objs = []
+
+
+def graph_to_dot(g: ExecutionGraph) -> str:
+    from io import StringIO
+
+    out = StringIO()
+    out.write("digraph {\n")
+
+    def _format_value(v):
+        if isinstance(v, FileRef):
+            v = "FileRef({})".format(v.path)
+        assert isinstance(v, str)
+        return v.replace("\"", "")
+
+    for artifact_index, artifact in g.get_artifacts():
+        # print(artifact)
+        label = "\n".join(["{}={}".format(k, _format_value(v)) for k, v in artifact])
+        out.write("a_{} [ shape=box, label=\"{}\" ];\n".format(artifact_index, label))
+
+    for rule_index, rule in g.get_rules():
+        out.write("r_{} [ shape=ellipse, label=\"{}\" ];\n".format(rule_index, rule.name))
+        print("rule inputs", rule.inputs)
+        print("rule outputs", rule.inputs)
+        for input_name, input_ids in g.rule_id_to_inputs[rule_index].items():
+            for input_id in input_ids:
+                #            input_id = g.artifact_model_to_id.get(input_model)
+                if input_id is not None:
+                    out.write("a_{} -> r_{} ;\n".format(input_id, rule_index))
+                else:
+                    print("missing input")
+
+        for output_id in g.rule_id_to_outputs[rule_index]:
+            # print("rule output", output)
+            # output_id = g.artifact_model_to_id.get(output)
+            if output_id is not None:
+                out.write("r_{} -> a_{} ;\n".format(rule_index, output_id))
+            else:
+                print("missing output")
+
+    out.write("}")
+    return out.getvalue()
 
 
 def test_execution_graph():
@@ -466,3 +581,45 @@ def test_execution_graph():
     #
     #         for completed_execution in completed_executions:
     #             trigger_downstream_rules(completed_execution.rule_name)
+
+
+from .config import read_rules
+
+
+def run_graph_to_dot(tmpdir, config):
+    state_dir = str(tmpdir) + "/state"
+    config_file = None  # str(tmpdir.join("config"))
+    depfile = str(tmpdir) + "/t.conseq"
+    with open(depfile, "wt") as fd:
+        fd.write(config)
+    # with open(config_file, "wt") as fd:
+    #     fd.write("let x='v'\n")
+
+    rules = read_rules(state_dir, depfile, config_file)
+    g = construct_graph(rules)
+    return graph_to_dot(g)
+
+
+def test_rules_to_graph(tmpdir):
+    dot = run_graph_to_dot(tmpdir,
+                           #                            """
+                           #     rule b:
+                           #         inputs: in={"type": "example"}
+                           #         outputs: {"type": "derived", "value":"{{inputs.in.value}}"}
+                           #
+                           #     rule a:
+                           #         outputs: {"type": "example", "value": "a"}, {"type": "example", "value": "b", "$space": "pocket"}
+                           # """
+
+                           """
+rule A:
+    outputs: {"type": "a-out"}
+
+rule B:
+    inputs: in={"type": "a-out"}
+    outputs: {"type": "b-out"}
+
+    """
+                           )
+
+    assert dot == "x"

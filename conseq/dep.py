@@ -963,6 +963,10 @@ class Template:
             return results
 
 
+class MissingObj(Exception):
+    pass
+
+
 class RuleAndDerivativesFilter:
     def __init__(self, rules_allowed, last_existing_id):
         self.rules_allowed = rules_allowed
@@ -1222,27 +1226,32 @@ class Jobs:
         def resolve_obj(props):
             assert isinstance(props, dict)
             objs = self.objects.find(space, props)
-            if len(objs) != 1:
+            if len(objs) == 0:
+                raise MissingObj()
+            elif len(objs) != 1:
                 raise Exception("Expected to find a single object with properties: {}, but found: {}".format(props, objs))
             return objs[0]
 
         log.info("Remembering execution: %s, %s", transform, exec_stmt.inputs)
-        # find inputs in repo.  Errors if no such object exists
-        inputs_json = exec_stmt.inputs
-        inputs = []
-        for name, value_json in inputs_json:
-            if isinstance(value_json, list) or isinstance(value_json, tuple):
-                value = tuple([resolve_obj(i) for i in value_json])
-            else:
-                value = resolve_obj(value_json)
-            inputs.append((name, value))
+        try:
+            # find inputs in repo.  Errors if no such object exists
+            inputs_json = exec_stmt.inputs
+            inputs = []
+            for name, value_json in inputs_json:
+                if isinstance(value_json, list) or isinstance(value_json, tuple):
+                    value = tuple([resolve_obj(i) for i in value_json])
+                else:
+                    value = resolve_obj(value_json)
+                inputs.append((name, value))
 
-        outputs_json = exec_stmt.outputs
-        interned_outputs = [resolve_obj(o) for o in outputs_json]
+            outputs_json = exec_stmt.outputs
+            interned_outputs = [resolve_obj(o) for o in outputs_json]
 
-        rule_id = self.rule_set.add_rule(space, inputs, transform)
-        execution_id = self.record_started(rule_id)
-        self._record_completed(execution_id, STATUS_COMPLETED, interned_outputs)
+            rule_id = self.rule_set.add_rule(space, inputs, transform)
+            execution_id = self.record_started(rule_id)
+            self._record_completed(execution_id, STATUS_COMPLETED, interned_outputs)
+        except MissingObj as ex:
+            log.warning("Skipping remembering due to missing obj: {}".format(ex))
 
     def cleanup_unsuccessful(self) -> None:
         with transaction(self.db):
