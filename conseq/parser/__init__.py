@@ -42,7 +42,6 @@ class Rule:
         return self.publish_location != None
 
     def output_matches_expectation(self, key_values):
-        print("output_matches_expectation", self.output_expectations)
         # if outputs were defined, then not checks needed
         if self.outputs is not None:
             return True

@@ -45,12 +45,12 @@ ConfigType = Dict[str, Union[str, Dict[str, str]]]
 
 
 def generate_run_stmts(job_dir: str, command_and_bodies: List[RunStmt], jinja2_env: Environment, config: ConfigType,
-                       inputs: Dict[str, Dict[str, str]], resolver_state: ResolveState) -> List[str]:
+                       resolver_state: ResolveState, **kwargs) -> List[str]:
     run_stmts = []
     for i, x in enumerate(command_and_bodies):
         exec_profile, command, script_body = x
         assert exec_profile == "default"
-        command, script_body = expand_run(jinja2_env, command, script_body, config, inputs)
+        command, script_body = expand_run(jinja2_env, command, script_body, config, **kwargs)
         if script_body != None:
             formatted_script_body = textwrap.dedent(script_body)
             script_name = os.path.abspath(os.path.join(job_dir, "script_%d" % i))
@@ -96,6 +96,12 @@ def publish(jinja2_env, location_template, config, inputs):
     publish_manifest(location, inputs, config)
 
 
+def _compute_task_hash(rule_name, inputs):
+    task_def_str = json.dumps(dict(rule=rule_name, inputs=inputs), sort_keys=True)
+    from hashlib import sha256
+    return sha256(task_def_str.encode("utf8")).hexdigest()
+
+
 def execute(name: str, resolver: Resolver, jinja2_env: Environment, id: int, job_dir: str,
             inputs: Dict[str, Dict[str, str]], rule: Rule, config: Dict[str, Union[str, Dict[str, str]]],
             capture_output: bool, resolver_state: ResolveState,
@@ -103,17 +109,19 @@ def execute(name: str, resolver: Resolver, jinja2_env: Environment, id: int, job
     try:
         prologue = render_template(jinja2_env, config["PROLOGUE"], config)
 
+        task_vars = {'HASH': _compute_task_hash(name, inputs)}
+
         if rule.outputs == None:
             outputs = None
         else:
-            outputs = [expand_outputs(jinja2_env, output, config, inputs=inputs) for output in rule.outputs]
+            outputs = [expand_outputs(jinja2_env, output, config, inputs=inputs, task=task_vars) for output in rule.outputs]
         assert isinstance(inputs, dict)
 
         log.info("Executing %s in %s with inputs:\n%s", name, job_dir, format_inputs(inputs))
         desc_name = "{} with inputs {} ({})".format(name, format_inputs(inputs), job_dir)
 
         if len(rule.run_stmts) > 0:
-            run_stmts = generate_run_stmts(job_dir, rule.run_stmts, jinja2_env, config, inputs, resolver_state)
+            run_stmts = generate_run_stmts(job_dir, rule.run_stmts, jinja2_env, config, resolver_state, inputs=inputs, task=task_vars)
 
             debug_log.log_execute(name, id, job_dir, inputs, run_stmts)
             execution = client.exec_script(name,
@@ -413,7 +421,6 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
                         break
 
                 if rule.is_publish_rule:
-                    print("publishing...")
                     publish(jinja2_env, rule.publish_location, rules.get_vars(), inputs)
 
                 # maybe record_started and update_exec_xref should be merged so anything started
@@ -485,10 +492,10 @@ def add_artifact_if_missing(j: Jobs, obj: Dict[str, Union[str, Dict[str, str]]])
 
 
 def expand_run(jinja2_env: Environment, command: str, script_body: None, config: Dict[str, Union[str, Dict[str, str]]],
-               inputs: Dict[str, Dict[str, str]]) -> Tuple[str, None]:
-    command = render_template(jinja2_env, command, config, inputs=inputs)
+               **kwargs) -> Tuple[str, None]:
+    command = render_template(jinja2_env, command, config, **kwargs)
     if script_body != None:
-        script_body = render_template(jinja2_env, script_body, config, inputs=inputs)
+        script_body = render_template(jinja2_env, script_body, config, **kwargs)
     return (command, script_body)
 
 
@@ -659,7 +666,7 @@ def remove_obj_and_children(j, root_obj_ids, dry_run):
 
 
 def process_add_if_missing(j: Jobs, jinja2_env: Environment, objs: List[Dict[str, Union[str, Dict[str, str]]]],
-                           vars: Dict[str, Union[str, Dict[str, str]]], force: bool = False) -> None:
+                           vars: Dict[str, Union[str, Dict[str, str]]], force: bool = None) -> None:
     # rewrite the objects, expanding templates and marking this as one which was manually added from the config file
     processed = []
     for obj in objs:
@@ -674,7 +681,9 @@ def process_add_if_missing(j: Jobs, jinja2_env: Environment, objs: List[Dict[str
         print("The following objects were not specified in the conseq file:")
         for obj in missing_objs:
             print("   {}".format(obj))
-        if force or ui.ask_y_n("do you wish to remove them?"):
+        if force is None:
+            force = ui.ask_y_n("do you wish to remove them?")
+        if force:
             remove_obj_and_children(j, [o.id for o in missing_objs], False)
 
     for obj in new_objs:
@@ -683,7 +692,9 @@ def process_add_if_missing(j: Jobs, jinja2_env: Environment, objs: List[Dict[str
 
 def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars: Dict[Any, Any],
          max_concurrent_executions: int, capture_output: bool, req_confirm: bool,
-         config_file: str, maxfail: int = 1, maxstart: None = None, force_no_targets: bool = False, reattach_existing=None) -> int:
+         config_file: str, maxfail: int = 1, maxstart: None = None, force_no_targets: bool = False,
+         reattach_existing=None,
+         remove_unknown_artifacts=None) -> int:
     if not os.path.exists(state_dir):
         os.makedirs(state_dir)
 
@@ -708,7 +719,7 @@ def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars:
         rules.set_var(var, value)
 
     # handle the "add-if-missing" objects
-    process_add_if_missing(j, jinja2_env, rules.objs, rules.vars)
+    process_add_if_missing(j, jinja2_env, rules.objs, rules.vars, force=remove_unknown_artifacts)
 
     # handle the remember-executed statements
     with j.transaction():

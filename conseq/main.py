@@ -125,6 +125,8 @@ def add_run(sub):
     parser.add_argument("--reattach", help="On startup, re-attach existing jobs", action="store_const", const=True, dest="reattach_existing")
     parser.add_argument("--nothing", action="store_true",
                         help="Don't run anything (useful when re-attaching existing jobs but you don't want to run downstream steps)")
+    parser.add_argument("--remove-unknown-artifacts", action="store_const", const=True, help="If set, don't ask before deleting artifacts which are not in the current conseq file.")
+    parser.add_argument("--keep-unknown-artifacts", action="store_const", const=False, dest='remove_unknown_artifacts', help="If set, don't ask before deleting artifacts which are not in the current conseq file.")
     parser.add_argument('targets', nargs='*')
 
     def run_cmd(args):
@@ -136,11 +138,12 @@ def add_run(sub):
         if args.overrides is not None:
             overrides.update(args.overrides)
 
-        depexec.main(args.file, args.dir, args.targets, overrides, concurrent, not args.nocapture, args.confirm,
-                     _get_config_file_path(args),
-                     maxfail=args.maxfail, maxstart=args.maxstart,
-                     force_no_targets=args.nothing,
-                     reattach_existing=args.reattach_existing)
+        return depexec.main(args.file, args.dir, args.targets, overrides, concurrent, not args.nocapture, args.confirm,
+                            _get_config_file_path(args),
+                            maxfail=args.maxfail, maxstart=args.maxstart,
+                            force_no_targets=args.nothing,
+                            reattach_existing=args.reattach_existing,
+                            remove_unknown_artifacts=args.remove_unknown_artifacts)
 
     parser.set_defaults(func=run_cmd)
 
@@ -163,6 +166,16 @@ def add_altdot(sub):
         commands.alt_dot(args.dir, args.file, _get_config_file_path(args))
 
     parser.set_defaults(func=altdot)
+
+
+def add_superdot(sub):
+    parser = sub.add_parser("superdot", help="Print the names all rules in the file")
+    parser.add_argument('file', metavar="FILE", help="the input file to parse")
+
+    def superdot(args):
+        commands.superdot(args.dir, args.file, _get_config_file_path(args))
+
+    parser.set_defaults(func=superdot)
 
 
 def add_debugrun(sub):
@@ -224,6 +237,17 @@ def add_localize(sub):
     parser.set_defaults(func=localize_cmd)
 
 
+def conseq_command_entry():
+    # disable stdout/stderr buffering to work better when run non-interactively
+    import sys, io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, line_buffering=True)
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, line_buffering=True)
+
+    ret = main()
+    if ret is not None:
+        sys.exit(ret)
+
+
 def main(args=None):
     from conseq import trace_on_demand
     trace_on_demand.install()
@@ -245,6 +269,7 @@ def main(args=None):
     add_debugrun(sub)
     add_dot(sub)
     add_altdot(sub)
+    add_superdot(sub)
     add_history_cmd(sub)
     add_localize(sub)
     add_version(sub)
@@ -263,6 +288,6 @@ def main(args=None):
     root.setLevel(level)
 
     if args.func != None:
-        args.func(args)
+        return args.func(args)
     else:
         parser.print_help()

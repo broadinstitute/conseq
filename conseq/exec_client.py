@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from subprocess import Popen
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -49,7 +50,7 @@ def is_valid_value(v):
     return isinstance(v, str)
 
 
-def _tail_file(filename, line_count=20):
+def _tail_file(filename, line_count=20, out=sys.stderr):
     if not os.path.exists(filename):
         log.error("Cannot tail {} because no such file exists".format(filename))
         return
@@ -62,6 +63,7 @@ def _tail_file(filename, line_count=20):
         lines = fd.read().split("\n")
         for line in lines[-line_count:]:
             print(line)
+    out.flush()
 
 
 def log_job_output(stdout_path, stderr_path, line_count=20, stdout_path_to_print=None, stderr_path_to_print=None):

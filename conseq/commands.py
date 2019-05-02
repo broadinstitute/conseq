@@ -1,15 +1,15 @@
-from io import StringIO
-from conseq.dep import Obj, DEFAULT_SPACE
-from conseq import helper
 import collections
+import json
 import logging
 import os
 import shutil
-import json
+from io import StringIO
 
 from conseq import dep
+from conseq import helper
 from conseq import xref
 from conseq.config import read_rules
+from conseq.dep import Obj, DEFAULT_SPACE
 from conseq.depexec import convert_input_spec_to_queries, get_job_dir, remove_obj_and_children
 from conseq.parser import ExpectKeyIs
 from conseq.util import indent_str
@@ -320,3 +320,13 @@ def _rules_to_dot(rules):
 def alt_dot(state_dir, depfile, config_file):
     rules = read_rules(state_dir, depfile, config_file)
     print(_rules_to_dot(rules))
+
+
+def superdot(state_dir, depfile, config_file):
+    from .scheduler import construct_graph, graph_to_dot
+
+    rules = read_rules(state_dir, depfile, config_file)
+    g = construct_graph(rules)
+
+    with open("dump.dot", "w") as fd:
+        fd.write(graph_to_dot(g))
