@@ -259,7 +259,7 @@ Run all possible rules, asking before each rule
 conseq run run-example.conseq --confirm
 ```
 
-Run possible combinations of artefacts for rank_scale_deps, and all downstream rules
+Run possible combinations of artefacts for rank_scale_deps, and all downstream rules. This forces running the rule, even if it has been run before.
 
 ```
 conseq run run-example.conseq rank_scale_deps
