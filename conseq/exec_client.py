@@ -356,7 +356,7 @@ def write_wrapper_script(wrapper_path: str, job_dir: Optional[str], prologue: st
             # based on http://veithen.github.io/2014/11/16/sigterm-propagation.html to propagate killing of child proc if this proc is killed.
             fd.write("  # Propagate kill if shell receives SIGTERM or SIGINT\n")
             fd.write("  trap 'kill -TERM $PID' TERM INT\n")
-            fd.write("  " + run_stmt + " &\n")
+            fd.write("  " + run_stmt.strip() + " &\n")
             fd.write("  PID=$!\n")
             fd.write("  wait $PID\n")
             fd.write("  trap - TERM INT\n")

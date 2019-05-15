@@ -170,6 +170,8 @@ class depfileParser(Parser):
             self._json_name_value_pair_()
         self._closure(block2)
         self.name_last_node('rest')
+        with self._optional():
+            self._token(',')
         self._token('}')
         self.ast._define(
             ['first', 'rest'],
@@ -261,6 +263,8 @@ class depfileParser(Parser):
             self._token(',')
             self._input_spec_()
         self._closure(block0)
+        with self._optional():
+            self._token(',')
 
     @tatsumasu()
     def _output_specs_(self):  # noqa
@@ -272,6 +276,8 @@ class depfileParser(Parser):
                     self._token(',')
                     self._json_obj_()
                 self._closure(block0)
+                with self._optional():
+                    self._token(',')
             with self._option():
                 self._token('none')
             self._error('no available options')
@@ -493,7 +499,8 @@ class depfileParser(Parser):
 
     @tatsumasu()
     def _all_declarations_(self):  # noqa
-        self._declarations_()
+        with self._optional():
+            self._declarations_()
         self._check_eof()
 
 

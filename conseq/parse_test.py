@@ -138,6 +138,26 @@ def _parse_exp(text, nonterminal):
         semantics=Semantics())
 
 
+def test_parse_empty():
+    statements = parser.parse_str("""
+    # empty
+    """)
+    assert len(statements) == 0
+
+
+def test_parse_trailing_commas():
+    # make sure we tolerate trailing commas
+    statements = parser.parse_str("""
+    rule a:
+        inputs: x={"a":"b"},
+        outputs: {"out": "b",},
+        run "cmd"
+    """)
+    assert len(statements) == 1
+    assert len(statements[0].inputs) == 1
+    assert len(statements[0].outputs) == 1
+
+
 def test_parse_json():
     value = _parse_exp("""
     {"a": "b", "c": '1'}

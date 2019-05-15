@@ -278,13 +278,16 @@ class Semantics(object):
 
 def parse_str(text, filename=None):
     parser = depfile.depfileParser(parseinfo=False)
-    return parser.parse(
+    statements = parser.parse(
         text,
         "all_declarations",
         filename=filename,
         trace=False,
         nameguard=None,
         semantics=Semantics())
+    if statements is None:
+        return []
+    return statements
 
 
 def parse(filename):

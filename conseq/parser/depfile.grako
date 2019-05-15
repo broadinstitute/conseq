@@ -26,8 +26,8 @@ json_name_value_pair =
     name:quoted_string ":" value:json_value
     ;
 
-json_obj =
-    "{" first:json_name_value_pair rest:{ "," json_name_value_pair }* "}"
+# allow "," delimited, but also accept an extra trailing ","
+json_obj = "{" first:json_name_value_pair rest:{ "," json_name_value_pair }* [ "," ] "}"
     ;
 
 # artifact queries
@@ -35,8 +35,8 @@ query_variable = identifier
     ;
 
 query_name_value_pair =
-    quoted_string ":" ( json_value | query_variable ) |
-    quoted_string "~" quoted_string
+    quoted_string ":" ( json_value | query_variable )
+    | quoted_string "~" quoted_string
     ;
 
 pattern_based_query_obj = "{" query_name_value_pair { "," query_name_value_pair }* "}"
@@ -49,14 +49,21 @@ query_obj = pattern_based_query_obj
     | fileref_query_obj
     ;
 
-input_spec_each = identifier "=" query_obj ;
-input_spec_all = identifier "=" "all" query_obj ;
-input_spec = input_spec_each | input_spec_all ;
-input_specs = input_spec { "," input_spec }* ;
+input_spec_each = identifier "=" query_obj
+    ;
+input_spec_all = identifier "=" "all" query_obj
+    ;
+input_spec = input_spec_each
+    | input_spec_all
+    ;
+
+# input specs are generally "," delimited, but also accept an extra trailing ","
+input_specs = input_spec { "," input_spec }* [ "," ]
+    ;
 
 # outputs
-output_specs = json_obj { "," json_obj } |
-    "none"
+output_specs = json_obj { "," json_obj } [ "," ]
+    | "none"
     ;
 
 run_statement =
@@ -112,4 +119,4 @@ conditional = "if" condition:conditional_expr ":" true_body:declarations elif_cl
 
 declarations = { rule | include_stmt | var_stmt | add_if_missing | exec_profile | remember_executed | conditional | eval_statement }+ ;
 
-all_declarations = declarations $ ;
+all_declarations = [ declarations ] $ ;
