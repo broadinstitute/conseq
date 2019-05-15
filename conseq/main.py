@@ -228,7 +228,7 @@ def add_history_cmd(sub):
 
 def add_localize(sub):
     def localize_cmd(args):
-        commands.localize_cmd(args.dir, args.space, _parse_query(args.predicates), args.file, args.config)
+        commands.localize_cmd(args.dir, args.space, _parse_query(args.predicates), args.file, _get_config_file_path(args))
 
     parser = sub.add_parser("localize", help="Download any artifacts with $file_url references")
     parser.add_argument('--space')
