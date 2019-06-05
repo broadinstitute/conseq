@@ -351,6 +351,10 @@ class depfileParser(Parser):
                     self._token(':')
                     self._identifier_()
                 with self._option():
+                    self._token('watch-regex')
+                    self._token(':')
+                    self._quoted_string_()
+                with self._option():
                     self._token('publish')
                     self._token(':')
                     self._quoted_string_()

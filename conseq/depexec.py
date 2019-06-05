@@ -133,7 +133,8 @@ def execute(name: str, resolver: Resolver, jinja2_env: Environment, id: int, job
                                            prologue,
                                            desc_name,
                                            resolver_state,
-                                           rule.resources)
+                                           rule.resources, 
+                                           rule.watch_regex)
         elif outputs != None:
             log.warning("No commands to run for rule %s", name)
             # fast path when there's no need to spawn an external process.  (mostly used by tests)

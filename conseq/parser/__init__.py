@@ -31,6 +31,7 @@ class Rule:
         self.outputs = None
         self.run_stmts = []
         self.executor = "default"
+        self.watch_regex = None
         assert self.name != "" and self.name != " "
         self.resources = {"slots": 1}
         self.output_expectations = []
@@ -56,7 +57,10 @@ class Rule:
                         break
                 else:
                     assert isinstance(predicate, ExpectKeyIs)
-                    if predicate.key not in key_values or key_values[predicate.key] != predicate.value:
+                    if (
+                        predicate.key not in key_values
+                        or key_values[predicate.key] != predicate.value
+                    ):
                         matched_all = False
                         break
                 unchecked_keys.remove(predicate.key)
@@ -78,7 +82,7 @@ def unquote(s):
     if s[:3] == "'''":
         assert s[-3:] == "'''"
         return s[3:-3]
-    if s[0] == "\"":
+    if s[0] == '"':
         assert s[-1] == '"'
         return s[1:-1]
     if s[0] == "'":
@@ -196,6 +200,8 @@ class Semantics(object):
                 for i in range(0, len(rest), 2):
                     options.append(rest[1])
                 rule.options = options
+            elif statement[0] == "watch-regex":
+                rule.watch_regex = re.compile(statement[2])
             elif statement[0] == "executor":
                 rule.executor = statement[2]
             elif statement[0] == "resources":
@@ -260,7 +266,9 @@ class Semantics(object):
         if ast.else_clause != None:
             else_clause = ast.else_clause[2]
         for i in reversed(range(len(ast.elif_clauses))):
-            else_clause = IfStatement(ast.elif_clauses[i][1], ast.elif_clauses[i][3], else_clause)
+            else_clause = IfStatement(
+                ast.elif_clauses[i][1], ast.elif_clauses[i][3], else_clause
+            )
         return IfStatement(ast.condition, ast.true_body, else_clause)
 
     def eval_statement(self, ast):
@@ -284,7 +292,8 @@ def parse_str(text, filename=None):
         filename=filename,
         trace=False,
         nameguard=None,
-        semantics=Semantics())
+        semantics=Semantics(),
+    )
     if statements is None:
         return []
     return statements

@@ -151,11 +151,33 @@ def validate_result_json_obj(obj, types):
 
     return None
 
+def grep_logs(log_grep_state : Dict[str, int], output_files : List[str], pattern):
+    # make a copy of the state, where state is a map of filename -> last read offset
+    next_log_grep_state = dict(log_grep_state)
+
+    filtered_lines = []
+    for output_file in output_files:
+        if not os.path.exists(output_file):
+            continue
+
+        # read file from where we left off
+        offset = next_log_grep_state.get(output_file, 0)
+        with open(output_file, "rb") as fd:
+            fd.seek(offset)
+            buffer = fd.read()
+            new_offset = fd.tell()
+        next_log_grep_state[output_file] = new_offset
+        lines = buffer.decode("utf8").split("\n")
+
+        # drop all lines except those that match pattern
+        filtered_lines.extend([line for line in lines if pattern.match(line) is not None])
+
+    return next_log_grep_state, filtered_lines
 
 class Execution:
     def __init__(self, transform: str, id: int, job_dir: str, proc: Union[PidProcStub, Popen],
                  outputs: List[Dict[str, Union[str, Dict[str, str]]]],
-                 captured_stdouts: Union[List[str], Tuple[str, str]], desc_name: str) -> None:
+                 captured_stdouts: Union[List[str], Tuple[str, str]], desc_name: str, watch_regex = None) -> None:
         self.transform = transform
         self.id = id
         self.proc = proc
@@ -163,6 +185,8 @@ class Execution:
         self.outputs = outputs
         self.captured_stdouts = captured_stdouts
         self.desc_name = desc_name
+        self.log_grep_state = {}
+        self.watch_regex = watch_regex
         assert job_dir != None
 
     def _resolve_filenames(self, props):
@@ -205,6 +229,12 @@ class Execution:
         return failure, outputs
 
     def _get_completion(self) -> Union[Tuple[None, List[Any]], Tuple[None, None]]:
+        if self.watch_regex is not None:
+            self.log_grep_state, log_output = grep_logs(self.log_grep_state, self.captured_stdouts, self.watch_regex)
+
+            for line in log_output:
+                print("{} output: {}".format(self.job_dir, line))
+
         retcode = self.proc.poll()
 
         if retcode == None:
@@ -369,7 +399,7 @@ def write_wrapper_script(wrapper_path: str, job_dir: Optional[str], prologue: st
 
 
 def local_exec_script(name: str, id: int, job_dir: str, run_stmts: List[str], outputs: List[Any], capture_output: bool,
-                      prologue: str, desc_name: str) -> Execution:
+                      prologue: str, desc_name: str, watch_regex) -> Execution:
     stdout_path = os.path.join(job_dir, "stdout.txt")
     stderr_path = os.path.join(job_dir, "stderr.txt")
     # results_path = os.path.join(job_dir, "results.json")
@@ -399,7 +429,7 @@ def local_exec_script(name: str, id: int, job_dir: str, run_stmts: List[str], ou
     with open(os.path.join(job_dir, "description.txt"), "w") as fd:
         fd.write(desc_name)
 
-    return Execution(name, id, job_dir, proc, outputs, captured_stdouts, desc_name)
+    return Execution(name, id, job_dir, proc, outputs, captured_stdouts, desc_name, watch_regex=watch_regex)
 
 
 def fetch_urls(obj: Dict[str, Union[str, Dict[str, str]]], resolver: Resolver) -> Dict[str, str]:
@@ -558,12 +588,12 @@ class LocalExecClient:
 
     def exec_script(self, name: str, id: int, job_dir: str, run_stmts: List[str], outputs: List[Any],
                     capture_output: bool, prologue: str, desc_name: str, resolve_state: NullResolveState,
-                    resources: Dict[str, int]) -> Execution:
+                    resources: Dict[str, int], watch_regex) -> Execution:
 
         for src, dst in resolve_state.files_to_copy:
             shutil.copy(src, os.path.join(job_dir, dst))
 
-        return local_exec_script(name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name)
+        return local_exec_script(name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name, watch_regex)
 
 
 SgeState = collections.namedtuple("SgeState", ["update_timestamp", "status", "refresh_id"])
@@ -780,7 +810,8 @@ class AsyncDelegateExecClient:
         return result, RemoteResolveState(files_to_upload_and_download, files_to_download)
 
     def exec_script(self, name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name, resolver_state,
-                    resources):
+                    resources, watch_regex):
+        assert watch_regex is None, "delegated executors cannot watch logs, watch-regex not allowed"
         mem_in_mb = resources.get("mem", 1000)
         assert job_dir[:len(self.local_workdir)] == self.local_workdir
         rel_job_dir = job_dir[len(self.local_workdir) + 1:]
@@ -909,7 +940,9 @@ class DelegateExecClient:
     def exec_script(self, name: str, id: int, job_dir: str, run_stmts: List[str],
                     outputs: List[Dict[str, Union[str, Dict[str, str]]]], capture_output: bool, prologue: str,
                     desc_name: str, resolver_state: RemoteResolveState,
-                    resources: Dict[str, int]) -> DelegateExecution:
+                    resources: Dict[str, int], watch_regex) -> DelegateExecution:
+        assert watch_regex is None, "delegated executors cannot watch logs, watch-regex not allowed"
+
         mem_in_mb = resources.get("mem", 1000)
         assert job_dir[:len(self.local_workdir)] == self.local_workdir
         rel_job_dir = job_dir[len(self.local_workdir) + 1:]
