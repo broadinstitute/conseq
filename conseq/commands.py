@@ -246,13 +246,18 @@ def debugrun(state_dir, depfile, target, override_vars, config_file):
 
 
 def gc(state_dir):
+    if not os.path.exists(state_dir):
+        log.warning("Nothing to do (No such directory: {})".format(state_dir))
+        return
+
     db_path = os.path.join(state_dir, "db.sqlite3")
+
     j = dep.open_job_db(db_path)
 
     def rm_job_dir(job_id):
         job_dir = get_job_dir(state_dir, job_id)
         if os.path.exists(job_dir):
-            log.warn("Removing unused directory: %s", job_dir)
+            log.warning("Removing unused directory: %s", job_dir)
             shutil.rmtree(job_dir)
 
     j.gc(rm_job_dir)
