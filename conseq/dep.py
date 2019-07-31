@@ -1306,9 +1306,6 @@ class Jobs:
                 print("all job:", job)
 
 
-# for job in self.log.get_pending():
-#                print("pending job:", job)
-
 def open_state_dir(state_dir):
     return open_job_db(os.path.join(state_dir, "db.sqlite3"))
 
@@ -1317,6 +1314,8 @@ def open_job_db(filename: str) -> Jobs:
     needs_create = not os.path.exists(filename)
 
     db = sqlite3.connect(filename)
+    # enforce FK constraints
+    db.execute("PRAGMA foreign_keys = ON")
 
     stmts = []
     if needs_create:
