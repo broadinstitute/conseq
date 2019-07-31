@@ -639,6 +639,12 @@ class ExecutionLog:
 
     def delete(self, id):
         c = get_cursor()
+        c.execute("SELECT id FROM rule_execution where execution_id = ?", [id])
+        rule_execution_ids = [x[0] for x in c.fetchall()]
+        for rule_execution_id in rule_execution_ids:
+            c.execute("DELETE FROM rule_execution_input where rule_execution_id = ?", [rule_execution_id])
+            c.execute("DELETE FROM rule_execution WHERE id = ?", [rule_execution_id])
+
         c.execute("DELETE FROM execution_input WHERE execution_id = ?", [id])
         c.execute("DELETE FROM execution_output WHERE execution_id = ?", [id])
         c.execute("DELETE FROM execution WHERE id = ?", [id])
@@ -1323,11 +1329,12 @@ def open_job_db(filename: str) -> Jobs:
             "create table rule (id INTEGER PRIMARY KEY AUTOINCREMENT, transform STRING, key STRING)",
             "create table cur_obj (id INTEGER PRIMARY KEY AUTOINCREMENT, space string, timestamp STRING, json STRING)",
             "create table past_obj (id INTEGER PRIMARY KEY AUTOINCREMENT, space string, timestamp STRING, json STRING)",
-            "create table rule_execution (id INTEGER PRIMARY KEY AUTOINCREMENT, space STRING, transform STRING, key STRING, state STRING, execution_id integer)",
-            "create table rule_execution_input (id INTEGER PRIMARY KEY AUTOINCREMENT, rule_execution_id INTEGER, name STRING, obj_id INTEGER, is_list INTEGER)",
             "create table execution (id INTEGER PRIMARY KEY AUTOINCREMENT, transform STRING, status STRING, execution_xref STRING, job_dir STRING)",
             "create table execution_input (id INTEGER PRIMARY KEY AUTOINCREMENT, execution_id INTEGER, name STRING, obj_id INTEGER, is_list INTEGER)",
             "create table execution_output (id INTEGER PRIMARY KEY AUTOINCREMENT, execution_id INTEGER, obj_id INTEGER)",
+            "create table rule_execution (id INTEGER PRIMARY KEY AUTOINCREMENT, space STRING, transform STRING, key STRING, state STRING, execution_id integer,"
+            "FOREIGN KEY(execution_id) REFERENCES execution(id))",
+            "create table rule_execution_input (id INTEGER PRIMARY KEY AUTOINCREMENT, rule_execution_id INTEGER, name STRING, obj_id INTEGER, is_list INTEGER)",
             "create table settings (schema_version integer, default_space string)",
             "insert into settings (schema_version, default_space) values (1, 'public')",
             "create table space (name string, parent string)",
