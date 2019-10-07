@@ -6,7 +6,7 @@ import time
 from sqlite3 import Connection
 from typing import Dict, Union
 
-import paramiko
+
 from boto.s3.connection import S3Connection
 from six.moves.urllib import request
 from six.moves.urllib.parse import urlparse
