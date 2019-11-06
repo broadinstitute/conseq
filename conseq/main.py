@@ -112,6 +112,14 @@ def _parse_define(txt):
     return (m.group(1), m.group(2))
 
 
+def _parse_label(label):
+    m = re.match("([^=]+)=(.*)", label)
+    if m is None:
+        raise argparse.ArgumentTypeError(
+            "Expected variable assigment of the form \"var=value\" but got: {}".format(repr(label)))
+    return (m.group(1), {"$value": m.group(2)})
+
+
 def add_run(sub):
     parser = sub.add_parser("run", help="Run rules in the specified file")
     parser.add_argument('file', metavar="FILE", help="the input file to parse")
@@ -127,7 +135,8 @@ def add_run(sub):
                         help="Don't run anything (useful when re-attaching existing jobs but you don't want to run downstream steps)")
     parser.add_argument("--remove-unknown-artifacts", action="store_const", const=True, help="If set, don't ask before deleting artifacts which are not in the current conseq file.")
     parser.add_argument("--keep-unknown-artifacts", action="store_const", const=False, dest='remove_unknown_artifacts', help="If set, don't ask before deleting artifacts which are not in the current conseq file.")
-    parser.add_argument('targets', nargs='*')
+    parser.add_argument("--addlabel", action="append", help="If set, will add the given property to each artifact generated from this run (Value must be of the form \"X=Y\")")
+    parser.add_argument('targets', nargs='*', help="limit running to these rules and downstream rules")
 
     def run_cmd(args):
         concurrent = args.concurrent
@@ -138,12 +147,20 @@ def add_run(sub):
         if args.overrides is not None:
             overrides.update(args.overrides)
 
+        print(args)
+        if args.addlabel:
+            print("addlabel", args.addlabel)
+            properties_to_add = [_parse_label(x) for x in args.addlabel]
+        else:
+            properties_to_add = []
+
         return depexec.main(args.file, args.dir, args.targets, overrides, concurrent, not args.nocapture, args.confirm,
                             _get_config_file_path(args),
                             maxfail=args.maxfail, maxstart=args.maxstart,
                             force_no_targets=args.nothing,
                             reattach_existing=args.reattach_existing,
-                            remove_unknown_artifacts=args.remove_unknown_artifacts)
+                            remove_unknown_artifacts=args.remove_unknown_artifacts,
+                            properties_to_add=properties_to_add)
 
     parser.set_defaults(func=run_cmd)
 

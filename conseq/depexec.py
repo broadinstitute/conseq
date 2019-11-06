@@ -133,7 +133,7 @@ def execute(name: str, resolver: Resolver, jinja2_env: Environment, id: int, job
                                            prologue,
                                            desc_name,
                                            resolver_state,
-                                           rule.resources, 
+                                           rule.resources,
                                            rule.watch_regex)
         elif outputs != None:
             log.warning("No commands to run for rule %s", name)
@@ -284,9 +284,23 @@ class Lazy:
         return self.result
 
 
+Artifact = Dict[str, Union[str, Dict[str, str]]]
+
+
+def _amend_outputs(artifacts: List[Artifact], properties_to_add: List[Tuple[str, str]]) -> List[Artifact]:
+    def _amend(artifact: Artifact):
+        new_artifact = dict(artifact)
+        for name, value in properties_to_add:
+            new_artifact[name] = value
+        return new_artifact
+
+    return [_amend(x) for x in artifacts]
+
+
 def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, rules: Rules, state_dir: str,
               executing: List[DelegateExecution], capture_output: bool, req_confirm: bool, maxfail: int,
-              maxstart: None) -> None:
+              maxstart: None,
+              properties_to_add=[]) -> None:
     from conseq.exec_client import create_publish_exec_client
     _client_for_publishing = Lazy(lambda: create_publish_exec_client(rules.get_vars()))
 
@@ -440,31 +454,30 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
                 start_count += 1
 
             # now poll the jobs which are running and look for which have completed
-            new_completions = False
             for i, e in reversed(list(enumerate(executing))):
                 failure, completion = e.get_completion()
 
-                if failure == None and completion == None:
+                if failure is None and completion is None:
                     continue
 
                 del executing[i]
                 timestamp = datetime.datetime.now().isoformat()
 
-                if failure != None:
+                if failure is not None:
                     job_id = j.record_completed(timestamp, e.id, dep.STATUS_FAILED, {})
                     failure_count += 1
                     debug_log.log_completed(job_id, dep.STATUS_FAILED, completion)
                     timings.log(job_id, "fail")
-                elif completion != None:
-                    job_id = j.record_completed(timestamp, e.id, dep.STATUS_COMPLETED, completion)
+                elif completion is not None:
+                    amended_outputs = _amend_outputs(completion, properties_to_add)
+
+                    job_id = j.record_completed(timestamp, e.id, dep.STATUS_COMPLETED, amended_outputs)
                     debug_log.log_completed(job_id, dep.STATUS_COMPLETED, completion)
                     success_count += 1
-                    new_completions = True
                     timings.log(job_id, "complete")
 
                 did_useful_work = True
 
-            # if dep.DISABLE_AUTO_CREATE_RULES and new_completions:
             j.refresh_rules()
 
             if not did_useful_work:
@@ -693,9 +706,13 @@ def process_add_if_missing(j: Jobs, jinja2_env: Environment, objs: List[Dict[str
 
 def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars: Dict[Any, Any],
          max_concurrent_executions: int, capture_output: bool, req_confirm: bool,
-         config_file: str, maxfail: int = 1, maxstart: None = None, force_no_targets: bool = False,
+         config_file: str,
+         maxfail: int = 1,
+         maxstart: None = None,
+         force_no_targets: bool = False,
          reattach_existing=None,
-         remove_unknown_artifacts=None) -> int:
+         remove_unknown_artifacts=None,
+         properties_to_add=[]) -> int:
     if not os.path.exists(state_dir):
         os.makedirs(state_dir)
 
@@ -789,7 +806,7 @@ def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars:
 
     try:
         ret = main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, capture_output, req_confirm, maxfail,
-                        maxstart)
+                        maxstart, properties_to_add=properties_to_add)
     except FatalUserError as e:
         print("Error: {}".format(e))
         return -1
