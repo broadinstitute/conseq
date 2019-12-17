@@ -1282,7 +1282,9 @@ class Jobs:
 
             to_drop = []
             for e in self.log.get_all():
-                if not has_reachable_output(e):
+                # if the e has an output that is associated with an artifact, don't delete it
+                # also, if e has no outputs, don't bother to clean it
+                if not has_reachable_output(e) and len(e.outputs) > 0:
                     to_drop.append(e.id)
 
             for e_id in to_drop:

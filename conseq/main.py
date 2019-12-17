@@ -84,6 +84,15 @@ def add_gc(sub):
     parser.set_defaults(func=gc)
 
 
+def add_lsexec(sub):
+    parser = sub.add_parser("lsexec", help="List executions")
+
+    def lsexec(args):
+        commands.lsexec(args.dir)
+
+    parser.set_defaults(func=lsexec)
+
+
 def add_rm(sub):
     parser = sub.add_parser("rm", help="Remove objects that satisfy given query")
     parser.add_argument('--space')
@@ -279,6 +288,7 @@ def main(args=None):
     sub = parser.add_subparsers()
     add_list(sub)
     add_ls(sub)
+    add_lsexec(sub)
     add_gc(sub)
     add_rm(sub)
     add_run(sub)

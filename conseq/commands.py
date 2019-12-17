@@ -70,6 +70,26 @@ def localize_cmd(state_dir, space, predicates, depfile, config_file):
                 log.info("resolved %s to %s", url, r)
 
 
+def _print_execution(execution):
+    print("Executed {} (id={}, state={}, dir={}):".format(repr(execution.transform), execution.id, execution.status, execution.job_dir))
+    if len(execution.inputs) > 0:
+        print("  inputs:")
+        for name, artifact in execution.inputs:
+            print("   {} = {}".format(name, artifact))
+    if len(execution.outputs) > 0:
+        print("  outputs:")
+        for artifact in execution.outputs:
+            print("   {}".format(artifact))
+    print()
+
+
+def lsexec(state_dir):
+    j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
+    executions = j.get_all_executions()
+    for execution in executions:
+        _print_execution(execution)
+
+
 def ls_cmd(state_dir, space, predicates, groupby, columns):
     from tabulate import tabulate
     from conseq import depquery
