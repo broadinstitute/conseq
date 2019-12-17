@@ -313,7 +313,7 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
     prev_msg = None
     abort = False
     success_count = 0
-    failure_count = 0
+    failures = []
     start_count = 0
     job_ids_to_ignore = set()
     skip_remaining = False
@@ -334,11 +334,11 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
             if interrupted:
                 break
 
-            if failure_count >= maxfail:
+            if len(failures) >= maxfail:
                 we_should_stop = True
                 if len(executing) > 0:
                     # if we have other tasks which are still running, ask user if we really want to abort now.
-                    we_should_stop, maxfail = ui.user_says_we_should_stop(failure_count, executing)
+                    we_should_stop, maxfail = ui.user_says_we_should_stop(len(failures), executing)
                 if we_should_stop:
                     break
 
@@ -465,7 +465,7 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
 
                 if failure is not None:
                     job_id = j.record_completed(timestamp, e.id, dep.STATUS_FAILED, {})
-                    failure_count += 1
+                    failures.append((e.transform, e.job_dir))
                     debug_log.log_completed(job_id, dep.STATUS_FAILED, completion)
                     timings.log(job_id, "fail")
                 elif completion is not None:
@@ -487,9 +487,9 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
         ui.ask_user_to_cancel(j, executing)
 
     log.info("%d jobs successfully executed", success_count)
-    if failure_count > 0:
+    if len(failures) > 0:
         # maybe also show summary of which jobs failed?
-        log.warning("%d jobs failed", failure_count)
+        log.warning("%d jobs failed: %s", len(failures), ", ".join(["{} ({})".format(job_dir, transform) for transform, job_dir in failures]))
         return -1
 
     return 0
