@@ -77,6 +77,19 @@ def get_cursor() -> Cursor:
 PropsType = Dict[str, Union[str, Dict[str, str]]]
 
 
+def _delete_execution_by_id(c, execution_id):
+    c.execute("SELECT id FROM rule_execution WHERE execution_id = ?", (execution_id,))
+    rule_execution_ids = [x[0] for x in c.fetchall()]
+
+    for rule_execution_id in rule_execution_ids:
+        c.execute("DELETE FROM rule_execution_input WHERE rule_execution_id = ?", (rule_execution_id,))
+        c.execute("DELETE FROM rule_execution WHERE id = ?", (rule_execution_id,))
+
+    c.execute("DELETE FROM execution_input WHERE execution_id = ?", (execution_id,))
+    c.execute("DELETE FROM execution_output WHERE execution_id = ?", (execution_id,))
+    c.execute("DELETE FROM execution WHERE id = ?", (execution_id,))
+
+
 def split_props_into_key_and_other(props: PropsType) -> Tuple[Dict[str, str], Dict[str, str]]:
     key_props = {}
     other_props = {}
@@ -191,9 +204,14 @@ class ObjSet:
         return Obj(id, space, timestamp, json.loads(_json))
 
     def remove(self, id):
+        signal_remove_obj(id)
         obj = self.get(id)
         c = get_cursor()
         c.execute("DELETE FROM cur_obj WHERE id = ?", [id])
+        c.execute("SELECT execution_id FROM execution_output WHERE obj_id = ? UNION SELECT execution_id FROM execution_input WHERE obj_id = ?", (id, id))
+        execution_ids = set([x[0] for x in c.fetchall()])
+        for execution_id in execution_ids:
+            _delete_execution_by_id(c, execution_id)
         for remove_listener in self.remove_listeners:
             remove_listener(obj)
 
@@ -249,6 +267,7 @@ class ObjSet:
         c.execute("INSERT INTO cur_obj (space, timestamp, json) VALUES (?, ?, ?)",
                   [space, timestamp, json.dumps(props)])
         id = c.lastrowid
+        signal_add_obj(id, space, props)
 
         obj = Obj(id, space, timestamp, props)
 
@@ -392,6 +411,23 @@ class RuleSet:
     def find_by_name(self, transform):
         return self._find_rule_execs("transform = ?", (transform,))
 
+    def get_rule_specifications(self):
+        c = get_cursor()
+        query = "select transform, definition from rule_snapshot"
+        c.execute(query, [])
+        return list(c.fetchall())
+
+    def write_rule_specifications(self, rule_specs):
+        # existing_specs = self.get_rule_specifications()
+        c = get_cursor()
+        c.execute("delete from rule_snapshot", [])
+
+        for transform, spec in rule_specs.items():
+            # if transform in existing_specs:
+            #     c.execute("delete from rule_snapshot where transform = ?", [transform])
+            #
+            c.execute("insert into rule_snapshot (transform, definition) values (?, ?)", [transform, spec])
+
     def find_by_input(self, input_id):
         "given an input id, find all of the rule executions ids which refer to that input"
         rules = self._find_rule_execs(
@@ -400,33 +436,33 @@ class RuleSet:
         rule_ids = [x.id for x in rules]
         return rule_ids
 
-    def find_downstream_from_rule(self, rule_id):
-        n_obj_ids = set()
-        n_rule_ids = set()
-
-        obj_ids = self.get_outputs(rule_id)
-
-        n_obj_ids.update(obj_ids)
-        for obj_id in obj_ids:
-            _rule_ids, _obj_ids = self.find_downstream_from_obj(obj_id)
-            n_obj_ids.update(_obj_ids)
-            n_rule_ids.update(_rule_ids)
-
-        return n_rule_ids, n_obj_ids
-
-    def find_downstream_from_obj(self, input_id):
-        "given an object, return all the rule_execution ids and object that executed downstream of that object"
-        n_obj_ids = set()
-        n_rule_ids = set()
-
-        rule_ids = self.find_by_input(input_id)
-        n_rule_ids.update(rule_ids)
-        for rule_id in rule_ids:
-            _rule_ids, _obj_ids = self.find_downstream_from_rule_exec(rule_id)
-            n_obj_ids.update(_obj_ids)
-            n_rule_ids.update(_rule_ids)
-
-        return n_rule_ids, n_obj_ids
+    # def find_downstream_from_rule(self, rule_id):
+    #     n_obj_ids = set()
+    #     n_rule_ids = set()
+    #
+    #     obj_ids = self.get_outputs(rule_id)
+    #
+    #     n_obj_ids.update(obj_ids)
+    #     for obj_id in obj_ids:
+    #         _rule_ids, _obj_ids = self.find_downstream_from_obj(obj_id)
+    #         n_obj_ids.update(_obj_ids)
+    #         n_rule_ids.update(_rule_ids)
+    #
+    #     return n_rule_ids, n_obj_ids
+    #
+    # def find_downstream_from_obj(self, input_id):
+    #     "given an object, return all the rule_execution ids and object that executed downstream of that object"
+    #     n_obj_ids = set()
+    #     n_rule_ids = set()
+    #
+    #     rule_ids = self.find_by_input(input_id)
+    #     n_rule_ids.update(rule_ids)
+    #     for rule_id in rule_ids:
+    #         _rule_ids, _obj_ids = self.find_downstream_from_rule_exec(rule_id)
+    #         n_obj_ids.update(_obj_ids)
+    #         n_rule_ids.update(_rule_ids)
+    #
+    #     return n_rule_ids, n_obj_ids
 
     def get(self, id):
         rules = self._find_rule_execs("id = ?", (id,))
@@ -483,10 +519,28 @@ class RuleSet:
 
         return rule_execution_id
 
-    def remove_rule(self, rule_id):
+    def assert_db_sane(self):
         c = get_cursor()
+        c.execute("SELECT * from execution e where not exists (select 1 from rule_execution re where re.execution_id = e.id)")
+        assert len(c.fetchall()) == 0
+        c.execute("SELECT * from rule_execution_input rei where not exists (select 1 from rule_execution re where re.id = rei.rule_execution_id)")
+        assert len(c.fetchall()) == 0
+        c.execute("SELECT * from rule_execution_input rei where not exists (select 1 from cur_obj o where o.id = rei.obj_id)")
+        assert len(c.fetchall()) == 0
+        c.execute("SELECT * from execution_output eo where not exists (select 1 from execution e where e.id = eo.execution_id)")
+        assert len(c.fetchall()) == 0
+        c.execute("SELECT * from execution_output eo where not exists (select 1 from cur_obj o where o.id = eo.obj_id)")
+        assert len(c.fetchall()) == 0
+
+    def remove_rule(self, rule_id):
+        signal_remove_rule(rule_id)
+        c = get_cursor()
+        c.execute("SELECT execution_id from rule_execution WHERE id = ?", (rule_id,))
+        execution_ids = [x[0] for x in c.fetchall()]
         c.execute("DELETE FROM rule_execution_input WHERE rule_execution_id = ?", (rule_id,))
         c.execute("DELETE FROM rule_execution WHERE id = ?", (rule_id,))
+        for execution_id in execution_ids:
+            _delete_execution_by_id(c, execution_id)
 
         for l in self.remove_rule_listeners:
             l(rule_id)
@@ -626,6 +680,11 @@ class ExecutionLog:
             pending.append(Execution(exec_id, tuple(in_name_values), outputs, transform, status, exec_xref, job_dir))
         return pending
 
+    def get_downstream_object_ids(self, transform):
+        c = get_cursor()
+        c.execute("SELECT eo.obj_id FROM execution e join execution_output eo on eo.execution_id = e.id WHERE transform = ?", [transform])
+        return [x[0] for x in c.fetchall()]
+
     def get(self, id) -> Execution:
         c = get_cursor()
         c.execute("SELECT id, transform, status, execution_xref, job_dir FROM execution WHERE id = ?", [id])
@@ -638,6 +697,7 @@ class ExecutionLog:
             raise Exception("Multiple rows fetched for id {}".format(id))
 
     def delete(self, id):
+        signal_remove_rule_execution(id)
         c = get_cursor()
         c.execute("SELECT id FROM rule_execution where execution_id = ?", [id])
         rule_execution_ids = [x[0] for x in c.fetchall()]
@@ -645,9 +705,7 @@ class ExecutionLog:
             c.execute("DELETE FROM rule_execution_input where rule_execution_id = ?", [rule_execution_id])
             c.execute("DELETE FROM rule_execution WHERE id = ?", [rule_execution_id])
 
-        c.execute("DELETE FROM execution_input WHERE execution_id = ?", [id])
-        c.execute("DELETE FROM execution_output WHERE execution_id = ?", [id])
-        c.execute("DELETE FROM execution WHERE id = ?", [id])
+        _delete_execution_by_id(c, id)
 
     def get_by_output(self, obj):
         # probably won't really make a copy, just want to get the corresponding id
@@ -1110,6 +1168,14 @@ class Jobs:
                 return existing.id
             return None
 
+    def get_rule_specifications(self):
+        with transaction(self.db):
+            return self.rule_set.get_rule_specifications()
+
+    def write_rule_specifications(self, rule_specs):
+        with transaction(self.db):
+            self.rule_set.write_rule_specifications(rule_specs)
+
     def add_obj(self, space, timestamp, obj_props, overwrite=True):
         """
         Used to record the creation of an object with a given timestamp
@@ -1264,6 +1330,15 @@ class Jobs:
             self.rule_set.remove_unsuccessful()
             # self.log.mark_incomplete()
 
+    def find_rule_output_ids(self, transform):
+        with transaction(self.db):
+            self.rule_set.assert_db_sane()
+            return [self.objects.get(id) for id in self.log.get_downstream_object_ids(transform)]
+
+        #         n_rule_ids, n_obj_ids = self.rule_set.find_downstream_from_rule(r.id)
+        #         all_object_ids.update(n_obj_ids)
+        # return all_object_ids
+
     def invalidate_rule_execution(self, transform):
         with transaction(self.db):
             for r in self.rule_set.find_by_name(transform):
@@ -1338,9 +1413,10 @@ def open_job_db(filename: str) -> Jobs:
             "FOREIGN KEY(execution_id) REFERENCES execution(id))",
             "create table rule_execution_input (id INTEGER PRIMARY KEY AUTOINCREMENT, rule_execution_id INTEGER, name STRING, obj_id INTEGER, is_list INTEGER)",
             "create table settings (schema_version integer, default_space string)",
-            "insert into settings (schema_version, default_space) values (1, 'public')",
+            "insert into settings (schema_version, default_space) values (2, 'public')",
             "create table space (name string, parent string)",
-            "insert into space (name) values ('public')"
+            "insert into space (name) values ('public')",
+            "create table rule_snapshot (transform STRING PRIMARY KEY, definition string)"
         ])
     else:
         c = db.cursor()
@@ -1358,8 +1434,30 @@ def open_job_db(filename: str) -> Jobs:
                 "create table space (name string, parent string)",
                 "insert into space (name) values ('public')"
             ])
+        if schema_version < 2:
+            stmts.extend([
+                "update settings set schema_version = 2",
+                "create table rule_snapshot (transform string, definition string)"
+            ])
 
     for stmt in stmts:
         db.execute(stmt)
 
     return Jobs(db)
+
+
+# These methods exist solely to monkey patch in hooks to record events in the context of tests
+def signal_remove_obj(id):
+    pass
+
+
+def signal_remove_rule(id):
+    pass
+
+
+def signal_remove_rule_execution(id):
+    pass
+
+
+def signal_add_obj(id, space, props):
+    pass

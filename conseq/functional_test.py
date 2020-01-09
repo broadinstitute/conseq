@@ -17,7 +17,7 @@ def run_conseq(tmpdir, config, targets=[], assert_clean=True):
     if assert_clean:
         assert not os.path.exists(db_path)
 
-    depexec.main(filename, state_dir, targets, {}, 10, False, False, None)
+    depexec.main(filename, state_dir, targets, {}, 10, False, False, None, remove_unknown_artifacts=False)
     j = dep.open_job_db(db_path)
     return j
 
@@ -150,8 +150,8 @@ def test_gc(tmpdir):
     print("objs", j.find_objs("public", {}))
     assert len(j.find_objs("public", {})) == 1
 
-    # make sure we have both executions
-    assert len(j.get_all_executions()) == 2
+    # # make sure we have both executions
+    # assert len(j.get_all_executions()) == 2
 
     j.gc(lambda x: None)
     # after GC there's only one
@@ -206,6 +206,7 @@ def test_rerun_same_result(tmpdir):
         inputs: in={"type": "thing"}
         outputs: {"type": "otherthing"}
     """)
+    print("3 j2.get_all_executions()", [x.transform for x in j.get_all_executions()])
     assert len(j.get_all_executions()) == 2
 
     j2 = run_conseq(tmpdir, """
@@ -217,6 +218,7 @@ def test_rerun_same_result(tmpdir):
     """, assert_clean=False)
 
     # only "c" should run this time.
+    print("2 j2.get_all_executions()", [x.transform for x in j2.get_all_executions()])
     assert len(j2.get_all_executions()) == 3
 
     j2 = run_conseq(tmpdir, """
@@ -227,8 +229,11 @@ def test_rerun_same_result(tmpdir):
         outputs: {"type": "otherthing"}
     """, assert_clean=False)
 
-    # now that the has has changed, d and b should execute
-    assert len(j2.get_all_executions()) == 5
+    # now that the hash has changed, d and b should execute
+    transforms = [x.transform for x in j2.get_all_executions()]
+    transforms.sort()
+    print("3 j2.get_all_executions()", transforms)
+    assert transforms == ["b", "d"]
     # however, we should only have one instance of "thing"
     assert len(j.find_objs("public", dict(type="thing"))) == 1
 

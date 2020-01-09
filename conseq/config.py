@@ -16,6 +16,12 @@ class Rules:
         self.remember_executed = []
         self.jinja2_env = create_jinja2_env()
 
+    def get_rule_specifications(self):
+        result = {}
+        for transform, instance in self.rule_by_name.items():
+            result[transform] = instance.to_json()
+        return result
+
     def add_remember_executed(self, value):
         self.remember_executed.append(value)
 

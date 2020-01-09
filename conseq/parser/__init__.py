@@ -1,3 +1,4 @@
+import json
 import re
 from collections import namedtuple
 
@@ -24,6 +25,14 @@ EvalStatement = namedtuple("EvalStatement", "body")
 FileRef = namedtuple("FileRef", "filename")
 
 
+class CustomRuleEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, re._pattern_type):
+            return {"re_pattern": obj.pattern}
+        # Let the base class default method raise the TypeError
+        return json.JSONEncoder.default(self, obj)
+
+
 class Rule:
     def __init__(self, name):
         self.name = name
@@ -37,6 +46,14 @@ class Rule:
         self.output_expectations = []
         self.publish_location = None
         self.uses_files = []
+
+    def to_json(self):
+        return json.dumps({
+            "name": self.name,
+            "inputs": self.inputs,
+            "outputs": self.outputs,
+            "run_stmts": self.run_stmts
+        }, sort_keys=True, cls=CustomRuleEncoder)
 
     @property
     def is_publish_rule(self):
@@ -58,8 +75,8 @@ class Rule:
                 else:
                     assert isinstance(predicate, ExpectKeyIs)
                     if (
-                        predicate.key not in key_values
-                        or key_values[predicate.key] != predicate.value
+                            predicate.key not in key_values
+                            or key_values[predicate.key] != predicate.value
                     ):
                         matched_all = False
                         break

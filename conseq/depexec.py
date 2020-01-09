@@ -679,9 +679,35 @@ def remove_obj_and_children(j, root_obj_ids, dry_run):
         j.remove_objects([obj.id for obj in all_objs])
 
 
-def process_add_if_missing(j: Jobs, jinja2_env: Environment, objs: List[Dict[str, Union[str, Dict[str, str]]]],
-                           vars: Dict[str, Union[str, Dict[str, str]]], force: bool = None) -> None:
+def reconcile_rule_specifications(j: Jobs, latest_rules: Dict[str, str]):
+    "returns artifact ids of objs which were invalidated due to stale rules (and therefore should be deleted from db)"
+
+    existing_rules = dict(j.get_rule_specifications())
+    # any rules for which we no longer have a definition are stale
+    stale_rules = set(existing_rules.keys()).difference(latest_rules.keys())
+    print("Identified stale rules: {}".format(stale_rules))
+
+    # now for those rules which we existed before and we have a definition now, if their definition is different, it's stale
+    for transform in latest_rules.keys():
+        if transform not in existing_rules:
+            continue
+
+        if existing_rules[transform] != latest_rules[transform]:
+            stale_rules.add(transform)
+
+    stale_object_ids = set()
+    for transform in stale_rules:
+        obj_ids = j.find_rule_output_ids(transform)
+        stale_object_ids.update(obj_ids)
+
+    return stale_object_ids
+
+
+def reconcile_db(j: Jobs, jinja2_env: Environment, rule_specifications: Dict[str, str],
+                 objs: List[Dict[str, Union[str, Dict[str, str]]]],
+                 vars: Dict[str, Union[str, Dict[str, str]]], force: bool = None) -> None:
     # rewrite the objects, expanding templates and marking this as one which was manually added from the config file
+    update_rule_specs_in_db = True
     processed = []
     for obj in objs:
         obj = dict(obj)
@@ -690,18 +716,26 @@ def process_add_if_missing(j: Jobs, jinja2_env: Environment, objs: List[Dict[str
         processed.append(expand_dict(jinja2_env, obj, vars))
 
     new_objs, missing_objs = reconcile_add_if_missing(j, processed)
+    invalidated_objs = reconcile_rule_specifications(j, rule_specifications)
+
+    missing_objs = set(invalidated_objs).union(missing_objs)
 
     if len(missing_objs) > 0:
-        print("The following objects were not specified in the conseq file:")
+        print("The following objects were not specified in the conseq file or were the result of a rule which has changed:")
         for obj in missing_objs:
             print("   {}".format(obj))
         if force is None:
             force = ui.ask_y_n("do you wish to remove them?")
         if force:
             remove_obj_and_children(j, [o.id for o in missing_objs], False)
+        else:
+            update_rule_specs_in_db = False
 
     for obj in new_objs:
         add_artifact_if_missing(j, obj)
+
+    if update_rule_specs_in_db:
+        j.write_rule_specifications(rule_specifications)
 
 
 def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars: Dict[Any, Any],
@@ -713,6 +747,8 @@ def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars:
          reattach_existing=None,
          remove_unknown_artifacts=None,
          properties_to_add=[]) -> int:
+    assert max_concurrent_executions > 0
+
     if not os.path.exists(state_dir):
         os.makedirs(state_dir)
 
@@ -726,6 +762,7 @@ def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars:
         forced_rule_names = []
 
     rules = read_rules(state_dir, depfile, config_file, initial_config={})
+    rule_specifications = rules.get_rule_specifications()
     jinja2_env = rules.jinja2_env
 
     if rules.get_client("default", must=False) is None:
@@ -736,8 +773,8 @@ def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars:
     for var, value in override_vars.items():
         rules.set_var(var, value)
 
-    # handle the "add-if-missing" objects
-    process_add_if_missing(j, jinja2_env, rules.objs, rules.vars, force=remove_unknown_artifacts)
+    # handle the "add-if-missing" objects and changes to rules
+    reconcile_db(j, jinja2_env, rule_specifications, rules.objs, rules.vars, force=remove_unknown_artifacts)
 
     # handle the remember-executed statements
     with j.transaction():
