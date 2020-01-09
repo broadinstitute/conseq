@@ -154,14 +154,15 @@ def _eval_stmts(rules, statements, filename, hashcache, eval_context=None):
             inputs = []
             for input in dec.inputs:
                 if isinstance(input.json_obj, parser.FileRef):
-                    sha256 = hashcache.sha256(input.json_obj.filename)
+                    filename = os.path.abspath(_render_template(input.json_obj.filename))
+                    sha256 = hashcache.sha256(filename)
                     new_json_obj = {"type": "$fileref",
-                                    "name": input.json_obj.filename,
-                                    "filename": {"$filename": input.json_obj.filename},
+                                    "name": filename,
+                                    "filename": {"$filename": filename},
                                     "sha256": sha256}
                     rules.add_if_missing(new_json_obj)
                     new_query_obj = {"type": "$fileref",
-                                     "name": input.json_obj.filename}
+                                     "name": filename}
                     input = parser.InputSpec(input.variable, new_query_obj, input.for_all)
                 inputs.append(input)
 
@@ -169,7 +170,8 @@ def _eval_stmts(rules, statements, filename, hashcache, eval_context=None):
             # attempt #2: uses_files. Process these in a similar way.
             for filename in dec.uses_files:
                 # create a $fileref which has the destination field set
-                sha256 = hashcache.sha256(input.json_obj.filename)
+                filename = os.path.abspath(_render_template(filename))
+                sha256 = hashcache.sha256(filename)
                 new_json_obj = {"type": "$fileref",
                                 "name": filename,
                                 "sha256": sha256,

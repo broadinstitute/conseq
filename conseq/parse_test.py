@@ -1,3 +1,5 @@
+import os
+
 import jinja2
 
 from conseq import depexec
@@ -229,9 +231,11 @@ def test_generic_eval():
     assert rules.vars["a"] == "1"
 
 
+from conseq.config import Rules, _eval_stmts
+from conseq.hashcache import HashCache
+
+
 def test_file_ref(tmpdir):
-    from conseq.config import Rules, _eval_stmts
-    from conseq.hashcache import HashCache
     rules = Rules()
     # rules.set_var(name, value)
 
@@ -249,3 +253,40 @@ def test_file_ref(tmpdir):
     a.inputs[0].json_obj["name"] == str(localfile)
     a.inputs[0].json_obj["type"] == "fileref"
     assert len(rules.objs) == 1
+
+
+def test_file_refs_with_vars(tmpdir):
+    # make sure we can use variables work in filenames
+    rules = Rules()
+    rules.set_var("VARIABLE", str(tmpdir))
+    rules.set_var("NUMBER", 2)
+
+    localfile = tmpdir.join("xyz-2")
+    localfile.write("x")
+
+    statements = parser.parse_str("""
+    rule a:
+        inputs: x=filename("{{config.VARIABLE}}/xyz-{{config.NUMBER}}")
+    """)
+    _eval_stmts(rules, statements, "none", HashCache(str(tmpdir.join("hashcache"))))
+    a = rules.get_rule("a")
+    assert a is not None
+    print(a.inputs)
+    a.inputs[0].json_obj["name"] == str(localfile)
+
+
+def test_relative_file_paths(tmpdir):
+    sample_rel_path = os.path.relpath(__file__, os.path.abspath("."))
+    assert sample_rel_path[0] != "/"
+
+    statements = parser.parse_str("""
+    rule a:
+        inputs: x=filename("{}")
+    """.format(sample_rel_path))
+
+    rules = Rules()
+    _eval_stmts(rules, statements, "none", HashCache(str(tmpdir.join("hashcache"))))
+    a = rules.get_rule("a")
+    assert a is not None
+    print(a.inputs)
+    a.inputs[0].json_obj["name"] == os.path.abspath(sample_rel_path)
