@@ -126,6 +126,9 @@ def _eval_stmts(rules, statements, filename, hashcache, eval_context=None):
         __render_template[0] = lambda x: render_template(rules.jinja2_env, x, rules.vars)
         eval_context = dict(rules=rules, config=config)
 
+    def rt(x):
+        return render_template(rules.jinja2_env, x, rules.vars)
+
     for dec in statements:
         if isinstance(dec, parser.RememberExecutedStmt):
             rules.add_remember_executed(dec)
@@ -154,7 +157,7 @@ def _eval_stmts(rules, statements, filename, hashcache, eval_context=None):
             inputs = []
             for input in dec.inputs:
                 if isinstance(input.json_obj, parser.FileRef):
-                    filename = os.path.abspath(_render_template(input.json_obj.filename))
+                    filename = os.path.abspath(rt(input.json_obj.filename))
                     sha256 = hashcache.sha256(filename)
                     new_json_obj = {"type": "$fileref",
                                     "name": filename,
@@ -170,7 +173,7 @@ def _eval_stmts(rules, statements, filename, hashcache, eval_context=None):
             # attempt #2: uses_files. Process these in a similar way.
             for filename in dec.uses_files:
                 # create a $fileref which has the destination field set
-                filename = os.path.abspath(_render_template(filename))
+                filename = os.path.abspath(rt(filename))
                 sha256 = hashcache.sha256(filename)
                 new_json_obj = {"type": "$fileref",
                                 "name": filename,
