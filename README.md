@@ -46,7 +46,7 @@ Individual scripts should only define new lowercase variables.  Variables in upp
 are used by conseq for configuration and are defined under special variables below. 
 
 The variable **SCRIPT_DIR** is automatically defined at startup and often is used in conseq rules. This variable contains
- the absolute path to the directory containing the conseq script being run. 
+ the absolute path to the directory containing the conseq script being run. (Note, if conseq files are included from different directories, this variable doesn't change. It always points to the directory of the top level conseq file) 
  
 This is frequently needed as each task runs in its own unique directory. This variable is useful
  for generating relative paths to files which are not artifacts. You can prefix your path with this 
