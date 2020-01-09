@@ -204,13 +204,41 @@ rule simple:
 
 Alternatively, if the artifacts can't be determined ahead of time, we can have one of our run statements write a "results.json" file with the artifacts in it. Conseq will attempt to part that file and read the artifacts if the task completes successfully.
 
+### References to files
+
+If a rule uses external scripts it's good to list those as "filerefs" in the
+inputs. This has two advantages:
+ 1. If the job runs on a remote node, the file will automatically be copied to the remote node for you.
+ 2. If the script changes, it will automaticly detect this rule needs to be rerun.
+
+Example:
+
+Imagine we have a bash script named "printdate.sh". We can write a rule
+which will run that script by creating a conseq file named
+`fileref-example.conseq` containing:
+
+```
+rule runscript:
+    inputs: script=fileref('printdate.sh')
+    outputs: {"type": "runscript-done"}
+    run "bash {{inputs.script.filename}}"    
+```
+
+now `conseq run fileref-example.conseq` will execute printdate.sh. If we try
+to run `conseq run fileref-example.conseq` a second time, nothing will
+happen because it knows it's already run that rule.
+
+However, if we change `printdate.sh` and run `conseq run fileref-example.conseq`
+once more, it will get rid of the existing artifact from that rule and
+re-run the "runscript" rule.
+
 <a name="conseq-command-line-reference"/>
 
 # Command Line Reference
 
 You can get help on all conseq commands by running `conseq --help`
 
-## List artefacts
+## List artifacts
 
 List all artifacts
 
