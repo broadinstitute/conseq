@@ -240,7 +240,7 @@ def test_file_ref(tmpdir):
 
     statements = parser.parse_str("""
     rule a:
-        inputs: x=fileref("{}")
+        inputs: x=filename("{}")
     """.format(localfile))
     _eval_stmts(rules, statements, "none", HashCache(str(tmpdir.join("hashcache"))))
     a = rules.get_rule("a")

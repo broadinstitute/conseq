@@ -206,8 +206,8 @@ Alternatively, if the artifacts can't be determined ahead of time, we can have o
 
 ### References to files
 
-If a rule uses external scripts it's good to list those as "filerefs" in the
-inputs. This has two advantages:
+If a rule uses external scripts it's good to list those via the "filename"
+annotation in the inputs. This has two advantages:
  1. If the job runs on a remote node, the file will automatically be copied to the remote node for you.
  2. If the script changes, it will automaticly detect this rule needs to be rerun.
 
@@ -219,7 +219,7 @@ which will run that script by creating a conseq file named
 
 ```
 rule runscript:
-    inputs: script=fileref('printdate.sh')
+    inputs: script=filename('printdate.sh')
     outputs: {"type": "runscript-done"}
     run "bash {{inputs.script.filename}}"    
 ```

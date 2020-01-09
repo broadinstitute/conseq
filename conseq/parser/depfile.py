@@ -214,7 +214,13 @@ class depfileParser(Parser):
 
     @tatsumasu()
     def _fileref_query_obj_(self):  # noqa
-        self._token('fileref')
+        with self._group():
+            with self._choice():
+                with self._option():
+                    self._token('fileref')
+                with self._option():
+                    self._token('filename')
+                self._error('no available options')
         self._token('(')
         self._quoted_string_()
         self.name_last_node('filename')
