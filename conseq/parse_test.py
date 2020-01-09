@@ -182,7 +182,7 @@ def test_parse_if():
       let a='2'
     endif
     """, "declarations")
-    _eval_stmts(rules, statements, "none")
+    _eval_stmts(rules, statements, "none", None)
     assert rules.vars["a"] == "2"
 
     # else:
@@ -201,7 +201,7 @@ def test_eval_if():
       let a='2'
     endif
     """)
-    _eval_stmts(rules, statements, "none")
+    _eval_stmts(rules, statements, "none", None)
     assert rules.vars["a"] == "2"
 
 
@@ -225,23 +225,27 @@ def test_generic_eval():
       let a='2'
     endif
     """)
-    _eval_stmts(rules, statements, "none")
+    _eval_stmts(rules, statements, "none", None)
     assert rules.vars["a"] == "1"
 
 
-def test_file_ref():
+def test_file_ref(tmpdir):
     from conseq.config import Rules, _eval_stmts
+    from conseq.hashcache import HashCache
     rules = Rules()
     # rules.set_var(name, value)
 
+    localfile = tmpdir.join("xyz")
+    localfile.write("x")
+
     statements = parser.parse_str("""
     rule a:
-        inputs: x=fileref("xyz")
-    """)
-    _eval_stmts(rules, statements, "none")
+        inputs: x=fileref("{}")
+    """.format(localfile))
+    _eval_stmts(rules, statements, "none", HashCache(str(tmpdir.join("hashcache"))))
     a = rules.get_rule("a")
     assert a is not None
     print(a.inputs)
-    a.inputs[0].json_obj["name"] == "xyz"
+    a.inputs[0].json_obj["name"] == str(localfile)
     a.inputs[0].json_obj["type"] == "fileref"
     assert len(rules.objs) == 1
