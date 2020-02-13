@@ -11,6 +11,33 @@ More on the motivation and details seen this slide deck: https://docs.google.com
 or this poster https://drive.google.com/file/d/1FF8ESVbo_LXs4BBfEGAgkbq77ABXyzKu/view?usp=sharing
 
 <a name="conseq-config-reference"/>
+
+## Installation
+
+### Clone and install the repo
+- clone the repo
+- run `python setup.py develop`
+- verify successful install by running `conseq --help`
+
+### Obtain AWS keys
+From https://console.aws.amazon.com/, in the toolbar under your_name@your_project, select security credentials. Generate access keys under "Access keys for CLI, SDK, & API access".
+
+### Configure conseq
+Create a `.conseq` file in your home directory as follows.
+
+```
+let AWS_ACCESS_KEY_ID = "<insert access key id>"
+let AWS_SECRET_ACCESS_KEY = "<insert access key>"
+```
+
+If running the depmap portal pipeline, the following may also be required
+
+```
+let TAIGA_URL = "http://taiga.broadinstitute.org"
+let DSUB_PATH = "<path to dsub installation>"
+```
+
+
 # Conseq Config Reference
 
 A conseq config file consists of "add-if-missing" artifact definitions, variables and rules.  
