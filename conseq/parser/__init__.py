@@ -27,7 +27,12 @@ FileRef = namedtuple("FileRef", "filename")
 
 class CustomRuleEncoder(json.JSONEncoder):
     def default(self, obj):
-        if isinstance(obj, re._pattern_type):
+        try:
+            pattern = re._pattern_type
+        except AttributeError:
+            # Python 3.7
+            pattern = re.Pattern
+        if isinstance(obj, pattern):
             return {"re_pattern": obj.pattern}
         # Let the base class default method raise the TypeError
         return json.JSONEncoder.default(self, obj)
