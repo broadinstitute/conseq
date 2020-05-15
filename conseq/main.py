@@ -262,6 +262,17 @@ def add_localize(sub):
     parser.add_argument('predicates', nargs='+', help="predicates to match in form 'key=value' ")
     parser.set_defaults(func=localize_cmd)
 
+def add_downstream(sub):
+    parser = sub.add_parser("downstream", help="List downstream artifacts")
+    parser.add_argument('predicates', nargs='*', help="predicates to match in form 'key=value' ")
+    parser.add_argument('--space')
+
+    def downstream(args):
+        key_value_pairs = [_parse_predicate_expr(p) for p in args.predicates]
+
+        commands.downstream_cmd(args.dir, args.space, key_value_pairs)
+
+    parser.set_defaults(func=downstream)
 
 def conseq_command_entry():
     # disable stdout/stderr buffering to work better when run non-interactively
@@ -301,6 +312,7 @@ def main(args=None):
     add_localize(sub)
     add_version(sub)
     add_export(sub)
+    add_downstream(sub)
 
     args = parser.parse_args(args)
     if args.verbose:

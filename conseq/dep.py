@@ -1204,9 +1204,13 @@ class Jobs:
                     self.log.delete(x.id)
             self.objects.remove(obj_id)
 
-    def find_all_reachable_downstream_objs(self, obj_id):
+    def get_all_rules(self):
         with transaction(self.db):
-            obj_ids = self.log.find_all_reachable_downstream_objs(obj_id)
+            return self.get_all()
+
+    def find_all_reachable_downstream_objs(self, obj_ids):
+        with transaction(self.db):
+            obj_ids = self.log.find_all_reachable_downstream_objs(obj_ids)
             result = [self.objects.get(obj_id, must=False) for obj_id in obj_ids]
             return [x for x in result if x is not None]
 

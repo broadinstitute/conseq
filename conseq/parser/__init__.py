@@ -24,10 +24,15 @@ IfStatement = namedtuple("IfStatement", "condition when_true when_false")
 EvalStatement = namedtuple("EvalStatement", "body")
 FileRef = namedtuple("FileRef", "filename")
 
+if hasattr(re, '_pattern_type'):
+    re_pattern_type = re._pattern_type
+else:
+    # python 3.7
+    re_pattern_type = re.Pattern
 
 class CustomRuleEncoder(json.JSONEncoder):
     def default(self, obj):
-        if isinstance(obj, re._pattern_type):
+        if isinstance(obj, re_pattern_type):
             return {"re_pattern": obj.pattern}
         # Let the base class default method raise the TypeError
         return json.JSONEncoder.default(self, obj)

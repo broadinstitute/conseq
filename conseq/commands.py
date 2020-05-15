@@ -90,6 +90,40 @@ def lsexec(state_dir):
         _print_execution(execution)
 
 
+def downstream_cmd(state_dir, space, predicates):
+
+    j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
+    if space is None:
+        space = j.get_current_space()
+
+    from collections import defaultdict
+    rules_by_obj_id = defaultdict(lambda: set())
+
+    all_rules = j.get_all_executions()
+    for rule in all_rules:
+        if rule.status == "canceled":
+            continue
+
+        for name, value in rule.inputs:
+            if not isinstance(value, tuple):
+                value = [value]
+            for v in value:
+                rules_by_obj_id[v.id].add(rule.transform)
+
+    #print(rules_by_obj_id)
+
+    subset = j.find_objs(space, dict(predicates))
+    for o in subset:
+        print(f"artifact {o} has the following downstream:")
+        downstreams = j.find_all_reachable_downstream_objs([o.id])
+        for downstream in downstreams:
+            rules = rules_by_obj_id[downstream.id]
+            downstream_id = downstream.id
+            print(f"  {downstream_id}: rules {rules}")
+        print("")
+    # subset is list of key -> value pairs
+
+
 def ls_cmd(state_dir, space, predicates, groupby, columns):
     from tabulate import tabulate
     from conseq import depquery
