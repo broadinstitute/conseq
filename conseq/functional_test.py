@@ -197,6 +197,17 @@ def test_regexp_queries(tmpdir):
     """)
     assert len(j.get_all_executions()) == 2
 
+def test_regexp_query_expands_var(tmpdir):
+    j = run_conseq(tmpdir, """
+    let samplevar="thing"
+    rule a:
+        outputs: {"type": "thing"}
+    rule b:
+        inputs: in={"type" ~ "{{config.samplevar}}"}
+        outputs: {"type": "otherthing"}
+    """)
+    assert len(j.get_all_executions()) == 2
+
 
 def test_rerun_same_result(tmpdir):
     j = run_conseq(tmpdir, """

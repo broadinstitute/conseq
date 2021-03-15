@@ -24,6 +24,8 @@ from conseq.parser import Rule, RunStmt
 from conseq.template import MissingTemplateVar, render_template
 from conseq.util import indent_str
 from conseq.xref import Resolver
+import re
+from .parser import RegEx
 
 log = logging.getLogger(__name__)
 
@@ -513,6 +515,20 @@ def expand_run(jinja2_env: Environment, command: str, script_body: None, config:
     return (command, script_body)
 
 
+def expand_dict_item(jinja2_env: Environment, k : str,  v: Union[str, Dict[str, str]],
+                config: Dict[str, Union[str, Dict[str, str]]], **kwargs) -> Tuple[str, Union[str, Dict[str, str]]]:
+    assert isinstance(config, dict)
+
+    k = render_template(jinja2_env, k, config, **kwargs)
+    # QueryVariables get introduced via expand input spec
+    if not isinstance(v, QueryVariable):
+        if isinstance(v, dict):
+            v = expand_dict(jinja2_env, v, config, **kwargs)
+        else:
+            v = render_template(jinja2_env, v, config, **kwargs)
+    return k, v
+
+
 def expand_dict(jinja2_env: Environment, d: Dict[str, Union[str, Dict[str, str]]],
                 config: Dict[str, Union[str, Dict[str, str]]], **kwargs) -> Dict[str, Union[str, Dict[str, str]]]:
     assert isinstance(d, dict)
@@ -521,13 +537,7 @@ def expand_dict(jinja2_env: Environment, d: Dict[str, Union[str, Dict[str, str]]
     new_output = {}
     for k, v in d.items():
         #        print("expanding k", k)
-        k = render_template(jinja2_env, k, config, **kwargs)
-        # QueryVariables get introduced via expand input spec
-        if not isinstance(v, QueryVariable):
-            if isinstance(v, dict):
-                v = expand_dict(jinja2_env, v, config, **kwargs)
-            else:
-                v = render_template(jinja2_env, v, config, **kwargs)
+        k, v = expand_dict_item(jinja2_env, k, v, config, **kwargs)
         new_output[k] = v
 
     return new_output
@@ -540,18 +550,22 @@ def expand_outputs(jinja2_env: Environment, output: Dict[str, Union[str, Dict[st
 
 def expand_input_spec(jinja2_env: Environment, spec: Dict[str, str], config: Dict[str, Union[str, Dict[str, str]]]) -> \
         Dict[str, str]:
-    spec = dict(spec)
-    regexps = {}
+
+    expanded = {}
+
     for k, v in spec.items():
         # if the value is a regexp, don't expand
-        if not isinstance(v, six.string_types):
-            regexps[k] = v
-    for k in regexps.keys():
-        del spec[k]
+        if isinstance(v, six.string_types):
+            k, v = expand_dict_item(jinja2_env, k, v, config)
+        elif isinstance(v, QueryVariable):
+            k = render_template(jinja2_env, k, config)
+        else:
+            assert isinstance(v, RegEx)
+            k = render_template(jinja2_env, k, config)
+            v = re.compile(render_template(jinja2_env, v.expression, config))
 
-    expanded = expand_dict(jinja2_env, spec, config)
-    for k, v in regexps.items():
         expanded[k] = v
+
     return expanded
 
 
