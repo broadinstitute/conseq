@@ -242,7 +242,10 @@ def export_cmd(state_dir, depfile, config_file, dest_s3_path):
         return "\n".join([lines[0]] + [indent_str + x for x in lines[1:]])
 
     for obj in objs:
-        props = process_filenames(obj)
+        try:
+            props = process_filenames(obj)
+        except Exception as e:
+            raise Exception("Could not process filenames in artifact: {}".format(repr(obj))) from e
         out.write("add-if-missing {}\n\n".format(reindent(json.dumps(props), 3)))
 
     def get_key_props(obj):
