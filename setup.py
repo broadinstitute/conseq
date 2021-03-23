@@ -16,7 +16,8 @@ setup(name='conseq',
       description='ConSeq dependency tracker',
       author='Philip Montgomery',
       author_email='pmontgom@broadinstitute.org',
-      packages=['conseq', 'conseq.parser'],
+      packages=['conseq', 'conseq.parser', 'conseq.templates'],
+      package_data={"":["*.html"]},
       entry_points={'console_scripts': ['conseq=conseq.main:conseq_command_entry']
                     },
       #      install_requires=[ "colorlog", "grako", "jinja2", "paramiko", "requests", "boto", "tabulate", "six" ]
