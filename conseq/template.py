@@ -83,3 +83,9 @@ def create_jinja2_env():
 
     jinja2_env.filters['quoted'] = _quote_str
     return jinja2_env
+
+def create_template_jinja2_env():
+    return jinja2.Environment(
+    loader=jinja2.PackageLoader('conseq', 'templates'),
+    autoescape=jinja2.select_autoescape(['html', 'xml'])
+)

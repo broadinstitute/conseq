@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% from 'macros.html' import obj_summary, execution_inputs %}
+
+{% block content %}
+   <h1>Artifact #{{ obj.id }}</h1>
+
+    {% if execution %}
+        <p>
+            Generated from executing <a href="exec_{{execution.id}}.html">{{ execution.transform }} (#{{ execution.id }})</a> with the following inputs:
+        </p>
+        {{ execution_inputs(execution) }}
+    {% else %}
+        <h1>Created from add-if-missing statement</h1>
+    {% endif %}
+
+    <p>Artifact #{{ obj.id }}'s properties:
+    <table>
+        <thead>
+        <tr>
+            <th>Property</th>
+            <th>Value</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for prop, value in obj.props.items() %}
+            <tr>
+                <td>{{ prop }}</td>
+                <td>{{ value }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </p>
+
+    <p>Downstream executions</p>
+    <ul>
+    {% for e in downstream_executions %}
+        <li> <a href="exec_{{ e.id }}.html">{{e.transform }} #{{ e.id }}</a> </li>
+    {% endfor %}
+    </ul>
+{% endblock %}
+
+
+

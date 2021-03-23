@@ -224,6 +224,13 @@ def add_dot(sub):
     parser.set_defaults(func=dot)
 
 
+def add_report(sub):
+    def report(args):
+        commands.generate_report_cmd(args.dir, args.dest)
+    parser = sub.add_parser("report", help="Generate HTML report describing the contents of the state directory")
+    parser.add_argument("dest", help="the directory to write the html files to")
+    parser.set_defaults(func=report)
+
 def add_export(sub):
     def export(args):
         commands.export_cmd(args.dir, args.file, args.config, args.dest)
@@ -312,6 +319,7 @@ def main(args=None):
     add_localize(sub)
     add_version(sub)
     add_export(sub)
+    add_report(sub)
     add_downstream(sub)
 
     args = parser.parse_args(args)

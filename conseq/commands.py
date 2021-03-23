@@ -201,6 +201,152 @@ def list_cmd(state_dir):
     j.dump()
 
 
+def generate_report_cmd(state_dir, dest_dir):
+    from .template import create_template_jinja2_env
+    if not os.path.exists(dest_dir):
+        os.makedirs(dest_dir)
+
+    jinja2_env = create_template_jinja2_env()
+
+    def prop_summary(obj):
+        result = []
+        for name, value in obj.props.items():
+            if len(value) > 20:
+                value = value[:5]+"..."
+            result.append((name, value))
+        return sorted(result)
+
+    jinja2_env.filters.update({"prop_summary": prop_summary,
+        'is_tuple': lambda x: isinstance(x, tuple)})
+    j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
+
+    objs = j.find_objs(DEFAULT_SPACE, {})
+    executions = j.get_all_executions()
+    execution_by_input = collections.defaultdict(lambda: [])
+    execution_by_output = {}
+    for execution in executions:
+        for name, input in execution.inputs:
+            if not isinstance(input, tuple):
+                inputs=[input]
+            else:
+                inputs = input
+            for input in inputs:
+                execution_by_input[input.id].append(execution)
+        for output in execution.outputs:
+            execution_by_output[output.id] = execution
+    # vars = rules.vars
+
+       # self.id = id
+       #  self.transform = transform
+       #  self.inputs = inputs
+       #  self.status = status
+       #  self.outputs = outputs
+       #  self.exec_xref = exec_xref
+       #  self.job_dir = job_dir
+
+    index_template =  jinja2_env.get_template("index.html")
+
+    obj_template = jinja2_env.get_template("artifact.html")
+
+    execution_template = jinja2_env.get_template("execution.html")
+
+    # try:
+    #     rendered = jinja2_env.from_string(text).render(**kwargs)
+    #     return rendered
+    # except jinja2.exceptions.UndefinedError as ex:
+    #     raise MissingTemplateVar(ex.message, kwargs, text)
+
+    # cas_remote = helper.Remote(vars["S3_STAGING_URL"], '.', vars['AWS_ACCESS_KEY_ID'],
+    #                            vars['AWS_SECRET_ACCESS_KEY'])
+    #
+    # def process_value(value):
+    #     if isinstance(value, dict):
+    #         if '$filename' in value:
+    #             url = cas_remote.upload_to_cas(value['$filename'])
+    #             value = {"$file_url": url}
+    #     return value
+    #
+    # def process_filenames(obj: Obj):
+    #     translated = {}
+    #     for key, value in obj.props.items():
+    #         if isinstance(value, list) or isinstance(value, tuple):
+    #             value = [process_value(x) for x in value]
+    #         else:
+    #             value = process_value(value)
+    #         translated[key] = value
+    #
+    #     if "$manually-added" not in translated:
+    #         translated["$manually-added"] = {'$value': 'false'}
+    #
+    #     return translated
+    #
+    # def reindent(s, ident):
+    #     indent_str = " " * ident
+    #     lines = s.split("\n")
+    #
+    #     return "\n".join([lines[0]] + [indent_str + x for x in lines[1:]])
+    #
+    #
+    # def get_key_props(obj):
+    #     props = {}
+    #     for key, value in obj.props.items():
+    #         if isinstance(value, dict) and (("$filename" in value) or ("$file_url" in value) or ("$value" in value)):
+    #             continue
+    #         props[key] = value
+    #     return props
+    #
+    # def value_as_json(value):
+    #     if isinstance(value, tuple):
+    #         return json.dumps([get_key_props(x) for x in value], indent=3)
+    #     else:
+    #         return json.dumps(get_key_props(value), indent=3)
+
+
+    def write_artifact(obj : Obj):
+        fn = f"{dest_dir}/obj_{obj.id}.html"
+        with open(fn , "wt") as fd:
+            execution = execution_by_output.get(obj.id)
+            downstream_executions = execution_by_input[obj.id]
+            fd.write(obj_template.render(obj=obj, execution=execution, downstream_executions=downstream_executions))
+
+    def write_execution(execution):
+        fn = f"{dest_dir}/exec_{execution.id}.html"
+
+        files = []
+        for output_fn in os.listdir(execution.job_dir):
+            files.append((os.path.relpath(os.path.join(execution.job_dir, output_fn), dest_dir), output_fn))
+        with open(fn , "wt") as fd:
+            fd.write(execution_template.render(execution=execution, files=files))
+
+    execs_by_name = collections.defaultdict(lambda: [])
+    objs_by_type = collections.defaultdict(lambda: [])
+    # write a file per object
+    for obj in objs:
+        write_artifact(obj)
+        objs_by_type[obj.props.get("type", "")].append(obj)
+
+    # write a file per execution
+    for execution in executions:
+        write_execution(execution)
+        execs_by_name[execution.transform].append(execution)
+
+        # if execution.status == "complete":
+        # out.write(
+        #     "remember-executed transform : \"{}\"\n".format(execution.transform))
+        # for input in execution.inputs:
+        #     out.write("   input \"{}\" : {}\n".format(
+        #         input[0], reindent(value_as_json(input[1]), 3)))
+        # for output in execution.outputs:
+        #     out.write("   output : {}\n".format(
+        #         reindent(value_as_json(output), 3)))
+        # out.write("\n")
+
+    with open(f"{dest_dir}/index.html", "wt") as fd:
+        sorted_objs_by_type = sorted(objs_by_type.items())
+        sorted_execs_by_name = sorted(execs_by_name.items())
+        fd.write(index_template.render(objs_by_type=sorted_objs_by_type, execs_by_name=sorted_execs_by_name))
+
+
 def export_cmd(state_dir, depfile, config_file, dest_s3_path):
     out = StringIO()
 

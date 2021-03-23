@@ -1,0 +1,36 @@
+{% from 'macros.html' import obj_summary, execution_inputs %}
+
+{% extends "base.html" %}
+{% block content %}
+    {% if execution %}
+        <h1>Execution {{ execution.transform }} #{{ execution.id }}</h1>
+    {% else %}
+        <h1>Created from add-if-missing statement</h1>
+    {% endif %}
+
+    <p>Inputs</p>
+    {{ execution_inputs(execution) }}
+    <p>Outputs</p>
+    {% if execution.outputs %}
+        <ul>
+            {% for output in execution.outputs %}
+                <li>
+                    {{ obj_summary(output) }}
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <i>None</i>
+    {% endif %}
+
+    <p>
+    Files in {{ execution.job_dir }}:
+    <ul>
+        {% for rel_path, name in files: %}
+            <li>
+                <a href="{{ rel_path }}">{{ name }}</a>
+            </li>
+        {% endfor %}
+    </ul>
+    </p>
+{%endblock%}

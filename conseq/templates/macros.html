@@ -1,0 +1,36 @@
+{% macro obj_summary(obj, exclude=[]) -%}
+    <a href="obj_{{obj.id}}.html">#{{ obj.id }}
+    {% for name, value in (obj | prop_summary) %}
+        {% if name not in exclude %}
+            {{ name }}={{ value }}
+        {% endif %}
+    {% endfor %}
+    </a>
+{%- endmacro %}
+
+{% macro execution_inputs(execution) -%}
+    {% if execution.inputs %}
+        <ul>
+            {% for name, input in execution.inputs %}
+                {% if input | is_tuple %}
+                <li>
+                    {{name}}:
+                    <ul>
+                    {% for input_ in input %}
+                        <li>
+                            {{ obj_summary(input_) }}
+                        </li>
+                    {% endfor %}
+                    </ul>
+                </li>
+                {% else %}
+                <li>
+                    {{name}}: {{ obj_summary(input) }}
+                </li>
+                {% endif %}
+            {% endfor %}
+        </ul>
+    {% else %}
+        <i>None</i>
+    {% endif %}
+{%- endmacro %}

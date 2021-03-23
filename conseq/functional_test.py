@@ -308,9 +308,11 @@ def test_commands(tmpdir):
         fd.write(config)
 
     state_dir = str(tmpdir.join("state"))
+    html_dir = str(tmpdir.join("html"))
 
     commands = [
         ["--dir", state_dir, "run", config_file],
+        ["--dir", state_dir, "report", html_dir],
         ["--dir", state_dir, "ls"],
         ["--dir", state_dir, "gc"],
         ["--dir", state_dir, "rm", "type=x"],

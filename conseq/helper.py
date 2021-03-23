@@ -370,7 +370,7 @@ def exec_cmd(args, config):
         for mapping_str in args.download:
             pull_map.append(parse_mapping_str(mapping_str))
 
-    pull(remote, pull_map, ignoreMissing=True, skipExisting=not args.forcedl, stage_dir=args.stage_dir)
+    pull(remoteURL, pull_map, stageDir, forceDownload)(remote, pull_map, ignoreMissing=True, skipExisting=not args.forcedl, stage_dir=args.stage_dir)
 
     exec_command_with_capture(args.command, args.stderr, args.stdout, args.retcode, args.local_dir)
 
