@@ -14,15 +14,28 @@
 {% endfor %}
 
 <h1>Executions by rule name</h1>
-{% for name, executions in execs_by_name %}
-    <h2>Name: {{name}}</h2>
+{% for name, summary in execs_by_name %}
+    <h2>Name: {{name}} (size: {{ summary.disk_usage }} bytes)</h2>
     <ul>
-        {% for execution in executions %}
+        {% for execution in summary.execs %}
             <li>
                 <a href="exec_{{execution.id}}.html">Execution #{{ execution.id }}</a>
             </li>
         {% endfor %}
     </ul>
 {% endfor %}
+
+<h1>Rules by size</h1>
+<table>
+    <thead>
+        <tr><th>Rule</th><th>Size</th></tr>
+    </thead>
+
+    <tbody>
+{% for name, disk_usage in rules_with_size %}
+        <tr><th>{{ name }}</th><th>{{ disk_usage }}</th></tr>
+{% endfor %}
+    </tbody>
+</table>
 
 {%endblock%}

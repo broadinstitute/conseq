@@ -211,8 +211,11 @@ def generate_report_cmd(state_dir, dest_dir):
     def prop_summary(obj):
         result = []
         for name, value in obj.props.items():
-            if len(value) > 20:
-                value = value[:5]+"..."
+            if isinstance(value, dict) and "$value" in value:
+                value = value["$value"]
+            value = str(value)
+            if len(value) > 40:
+                value = value[:5]+"..."+value[-20:]
             result.append((name, value))
         return sorted(result)
 
@@ -250,58 +253,6 @@ def generate_report_cmd(state_dir, dest_dir):
 
     execution_template = jinja2_env.get_template("execution.html")
 
-    # try:
-    #     rendered = jinja2_env.from_string(text).render(**kwargs)
-    #     return rendered
-    # except jinja2.exceptions.UndefinedError as ex:
-    #     raise MissingTemplateVar(ex.message, kwargs, text)
-
-    # cas_remote = helper.Remote(vars["S3_STAGING_URL"], '.', vars['AWS_ACCESS_KEY_ID'],
-    #                            vars['AWS_SECRET_ACCESS_KEY'])
-    #
-    # def process_value(value):
-    #     if isinstance(value, dict):
-    #         if '$filename' in value:
-    #             url = cas_remote.upload_to_cas(value['$filename'])
-    #             value = {"$file_url": url}
-    #     return value
-    #
-    # def process_filenames(obj: Obj):
-    #     translated = {}
-    #     for key, value in obj.props.items():
-    #         if isinstance(value, list) or isinstance(value, tuple):
-    #             value = [process_value(x) for x in value]
-    #         else:
-    #             value = process_value(value)
-    #         translated[key] = value
-    #
-    #     if "$manually-added" not in translated:
-    #         translated["$manually-added"] = {'$value': 'false'}
-    #
-    #     return translated
-    #
-    # def reindent(s, ident):
-    #     indent_str = " " * ident
-    #     lines = s.split("\n")
-    #
-    #     return "\n".join([lines[0]] + [indent_str + x for x in lines[1:]])
-    #
-    #
-    # def get_key_props(obj):
-    #     props = {}
-    #     for key, value in obj.props.items():
-    #         if isinstance(value, dict) and (("$filename" in value) or ("$file_url" in value) or ("$value" in value)):
-    #             continue
-    #         props[key] = value
-    #     return props
-    #
-    # def value_as_json(value):
-    #     if isinstance(value, tuple):
-    #         return json.dumps([get_key_props(x) for x in value], indent=3)
-    #     else:
-    #         return json.dumps(get_key_props(value), indent=3)
-
-
     def write_artifact(obj : Obj):
         fn = f"{dest_dir}/obj_{obj.id}.html"
         with open(fn , "wt") as fd:
@@ -309,16 +260,23 @@ def generate_report_cmd(state_dir, dest_dir):
             downstream_executions = execution_by_input[obj.id]
             fd.write(obj_template.render(obj=obj, execution=execution, downstream_executions=downstream_executions))
 
-    def write_execution(execution):
+    def get_disk_usage(job_dir):
+        size = 0
+        for fn in os.listdir(job_dir):
+            size += os.path.getsize(os.path.join(job_dir, fn))
+        return size
+
+    def write_execution(execution, disk_usage):
         fn = f"{dest_dir}/exec_{execution.id}.html"
 
         files = []
         for output_fn in os.listdir(execution.job_dir):
             files.append((os.path.relpath(os.path.join(execution.job_dir, output_fn), dest_dir), output_fn))
         with open(fn , "wt") as fd:
-            fd.write(execution_template.render(execution=execution, files=files))
+            fd.write(execution_template.render(execution=execution, files=files, disk_usage=disk_usage))
 
-    execs_by_name = collections.defaultdict(lambda: [])
+    ExecSummary = collections.namedtuple("ExecSummary", "execs disk_usage")
+    execs_by_name = collections.defaultdict(lambda: ExecSummary([], 0))
     objs_by_type = collections.defaultdict(lambda: [])
     # write a file per object
     for obj in objs:
@@ -327,24 +285,18 @@ def generate_report_cmd(state_dir, dest_dir):
 
     # write a file per execution
     for execution in executions:
-        write_execution(execution)
-        execs_by_name[execution.transform].append(execution)
+        disk_usage = get_disk_usage(execution.job_dir)
+        write_execution(execution, disk_usage)
+        execs, total_disk_usage = execs_by_name[execution.transform]
+        execs_by_name[execution.transform] = ExecSummary(execs + [execution], total_disk_usage+disk_usage)
 
-        # if execution.status == "complete":
-        # out.write(
-        #     "remember-executed transform : \"{}\"\n".format(execution.transform))
-        # for input in execution.inputs:
-        #     out.write("   input \"{}\" : {}\n".format(
-        #         input[0], reindent(value_as_json(input[1]), 3)))
-        # for output in execution.outputs:
-        #     out.write("   output : {}\n".format(
-        #         reindent(value_as_json(output), 3)))
-        # out.write("\n")
+    rules_with_size = [ (name, summary.disk_usage) for name, summary in execs_by_name.items() ]
+    rules_with_size.sort(key=lambda x: x[1], reverse=True)
 
     with open(f"{dest_dir}/index.html", "wt") as fd:
         sorted_objs_by_type = sorted(objs_by_type.items())
         sorted_execs_by_name = sorted(execs_by_name.items())
-        fd.write(index_template.render(objs_by_type=sorted_objs_by_type, execs_by_name=sorted_execs_by_name))
+        fd.write(index_template.render(objs_by_type=sorted_objs_by_type, execs_by_name=sorted_execs_by_name, rules_with_size=rules_with_size))
 
 
 def export_cmd(state_dir, depfile, config_file, dest_s3_path):

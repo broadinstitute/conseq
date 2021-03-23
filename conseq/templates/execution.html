@@ -24,7 +24,7 @@
     {% endif %}
 
     <p>
-    Files in {{ execution.job_dir }}:
+    Files in {{ execution.job_dir }} (size: {{ disk_usage }} bytes):
     <ul>
         {% for rel_path, name in files: %}
             <li>
