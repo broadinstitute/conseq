@@ -17,7 +17,7 @@ def run_conseq(tmpdir, config, targets=[], assert_clean=True):
     if assert_clean:
         assert not os.path.exists(db_path)
 
-    depexec.main(filename, state_dir, targets, {}, 10, False, False, None, remove_unknown_artifacts=False)
+    depexec.main(filename, state_dir, targets, {}, 10, False, False, None, remove_unknown_artifacts=True)
     j = dep.open_job_db(db_path)
     return j
 
@@ -84,6 +84,9 @@ def test_non_key_values(tmpdir):
     assert len(j.find_objs("public", {})) == 1
 
     j = run_conseq(tmpdir, """
+    rule a:
+        outputs: {"finished": "true", "other": {"$value": "apple"}}
+        run "bash" with "echo test"
     rule b:
         inputs: in={"finished": "true"}
         outputs: {"name": "result", "filename": {"$filename":"foo.txt"}}
@@ -153,7 +156,7 @@ def test_gc(tmpdir):
     # # make sure we have both executions
     # assert len(j.get_all_executions()) == 2
 
-    j.gc(lambda x: None)
+    j.gc()
     # after GC there's only one
     assert len(j.get_all_executions()) == 1
 
@@ -209,45 +212,6 @@ def test_regexp_query_expands_var(tmpdir):
     assert len(j.get_all_executions()) == 2
 
 
-def test_rerun_same_result(tmpdir):
-    j = run_conseq(tmpdir, """
-    rule a:
-        outputs: {"type": "thing", "$hash": "1"}
-    rule b:
-        inputs: in={"type": "thing"}
-        outputs: {"type": "otherthing"}
-    """)
-    print("3 j2.get_all_executions()", [x.transform for x in j.get_all_executions()])
-    assert len(j.get_all_executions()) == 2
-
-    j2 = run_conseq(tmpdir, """
-    rule c:
-        outputs: {"type": "thing", "$hash": "1"}
-    rule b:
-        inputs: in={"type": "thing"}
-        outputs: {"type": "otherthing"}
-    """, assert_clean=False)
-
-    # only "c" should run this time.
-    print("2 j2.get_all_executions()", [x.transform for x in j2.get_all_executions()])
-    assert len(j2.get_all_executions()) == 3
-
-    j2 = run_conseq(tmpdir, """
-    rule d:
-        outputs: {"type": "thing", "$hash": "2"}
-    rule b:
-        inputs: in={"type": "thing"}
-        outputs: {"type": "otherthing"}
-    """, assert_clean=False)
-
-    # now that the hash has changed, d and b should execute
-    transforms = [x.transform for x in j2.get_all_executions()]
-    transforms.sort()
-    print("3 j2.get_all_executions()", transforms)
-    assert transforms == ["b", "d"]
-    # however, we should only have one instance of "thing"
-    assert len(j.find_objs("public", dict(type="thing"))) == 1
-
 
 def test_publish(tmpdir, monkeypatch):
     publish_called = [False]
@@ -293,6 +257,74 @@ def test_publish(tmpdir, monkeypatch):
     """)
 
     assert publish_called[0]
+
+def test_detect_clobber(tmpdir):
+    # if two rules emit the same artifact, the second one should fail. Don't allow a rule to clobber an
+    # existing artifact.
+
+    j = run_conseq(tmpdir, """
+    rule a:
+        outputs: {"type": "thing"}
+    rule b:
+        inputs: in={"type": "thing"}
+        outputs: {"type": "derived-thing"}
+    rule c:
+        inputs: in={"type": "thing"}
+        outputs: {"type": "derived-thing"}
+    """)
+    status_by_rule = {x.transform : x.status for x in j.get_all_executions()}
+    assert status_by_rule == {"a": "completed", "c": "completed", "b": "failed"}
+
+
+def test_gc_with_real_cleanup(tmpdir):
+    # do an end-to-end simulation of multiple re-runs and doing GC
+
+    config = """
+        add-if-missing {"type": "initial", "value": "1"}
+        rule a:
+            outputs: {"type":"a", "value":"y"}
+        rule b:
+            inputs: in={"type":"a"}, in2={"type": "initial"}
+            outputs: {"type": "b", "value":"1"}
+    """
+    config_file = str(tmpdir.join("t.conseq"))
+    with open(config_file, "wt") as fd:
+        fd.write(config)
+
+    state_dir = str(tmpdir.join("state"))
+
+    from conseq.main import main
+
+    # should run two rules, resulting in two directories
+    main(["--dir", state_dir, "run", config_file])
+    assert os.path.exists(os.path.join(state_dir, "r1"))
+    assert os.path.exists(os.path.join(state_dir, "r2"))
+
+    # re-running should do nothing
+    main(["--dir", state_dir, "run", config_file])
+    assert not os.path.exists(os.path.join(state_dir, "r3"))
+
+    # now change the config and re-run, which should result in one additional directory
+    config = """
+        add-if-missing {"type": "initial", "value": "2"}
+        rule a:
+            outputs: {"type":"a", "value":"y"}
+        rule b:
+            inputs: in={"type":"a"}, in2={"type": "initial"}
+            outputs: {"type": "b", "value":"1"}
+    """
+    with open(config_file, "wt") as fd:
+        fd.write(config)
+    main(["--dir", state_dir, "run", "--remove-unknown-artifacts", config_file])
+    assert os.path.exists(os.path.join(state_dir, "r3"))
+    assert not os.path.exists(os.path.join(state_dir, "r4"))
+
+    # running gc should clean up r2 and leave the others
+    main(["--dir", state_dir, "gc"])
+    assert os.path.exists(os.path.join(state_dir, "r1"))
+    assert not os.path.exists(os.path.join(state_dir, "r2"))
+    assert os.path.exists(os.path.join(state_dir, "r3"))
+    assert not os.path.exists(os.path.join(state_dir, "r4"))
 
 
 def test_commands(tmpdir):

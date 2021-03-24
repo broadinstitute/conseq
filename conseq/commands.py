@@ -13,6 +13,7 @@ from conseq.dep import Obj, DEFAULT_SPACE
 from conseq.depexec import convert_input_spec_to_queries, get_job_dir, remove_obj_and_children
 from conseq.parser import ExpectKeyIs
 from conseq.util import indent_str
+import re
 
 log = logging.getLogger(__name__)
 
@@ -237,15 +238,6 @@ def generate_report_cmd(state_dir, dest_dir):
                 execution_by_input[input.id].append(execution)
         for output in execution.outputs:
             execution_by_output[output.id] = execution
-    # vars = rules.vars
-
-       # self.id = id
-       #  self.transform = transform
-       #  self.inputs = inputs
-       #  self.status = status
-       #  self.outputs = outputs
-       #  self.exec_xref = exec_xref
-       #  self.job_dir = job_dir
 
     index_template =  jinja2_env.get_template("index.html")
 
@@ -400,22 +392,32 @@ def debugrun(state_dir, depfile, target, override_vars, config_file):
     log.info("{} matches for entire rule".format(len(applications)))
 
 
-def gc(state_dir):
-    if not os.path.exists(state_dir):
-        log.warning("Nothing to do (No such directory: {})".format(state_dir))
-        return
 
+def gc(state_dir):
     db_path = os.path.join(state_dir, "db.sqlite3")
+
+    if not os.path.exists(state_dir) or not os.path.exists(db_path):
+        log.warning("Nothing to do (No such directory: {} or missing db.sqlite3 file)".format(state_dir))
+        return
 
     j = dep.open_job_db(db_path)
 
-    def rm_job_dir(job_id):
-        job_dir = get_job_dir(state_dir, job_id)
-        if os.path.exists(job_dir):
-            log.warning("Removing unused directory: %s", job_dir)
-            shutil.rmtree(job_dir)
+    all_job_dirs = [ os.path.join(state_dir, fn)  for fn in os.listdir(state_dir) if re.match("r[0-9]+", fn)]
+    job_dirs_in_use = set([e.job_dir for e in j.get_all_executions()])
 
-    j.gc(rm_job_dir)
+    # make sure the jobdirs are a subset of all the job dirs we've found
+    assert job_dirs_in_use.issubset(all_job_dirs)
+
+    for job_dir in all_job_dirs:
+        if job_dir in job_dirs_in_use:
+            continue
+
+        # one more final check because we're about to blow away a directory
+        assert job_dir.startswith(state_dir)
+        log.warning("Removing unused directory: %s", job_dir)
+        shutil.rmtree(job_dir)
+
+    j.gc()
 
 
 def _rules_to_dot(rules):

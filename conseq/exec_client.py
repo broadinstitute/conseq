@@ -95,9 +95,11 @@ class FailedExecutionStub:
 
 
 class SuccessfulExecutionStub:
-    def __init__(self, id, outputs):
+    def __init__(self, id, outputs, transform=None, job_dir=None):
         self.id = id
         self.outputs = outputs
+        self.transform = transform
+        self.job_dir = job_dir
 
     def get_external_id(self):
         return "SuccessfulExecutionStub:{}".format(self.id)

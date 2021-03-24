@@ -465,6 +465,14 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
                 del executing[i]
                 timestamp = datetime.datetime.now().isoformat()
 
+                if completion is not None:
+                    for artifact in completion:
+                        if j.get_existing_id(None, artifact) is not None:
+                            j.gc()
+                            failure = f"Rule {e.transform} ({e.job_dir} generated an output which already exists: {artifact}"
+                            log.error(failure)
+                            break
+
                 if failure is not None:
                     job_id = j.record_completed(timestamp, e.id, dep.STATUS_FAILED, {})
                     failures.append((e.transform, e.job_dir))
@@ -631,8 +639,6 @@ def force_execution_of_rules(j, forced_targets):
                 constraint_var = m.group(2)
                 constraint_value = m.group(3)
                 constraint_list.append((constraint_input, constraint_var, constraint_value))
-
-            print(rule_name, constraint_list)
 
             def inputs_has_constraint(inputs, constraint_var, constraint_value, constraint_input):
                 for name, value in inputs:

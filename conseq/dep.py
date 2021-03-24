@@ -1162,6 +1162,9 @@ class Jobs:
                     # log.info("Refreshed the following templates: %s, refresh_count=%s, added=%s", pending_rules_to_evaluate, refresh_count, add_executions)
 
     def get_existing_id(self, space, obj_props):
+        # hardcoding default on space because "space" is no longer fully working. Really should get rid of it.
+        if space is None:
+            space = PUBLIC_SPACE
         with transaction(self.db):
             existing = self.objects.find_by_key(space, obj_props)
             if existing is not None:
@@ -1345,10 +1348,22 @@ class Jobs:
 
     def invalidate_rule_execution(self, transform):
         with transaction(self.db):
-            for r in self.rule_set.find_by_name(transform):
-                self.rule_set.remove_rule(r.id)
+            root_obj_ids = set()
 
-    def gc(self, rm_callback):
+            for r in self.rule_set.find_by_name(transform):
+                # get all the objects that are downstream of this rule execution
+                if r.execution_id is not None:
+                    execution = self.log.get(r.execution_id)
+                    root_obj_ids.update([o.id for o in execution.outputs])
+
+            # now find all downstream objects
+            all_objs = self.find_all_reachable_downstream_objs(root_obj_ids)
+            for obj in all_objs:
+                log.warning("invaliding rule %s, rm object %s", transform, obj)
+                self.remove_objects([obj.id for obj in all_objs])
+
+    def gc(self):
+        """Deletes executions which are not associated with a reachable artifact."""
         with transaction(self.db):
             root_objs = [o.id for o in self.objects]
             obj_ids = self.log.find_all_reachable_objs(root_objs)
@@ -1368,7 +1383,6 @@ class Jobs:
 
             for e_id in to_drop:
                 self.log.delete(e_id)
-                rm_callback(e_id)
 
         return to_drop
 
