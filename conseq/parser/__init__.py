@@ -55,6 +55,9 @@ class Rule:
             "run_stmts": self.run_stmts
         }, sort_keys=True, cls=CustomRuleEncoder)
 
+    def has_for_all_input(self):
+        return any([x.for_all for x in self.inputs])
+
     @property
     def is_publish_rule(self):
         return self.publish_location != None

@@ -140,10 +140,10 @@ def execute(name: str, resolver: Resolver, jinja2_env: Environment, id: int, job
         elif outputs != None:
             log.warning("No commands to run for rule %s", name)
             # fast path when there's no need to spawn an external process.  (mostly used by tests)
-            execution = exec_client.SuccessfulExecutionStub(id, outputs)
+            execution = exec_client.SuccessfulExecutionStub(id, outputs, transform=name)
         else:
             assert rule.is_publish_rule, "No body, nor outputs specified and not a publish rule.  This rule does nothing."
-            execution = exec_client.SuccessfulExecutionStub(id, [])
+            execution = exec_client.SuccessfulExecutionStub(id, [], transform=name)
 
         return execution
 
@@ -466,12 +466,25 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
                 timestamp = datetime.datetime.now().isoformat()
 
                 if completion is not None:
-                    for artifact in completion:
-                        if j.get_existing_id(None, artifact) is not None:
-                            j.gc()
-                            failure = f"Rule {e.transform} ({e.job_dir} generated an output which already exists: {artifact}"
-                            log.error(failure)
-                            break
+                    rule = rules.get_rule( e.transform)
+                    if not rule.has_for_all_input():
+                        # only do this check if no inputs are marked as "for all"
+                        # because we can have cases where a new artifact appears and we _do_ want
+                        # to re-run the rule and clobber the output of the previous run.
+                        # If we wanted to be very conservative, we could handle for-all by
+                        # looking up which rule created the previous artifact and confirm that it was
+                        # from a rule with the same inputs, only verifying the "all" parameters have
+                        # changed. However, just ignoring clobbers from rules with "for all" is a cheap
+                        # approximation. 
+                        _failures = []
+                        for artifact in completion:
+                            if j.get_existing_id(None, artifact) is not None:
+                                # j.gc()
+                                _failure = f"Rule {e.transform} ({e.job_dir} generated an output which already exists: {artifact}"
+                                _failures.append(_failure)
+                                log.error(_failure)
+                        if len(_failures) >0:
+                            failure = ", ".join(_failures)
 
                 if failure is not None:
                     job_id = j.record_completed(timestamp, e.id, dep.STATUS_FAILED, {})

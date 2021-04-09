@@ -275,6 +275,41 @@ def test_detect_clobber(tmpdir):
     status_by_rule = {x.transform : x.status for x in j.get_all_executions()}
     assert status_by_rule == {"a": "completed", "c": "completed", "b": "failed"}
 
+def test_clobbers_from_rules_with_all_are_okay(tmpdir):
+    # if two rules emit the same artifact, the second one should fail. Don't allow a rule to clobber an
+    # existing artifact.
+
+    def get_exec_id(j, transform):
+        matches = [x.id for x in j.get_all_executions() if x.transform == transform]
+        assert len(matches) == 1
+        return matches[0]
+
+    j = run_conseq(tmpdir, """
+    rule a:
+        outputs: {"type": "thing", "value": "1"}
+    rule b:
+        inputs: in=all {"type": "thing"}
+        outputs: {"type": "derived-thing"}
+    """)
+    status_by_rule = [f"{x.transform} {x.status}" for x in j.get_all_executions()]
+    assert sorted(status_by_rule) == ["a completed", "b completed"]
+    orig_b_id = get_exec_id(j, "b")
+
+    j = run_conseq(tmpdir, """
+    rule a:
+        outputs: {"type": "thing", "value": "1"}
+    rule a2:
+        outputs: {"type": "thing", "value": "2"}
+    rule b:
+        inputs: in=all {"type": "thing"}
+        outputs: {"type": "derived-thing"}
+    """, assert_clean=False)
+    b_id = [0]
+    status_by_rule = [f"{x.transform} {x.status}" for x in j.get_all_executions()]
+    assert sorted(status_by_rule) == ["a completed", "a2 completed", "b completed"]
+    new_b_id = get_exec_id(j, "b")
+
+    assert new_b_id != orig_b_id
 
 def test_gc_with_real_cleanup(tmpdir):
     # do an end-to-end simulation of multiple re-runs and doing GC
