@@ -148,7 +148,7 @@ def execute(name: str, resolver: Resolver, jinja2_env: Environment, id: int, job
         return execution
 
     except MissingTemplateVar as ex:
-        return exec_client.FailedExecutionStub(id, ex.get_error())
+        return exec_client.FailedExecutionStub(id, ex.get_error(), transform=name)
 
 
 def reattach(j: Jobs, rules: Rules, pending_jobs: List[Execution]) -> List[DelegateExecution]:
@@ -475,7 +475,7 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
                         # looking up which rule created the previous artifact and confirm that it was
                         # from a rule with the same inputs, only verifying the "all" parameters have
                         # changed. However, just ignoring clobbers from rules with "for all" is a cheap
-                        # approximation. 
+                        # approximation.
                         _failures = []
                         for artifact in completion:
                             if j.get_existing_id(None, artifact) is not None:

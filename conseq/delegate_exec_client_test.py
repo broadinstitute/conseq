@@ -89,10 +89,11 @@ def create_async_client_for(tmpdir, script, uid=None):
     return job_dir, c, uid, resolver_state
 
 
+
 def _verify_job_runs(job_dir, c, uid, resolver_state):
     print("resolver_state", resolver_state.files_to_upload_and_download)
     e = c.exec_script("name", "ID", job_dir, ["python script1"], [{"name": "banana"}], True, "", "desc", resolver_state,
-                      {"mem": 10})
+                      {"mem": 10}, watch_regex=None)
     while True:
         failure, output = e.get_completion()
         assert failure is None
@@ -129,7 +130,7 @@ def test_delegate_reattach(tmpdir, use_async):
         """)
 
     e = c.exec_script("name", "ID", job_dir, ["python script1"], [{"name": "test_delegate_reattach"}], True, "", "desc",
-                      resolver_state, {"mem": 10})
+                      resolver_state, {"mem": 10}, watch_regex=None)
     print(e)
     extern_id = e.get_external_id()
 
@@ -162,7 +163,7 @@ def test_terminate(tmpdir, use_async):
 
     print("resolver_state", resolver_state.files_to_upload_and_download)
     e = c.exec_script("name", "ID", job_dir, ["python script1"], [{"name": "banana"}], True, "", "desc", resolver_state,
-                      {"mem": 10})
+                      {"mem": 10}, watch_regex=None)
 
     failure, output = e.get_completion()
     assert failure is None

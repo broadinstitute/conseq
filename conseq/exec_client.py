@@ -82,9 +82,10 @@ def log_job_output(stdout_path, stderr_path, line_count=20, stdout_path_to_print
 
 
 class FailedExecutionStub:
-    def __init__(self, id, message):
+    def __init__(self, id, message, transform, job_dir=None):
         self.id = id
         self.message = message
+        self.transform = transform
 
     def get_external_id(self):
         return "FailedExecutionStub:{}".format(self.id)
@@ -756,11 +757,11 @@ def make_results_path(cas_remote_url: str, pull_map_url: str) -> str:
     return os.path.join(cas_remote_url, "results", hash)
 
 
-def load_existing_results(id, remote, results_path):
+def load_existing_results(id, remote, results_path, transform):
     log.warning("Job appears to have already been run, taking results from %s", results_path)
     results_str = remote.download_as_str(results_path)
     results = json.loads(results_str)
-    return SuccessfulExecutionStub(id, outputs=results['outputs'])
+    return SuccessfulExecutionStub(id, outputs=results['outputs'], transform=transform)
 
 
 class PublishExecClient:
@@ -847,7 +848,7 @@ class AsyncDelegateExecClient:
         pull_map = push_to_cas_with_pullmap(cas_remote, source_and_dest, resolver_state.files_to_download)
         results_path = make_results_path(self.cas_remote_url, pull_map)
         if self.recycle_past_runs and remote.exists(results_path):
-            return load_existing_results(id, remote, results_path)
+            return load_existing_results(id, remote, results_path, name)
 
         command = "{helper_path} exec --uploadresults {results_path} " \
                   "-u retcode.json " \
@@ -978,7 +979,7 @@ class DelegateExecClient:
         pull_map = push_to_cas_with_pullmap(cas_remote, source_and_dest, resolver_state.files_to_download)
         results_path = make_results_path(self.cas_remote_url, pull_map)
         if self.recycle_past_runs and remote.exists(results_path):
-            return load_existing_results(id, remote, results_path)
+            return load_existing_results(id, remote, results_path, name)
 
         command = "{helper_path} exec --uploadresults {results_path} " \
                   "-u retcode.json " \
