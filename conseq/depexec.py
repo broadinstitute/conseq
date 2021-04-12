@@ -148,7 +148,7 @@ def execute(name: str, resolver: Resolver, jinja2_env: Environment, id: int, job
         return execution
 
     except MissingTemplateVar as ex:
-        return exec_client.FailedExecutionStub(id, ex.get_error(), transform=name)
+        return exec_client.FailedExecutionStub(id, ex.get_error(), transform=name, job_dir=job_dir)
 
 
 def reattach(j: Jobs, rules: Rules, pending_jobs: List[Execution]) -> List[DelegateExecution]:

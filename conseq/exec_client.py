@@ -86,6 +86,7 @@ class FailedExecutionStub:
         self.id = id
         self.message = message
         self.transform = transform
+        self.job_dir = job_dir
 
     def get_external_id(self):
         return "FailedExecutionStub:{}".format(self.id)
