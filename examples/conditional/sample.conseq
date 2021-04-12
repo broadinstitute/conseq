@@ -1,0 +1,17 @@
+let x="y"
+
+if "config.x == 'y'":
+    eval """
+    print("in true clause")
+    config.result = "good"
+    """
+else:
+    eval """
+    print("in false clause")
+    config.result = 'bad'
+    """
+endif
+
+
+rule a:
+    run "test {{config.result}} == good"

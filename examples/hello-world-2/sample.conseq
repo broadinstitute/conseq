@@ -1,0 +1,4 @@
+rule hello_world:
+   outputs: {'type': 'output', 
+             'filename': {'$filename': 'message.txt'}}
+   run "echo hello world > message.txt"

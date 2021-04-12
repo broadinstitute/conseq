@@ -250,10 +250,27 @@ def test_file_ref(tmpdir):
     a = rules.get_rule("a")
     assert a is not None
     print(a.inputs)
-    a.inputs[0].json_obj["name"] == str(localfile)
-    a.inputs[0].json_obj["type"] == "fileref"
+    assert a.inputs[0].json_obj["name"] == str(localfile)
+    assert a.inputs[0].json_obj["type"] == "$fileref"
+    assert a.inputs[0].copy_to is None
     assert len(rules.objs) == 1
 
+def test_file_ref_with_copy_to(tmpdir):
+    rules = Rules()
+    # rules.set_var(name, value)
+
+    localfile = tmpdir.join("xyz")
+    localfile.write("x")
+
+    statements = parser.parse_str("""
+    rule a:
+        inputs: x=filename("{}", copy_to="z")
+    """.format(localfile))
+    _eval_stmts(rules, statements, "none", HashCache(str(tmpdir.join("hashcache"))))
+
+    a = rules.get_rule("a")
+    assert a is not None
+    assert a.inputs[0].copy_to == "z"
 
 def test_file_refs_with_vars(tmpdir):
     # make sure we can use variables work in filenames

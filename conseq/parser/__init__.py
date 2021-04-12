@@ -16,13 +16,16 @@ RememberExecutedStmt = namedtuple("RememberExecutedStmt", "transform inputs outp
 ExpectKeyIs = namedtuple("ExpectKeyIs", "key value")
 ExpectKey = namedtuple("ExpectKey", "key")
 ExpectedTemplate = namedtuple("ExpectedTemplate", "predicates")
-InputSpec = namedtuple("InputSpec", ["variable", "json_obj", "for_all"])
+InputSpec = namedtuple("InputSpec", ["variable", "json_obj", "for_all", "copy_to"])
 IncludeStatement = namedtuple("IncludeStatement", ["filename"])
 LetStatement = namedtuple("LetStatement", ["name", "value"])
 AddIfMissingStatement = namedtuple("AddIfMissingStatement", "json_obj")
 IfStatement = namedtuple("IfStatement", "condition when_true when_false")
 EvalStatement = namedtuple("EvalStatement", "body")
-FileRef = namedtuple("FileRef", "filename")
+class FileRef:
+    def __init__(self, filename, copy_to=None):
+        self.filename = filename
+        self.copy_to = copy_to
 RegEx = namedtuple("RegEx", "expression")
 
 class CustomRuleEncoder(json.JSONEncoder):
@@ -130,11 +133,11 @@ class Semantics(object):
         return RunStmt(exec_profile, ast[1], script_body)
 
     def input_spec_each(self, ast):
-        inspec = InputSpec(ast[0], ast[2], False)
+        inspec = InputSpec(ast[0], ast[2], False, None)
         return inspec
 
     def input_spec_all(self, ast):
-        inspec = InputSpec(ast[0], ast[3], True)
+        inspec = InputSpec(ast[0], ast[3], True, None)
         return inspec
 
     def json_name_value_pair(self, ast):
@@ -295,7 +298,15 @@ class Semantics(object):
         return EvalStatement(ast[1])
 
     def fileref_query_obj(self, ast):
-        return FileRef(ast.filename)
+        # import pdb
+        # pdb.set_trace()
+        copy_to = None
+        for option in ast.options:
+            name = option[1]
+            value = option[3]
+            assert name == "copy_to"
+            copy_to = value
+        return FileRef(ast.filename, copy_to)
 
     def file_list(self, ast):
         files = [ast[0]]

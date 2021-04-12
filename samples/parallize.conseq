@@ -1,0 +1,16 @@
+add-if-missing {"type": "A", "name": "1"}
+add-if-missing {"type": "A", "name": "2"}
+add-if-missing {"type": "A", "name": "3"}
+add-if-missing {"type": "A", "name": "4"}
+add-if-missing {"type": "A", "name": "5"}
+add-if-missing {"type": "A", "name": "6"}
+
+rule run_a_bunch:
+    inputs: in={'type': 'A'}
+    resources: {'slots': "0.1"}
+    run """python""" with """
+        import time
+        for i in range(15):
+            print("sleeping...")
+            time.sleep(1)
+    """

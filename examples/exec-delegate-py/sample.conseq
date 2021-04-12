@@ -1,0 +1,14 @@
+include "../docker-local-exec.conseq"
+
+# make sure we can use copy_to to import python scripts
+
+rule import_py_test:
+  inputs: utils=filename("utils.py", copy_to="utils.py")
+  outputs: {"type": "success"}
+  executor: docker-local
+  run "python" with """
+    from utils import sum as sum2
+    assert sum2(2) == 4
+  """
+
+

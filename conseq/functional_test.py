@@ -212,6 +212,34 @@ def test_regexp_query_expands_var(tmpdir):
     assert len(j.get_all_executions()) == 2
 
 
+def test_fileref_copy_to(tmpdir):
+    file_a = tmpdir.join("a")
+    file_a.write("a")
+    file_b = tmpdir.join("b")
+    file_b.write("b")
+
+    script="""\"\"\"
+        assert open("{{ inputs.a.filename }}").read() == "a"
+        assert open("{{ inputs.b.filename }}").read() == "b"
+        import os
+        cwd = os.path.abspath(".")
+        assert os.path.abspath(os.path.dirname("{{ inputs.a.filename }}")) == cwd
+        assert os.path.basename("{{ inputs.a.filename }}") == "z"
+        assert os.path.abspath(os.path.dirname("{{ inputs.b.filename }}")) != cwd
+    \"\"\""""
+
+    j = run_conseq(tmpdir, """
+    rule a:
+        inputs: a=filename("{}", copy_to="z"),
+                b=filename("{}")
+        outputs: {}
+        run "python" with {}
+    """.format(file_a, file_b, "{'done': 'true'}", script))
+
+    execs = j.get_all_executions()
+    assert len(execs) == 1
+    assert execs[0].status == "completed"
+
 
 def test_publish(tmpdir, monkeypatch):
     publish_called = [False]

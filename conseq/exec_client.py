@@ -514,6 +514,7 @@ class ResolveState:
 class NullResolveState(ResolveState):
     def __init__(self, files_to_copy: List[Any]) -> None:
         self.files_to_copy = files_to_copy
+        print("self.files_to_copy", self.files_to_copy)
 
     def add_script(self, script):
         pass
@@ -550,7 +551,13 @@ class ExternProc:
 #     def poll(self):
 #         return 0
 
+from collections import namedtuple
+BoundInput = namedtuple("BoundInput", "name value copy_to")
+from typing import Optional
 
+def bind_inputs(rule, inputs : Tuple[Tuple[str, any]]):
+    by_name = {input.variable : input for input in rule.inputs}
+    return [BoundInput(name, value, by_name[name].copy_to) for name, value in inputs]
 
 class LocalExecClient:
     def __init__(self, resources: Dict[Any, Any]) -> None:
@@ -561,11 +568,11 @@ class LocalExecClient:
         return Execution(d['transform'], d['id'], d['job_dir'], PidProcStub(d['pid']), d['outputs'],
                          d['captured_stdouts'], d['desc_name'])
 
-    def preprocess_inputs(self, resolver: Resolver, inputs: Tuple[Tuple[str, Obj]]) -> Tuple[
+    def preprocess_inputs(self, resolver: Resolver, inputs: Tuple[BoundInput]) -> Tuple[
         Dict[str, Dict[str, str]], NullResolveState]:
         files_to_copy = []
 
-        def resolve(obj_: dep.Obj):
+        def resolve(obj_: dep.Obj, copy_to: Optional[str]):
             assert isinstance(obj_, dep.Obj)
 
             obj = obj_.props
@@ -574,19 +581,27 @@ class LocalExecClient:
             obj = fetch_urls(obj, resolver)
             obj = flatten_parameters(obj)
             if obj.get("type") == "$fileref":
+                filename = obj.get("filename")
                 destination = obj.get("destination")
-                if destination:
-                    files_to_copy.append((destination, destination))
+                if copy_to is not None:
+                    files_to_copy.append((filename, copy_to))
+                    obj = dict(obj)
+                    obj['filename'] = copy_to
+                elif destination:
+                    files_to_copy.append((filename, destination))
+                    obj['filename'] = destination
+            else:
+                assert not copy_to
             return obj
 
         result = {}
-        for bound_name, obj_or_list in inputs:
+        for bound_name, obj_or_list, copy_to in inputs:
             if isinstance(obj_or_list, list) or isinstance(obj_or_list, tuple):
                 list_ = obj_or_list
-                result[bound_name] = [resolve(obj_) for obj_ in list_]
+                result[bound_name] = [resolve(obj_, copy_to) for obj_ in list_]
             else:
                 obj_ = obj_or_list
-                result[bound_name] = resolve(obj_)
+                result[bound_name] = resolve(obj_, copy_to)
 
         return result, NullResolveState(files_to_copy)
 
@@ -595,6 +610,7 @@ class LocalExecClient:
                     resources: Dict[str, int], watch_regex) -> Execution:
 
         for src, dst in resolve_state.files_to_copy:
+            print("copying ", src, os.path.join(job_dir, dst))
             shutil.copy(src, os.path.join(job_dir, dst))
 
         return local_exec_script(name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name, watch_regex)
@@ -646,7 +662,7 @@ def push_to_cas_with_pullmap(remote: Remote, source_and_dest: List[Tuple[str, st
     return "{}/{}".format(remote.remote_url, map_name)
 
 
-def process_inputs_for_publishing(cas_remote, inputs):
+def process_inputs_for_publishing(cas_remote, inputs : Tuple[BoundInput]):
     def resolve(obj_):
         assert isinstance(obj_, dep.Obj)
         obj = obj_.props
@@ -671,7 +687,8 @@ def process_inputs_for_publishing(cas_remote, inputs):
         return new_obj
 
     result = {}
-    for bound_name, obj_or_list in inputs:
+    for input in inputs:
+        bound_name, obj_or_list = (input.name, input.value)
         if isinstance(obj_or_list, list) or isinstance(obj_or_list, tuple):
             list_ = obj_or_list
             result[bound_name] = [resolve(obj_) for obj_ in list_]
@@ -683,7 +700,7 @@ def process_inputs_for_publishing(cas_remote, inputs):
     return result
 
 
-def process_inputs_for_remote_exec(inputs: Tuple[Tuple[str, Obj]]) -> Tuple[
+def process_inputs_for_remote_exec(inputs: Tuple[BoundInput]) -> Tuple[
     List[Any], List[Tuple[str, str]], Dict[str, Dict[str, str]]]:
     log.debug("preprocess_inputs, before inputs: %s", inputs)
     files_to_upload_and_download = []
@@ -693,7 +710,7 @@ def process_inputs_for_remote_exec(inputs: Tuple[Tuple[str, Obj]]) -> Tuple[
         return len(files_to_upload_and_download) + len(files_to_download)
 
     # need to find all files that will be downloaded and update with $filename of what eventual local location will be.
-    def resolve(obj_):
+    def resolve(obj_, copy_to):
         assert isinstance(obj_, dep.Obj)
         obj = obj_.props
         assert isinstance(obj, dict)
@@ -703,6 +720,8 @@ def process_inputs_for_remote_exec(inputs: Tuple[Tuple[str, Obj]]) -> Tuple[
         destination = None
         if obj.get("type") == "$fileref":
             destination = flatten_value(obj.get("destination"))
+            if copy_to:
+                destination = copy_to
 
         new_obj = {}
         for k, v in obj.items():
@@ -734,13 +753,14 @@ def process_inputs_for_remote_exec(inputs: Tuple[Tuple[str, Obj]]) -> Tuple[
         return new_obj
 
     result = {}
-    for bound_name, obj_or_list in inputs:
+    for input in inputs:
+        bound_name, obj_or_list, copy_to = input
         if isinstance(obj_or_list, list) or isinstance(obj_or_list, tuple):
             list_ = obj_or_list
-            result[bound_name] = [resolve(obj_) for obj_ in list_]
+            result[bound_name] = [resolve(obj_, copy_to) for obj_ in list_]
         else:
             obj_ = obj_or_list
-            result[bound_name] = resolve(obj_)
+            result[bound_name] = resolve(obj_, copy_to)
     log.debug("preprocess_inputs, after inputs: %s", result)
     log.debug("files_to_upload_and_download: %s", files_to_upload_and_download)
     log.debug("files_to_download: %s", files_to_download)
@@ -809,7 +829,7 @@ class AsyncDelegateExecClient:
         return DelegateExecution(d['transform'], d['id'], d['job_dir'], proc, d['outputs'], d['captured_stdouts'],
                                  d['desc_name'], remote, file_fetcher, d['label'], d['results_path'])
 
-    def preprocess_inputs(self, resolver, inputs):
+    def preprocess_inputs(self, resolver, inputs : Tuple[BoundInput]):
         files_to_download, files_to_upload_and_download, result = process_inputs_for_remote_exec(inputs)
         return result, RemoteResolveState(files_to_upload_and_download, files_to_download)
 
@@ -936,7 +956,7 @@ class DelegateExecClient:
                                  d['captured_stdouts'], d['desc_name'], remote, file_fetcher, d['label'],
                                  d['results_path'])
 
-    def preprocess_inputs(self, resolver: Resolver, inputs: Tuple[Tuple[str, Obj]]) -> Tuple[
+    def preprocess_inputs(self, resolver: Resolver, inputs: Tuple[BoundInput]) -> Tuple[
         Dict[str, Dict[str, str]], RemoteResolveState]:
         files_to_download, files_to_upload_and_download, result = process_inputs_for_remote_exec(inputs)
         return result, RemoteResolveState(files_to_upload_and_download, files_to_download)

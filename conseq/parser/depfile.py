@@ -213,6 +213,10 @@ class depfileParser(Parser):
         self._token('}')
 
     @tatsumasu()
+    def _fileref_option_(self):  # noqa
+        self._token('copy_to')
+
+    @tatsumasu()
     def _fileref_query_obj_(self):  # noqa
         with self._group():
             with self._choice():
@@ -224,9 +228,17 @@ class depfileParser(Parser):
         self._token('(')
         self._quoted_string_()
         self.name_last_node('filename')
+
+        def block3():
+            self._token(',')
+            self._fileref_option_()
+            self._token('=')
+            self._quoted_string_()
+        self._closure(block3)
+        self.name_last_node('options')
         self._token(')')
         self.ast._define(
-            ['filename'],
+            ['filename', 'options'],
             []
         )
 
@@ -552,6 +564,9 @@ class depfileSemantics(object):
         return ast
 
     def pattern_based_query_obj(self, ast):  # noqa
+        return ast
+
+    def fileref_option(self, ast):  # noqa
         return ast
 
     def fileref_query_obj(self, ast):  # noqa

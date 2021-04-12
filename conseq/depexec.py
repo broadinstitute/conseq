@@ -18,7 +18,7 @@ from conseq import xref
 from conseq.config import Rules
 from conseq.config import read_rules
 from conseq.dep import ForEach, Jobs, RuleExecution, Template
-from conseq.exec_client import DelegateExecClient, DelegateExecution, Execution, LocalExecClient, ResolveState
+from conseq.exec_client import DelegateExecClient, DelegateExecution, Execution, LocalExecClient, ResolveState, bind_inputs
 from conseq.parser import QueryVariable
 from conseq.parser import Rule, RunStmt
 from conseq.template import MissingTemplateVar, render_template
@@ -419,7 +419,7 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
                 else:
                     # localize paths that will be used in scripts
                     client = rules.get_client(rule.executor)
-                inputs, resolver_state = client.preprocess_inputs(resolver, job.inputs)
+                inputs, resolver_state = client.preprocess_inputs(resolver, bind_inputs(rule, job.inputs))
                 debug_log.log_input_preprocess(job.id, job.inputs, inputs)
 
                 # if we're required confirmation from the user, do this before we continue
@@ -595,7 +595,7 @@ def convert_input_spec_to_queries(jinja2_env: Environment, rule: Rule, config: D
     queries = []
     predicates = []
     pairs_by_var = collections.defaultdict(lambda: [])
-    for bound_name, spec, for_all in rule.inputs:
+    for bound_name, spec, for_all, _ in rule.inputs:
         assert bound_name != ""
         spec = expand_input_spec(jinja2_env, spec, config)
 
