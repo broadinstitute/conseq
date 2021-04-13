@@ -246,11 +246,11 @@ def test_file_ref(tmpdir):
     rule a:
         inputs: x=filename("{}")
     """.format(localfile))
-    _eval_stmts(rules, statements, "none", HashCache(str(tmpdir.join("hashcache"))))
+    _eval_stmts(rules, statements, str(tmpdir)+"/none", HashCache(str(tmpdir.join("hashcache"))))
     a = rules.get_rule("a")
     assert a is not None
     print(a.inputs)
-    assert a.inputs[0].json_obj["name"] == str(localfile)
+    assert a.inputs[0].json_obj["name"] == os.path.relpath(str(localfile), str(tmpdir))
     assert a.inputs[0].json_obj["type"] == "$fileref"
     assert a.inputs[0].copy_to is None
     assert len(rules.objs) == 1
