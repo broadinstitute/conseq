@@ -118,6 +118,8 @@ def _load_initial_config(state_dir, depfile, config_file):
 
 
 def _eval_stmts(rules, statements, filename, hashcache, eval_context=None):
+    root_dir = os.path.dirname(os.path.abspath(filename))
+
     if eval_context is None:
         # circular reference needed
         __render_template = [None]
@@ -159,14 +161,15 @@ def _eval_stmts(rules, statements, filename, hashcache, eval_context=None):
                 if isinstance(input.json_obj, parser.FileRef):
                     fileref = input.json_obj
                     filename = os.path.abspath(rt(fileref.filename))
+                    ref_name = os.path.relpath(filename, root_dir)
                     sha256 = hashcache.sha256(filename)
                     new_json_obj = {"type": "$fileref",
-                                    "name": filename,
+                                    "name": ref_name,
                                     "filename": {"$filename": filename},
                                     "sha256": sha256}
                     rules.add_if_missing(new_json_obj)
                     new_query_obj = {"type": "$fileref",
-                                     "name": filename}
+                                     "name": ref_name}
                     # print("rewrite", filename, fileref.copy_to)
                     input = parser.InputSpec(input.variable, new_query_obj, input.for_all, fileref.copy_to)
                 inputs.append(input)

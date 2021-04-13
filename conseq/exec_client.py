@@ -900,10 +900,14 @@ class AsyncDelegateExecClient:
         log.warning("executing: %s", bash_cmd)
 
         # create child in new process group so ctrl-c doesn't kill child process
-        subprocess.check_call(['bash', '-c', bash_cmd], close_fds=close_fds, preexec_fn=os.setsid, cwd=job_dir)
+        returncode = subprocess.call(['bash', '-c', bash_cmd], close_fds=close_fds, preexec_fn=os.setsid, cwd=job_dir)
 
         with open(stdout_path, "rt") as fd:
             output = fd.read()
+
+        if returncode != 0:
+            log.error("Failed to run %s due to non-zero error code (%d) when running \"%s\". Log from the command:\n%s\n", name, returncode, full_command, output)
+            return FailedExecutionStub(id, "Could not launch delegate runner", name, job_dir=job_dir)
 
         x_job_id = self._extract_job_id(output)
 

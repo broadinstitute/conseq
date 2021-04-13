@@ -353,8 +353,12 @@ def export_cmd(state_dir, depfile, config_file, dest_s3_path):
             return json.dumps(get_key_props(value), indent=3)
 
     executions = j.get_all_executions()
+    skipped = 0
     for execution in executions:
-        # if execution.status == "complete":
+        if execution.status != "completed":
+            skipped += 1
+            continue
+
         out.write(
             "remember-executed transform : \"{}\"\n".format(execution.transform))
         for input in execution.inputs:
@@ -365,8 +369,14 @@ def export_cmd(state_dir, depfile, config_file, dest_s3_path):
                 reindent(value_as_json(output), 3)))
         out.write("\n")
 
-    log.info("Uploading artifact metadata to %s", dest_s3_path)
-    cas_remote.upload_str(dest_s3_path, out.getvalue())
+    log.info("Skipping export of %d executions which did not complete successfully", skipped)
+    if dest_s3_path.startswith("s3://"):
+        log.info("Uploading artifact metadata to %s", dest_s3_path)
+        cas_remote.upload_str(dest_s3_path, out.getvalue())
+    else:
+        log.info("Writing artifacts to %s", dest_s3_path)
+        with open(dest_s3_path, "wt") as fd:
+            fd.write(out.getvalue())
 
 
 def debugrun(state_dir, depfile, target, override_vars, config_file):
@@ -403,9 +413,11 @@ def gc(state_dir):
     j = dep.open_job_db(db_path)
 
     all_job_dirs = [ os.path.join(state_dir, fn)  for fn in os.listdir(state_dir) if re.match("r[0-9]+", fn)]
-    job_dirs_in_use = set([e.job_dir for e in j.get_all_executions()])
+    job_dirs_in_use = set([e.job_dir for e in j.get_all_executions() if e.job_dir is not None])
 
     # make sure the jobdirs are a subset of all the job dirs we've found
+    # print("job in use", list(job_dirs_in_use)[:10])
+    # print("all_job_dirs", list(all_job_dirs)[:10])
     assert job_dirs_in_use.issubset(all_job_dirs)
 
     for job_dir in all_job_dirs:

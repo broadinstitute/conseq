@@ -522,7 +522,7 @@ class RuleSet:
     def assert_db_sane(self):
         c = get_cursor()
         c.execute("SELECT * from execution e where not exists (select 1 from rule_execution re where re.execution_id = e.id)")
-        assert len(c.fetchall()) == 0
+        assert len(c.fetchall()) == 0, "Found execution which has no rule_execution"
         c.execute("SELECT * from rule_execution_input rei where not exists (select 1 from rule_execution re where re.id = rei.rule_execution_id)")
         assert len(c.fetchall()) == 0
         c.execute("SELECT * from rule_execution_input rei where not exists (select 1 from cur_obj o where o.id = rei.obj_id)")
@@ -1350,7 +1350,8 @@ class Jobs:
         with transaction(self.db):
             root_obj_ids = set()
 
-            for r in self.rule_set.find_by_name(transform):
+            rules_to_remove = self.rule_set.find_by_name(transform)
+            for r in rules_to_remove:
                 # get all the objects that are downstream of this rule execution
                 if r.execution_id is not None:
                     execution = self.log.get(r.execution_id)
@@ -1361,6 +1362,11 @@ class Jobs:
             for obj in all_objs:
                 log.warning("invaliding rule %s, rm object %s", transform, obj)
                 self.remove_objects([obj.id for obj in all_objs])
+
+            for r in rules_to_remove:
+               if r.execution_id is not None:
+                   self.log.delete(r.execution_id)
+               self.rule_set.remove_rule(r.id)
 
     def gc(self):
         """Deletes executions which are not associated with a reachable artifact."""
