@@ -1,16 +1,11 @@
 {% extends "base.html" %}
 {% from 'macros.html' import obj_summary %}
+{% from 'macros.html' import obj_table %}
 {% block content %}
 <h1>Artifacts by type</h1>
 {% for type, objs in objs_by_type %}
     <h2>Type: {{type}}</h2>
-    <ul>
-        {% for obj in objs %}
-            <li>
-                {{ obj_summary(obj, exclude=["type"]) }}
-            </li>
-        {% endfor %}
-    </ul>
+    {{ obj_table(objs) }}
 {% endfor %}
 
 <h1>Executions by rule name</h1>

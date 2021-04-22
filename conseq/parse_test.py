@@ -137,7 +137,7 @@ def _parse_exp(text, nonterminal):
         nonterminal,
         trace=False,
         nameguard=None,
-        semantics=Semantics())
+        semantics=Semantics("<none>"))
 
 
 def test_parse_empty():

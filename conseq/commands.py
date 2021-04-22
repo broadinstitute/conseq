@@ -202,95 +202,6 @@ def list_cmd(state_dir):
     j.dump()
 
 
-def generate_report_cmd(state_dir, dest_dir):
-    from .template import create_template_jinja2_env
-    if not os.path.exists(dest_dir):
-        os.makedirs(dest_dir)
-
-    jinja2_env = create_template_jinja2_env()
-
-    def prop_summary(obj):
-        result = []
-        for name, value in obj.props.items():
-            if isinstance(value, dict) and "$value" in value:
-                value = value["$value"]
-            value = str(value)
-            if len(value) > 40:
-                value = value[:5]+"..."+value[-20:]
-            result.append((name, value))
-        return sorted(result)
-
-    jinja2_env.filters.update({"prop_summary": prop_summary,
-        'is_tuple': lambda x: isinstance(x, tuple)})
-    j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
-
-    objs = j.find_objs(DEFAULT_SPACE, {})
-    executions = j.get_all_executions()
-    execution_by_input = collections.defaultdict(lambda: [])
-    execution_by_output = {}
-    for execution in executions:
-        for name, input in execution.inputs:
-            if not isinstance(input, tuple):
-                inputs=[input]
-            else:
-                inputs = input
-            for input in inputs:
-                execution_by_input[input.id].append(execution)
-        for output in execution.outputs:
-            execution_by_output[output.id] = execution
-
-    index_template =  jinja2_env.get_template("index.html")
-
-    obj_template = jinja2_env.get_template("artifact.html")
-
-    execution_template = jinja2_env.get_template("execution.html")
-
-    def write_artifact(obj : Obj):
-        fn = f"{dest_dir}/obj_{obj.id}.html"
-        with open(fn , "wt") as fd:
-            execution = execution_by_output.get(obj.id)
-            downstream_executions = execution_by_input[obj.id]
-            fd.write(obj_template.render(obj=obj, execution=execution, downstream_executions=downstream_executions))
-
-    def get_disk_usage(job_dir):
-        size = 0
-        for fn in os.listdir(job_dir):
-            size += os.path.getsize(os.path.join(job_dir, fn))
-        return size
-
-    def write_execution(execution, disk_usage):
-        fn = f"{dest_dir}/exec_{execution.id}.html"
-
-        files = []
-        for output_fn in os.listdir(execution.job_dir):
-            files.append((os.path.relpath(os.path.join(execution.job_dir, output_fn), dest_dir), output_fn))
-        with open(fn , "wt") as fd:
-            fd.write(execution_template.render(execution=execution, files=files, disk_usage=disk_usage))
-
-    ExecSummary = collections.namedtuple("ExecSummary", "execs disk_usage")
-    execs_by_name = collections.defaultdict(lambda: ExecSummary([], 0))
-    objs_by_type = collections.defaultdict(lambda: [])
-    # write a file per object
-    for obj in objs:
-        write_artifact(obj)
-        objs_by_type[obj.props.get("type", "")].append(obj)
-
-    # write a file per execution
-    for execution in executions:
-        disk_usage = get_disk_usage(execution.job_dir)
-        write_execution(execution, disk_usage)
-        execs, total_disk_usage = execs_by_name[execution.transform]
-        execs_by_name[execution.transform] = ExecSummary(execs + [execution], total_disk_usage+disk_usage)
-
-    rules_with_size = [ (name, summary.disk_usage) for name, summary in execs_by_name.items() ]
-    rules_with_size.sort(key=lambda x: x[1], reverse=True)
-
-    with open(f"{dest_dir}/index.html", "wt") as fd:
-        sorted_objs_by_type = sorted(objs_by_type.items())
-        sorted_execs_by_name = sorted(execs_by_name.items())
-        fd.write(index_template.render(objs_by_type=sorted_objs_by_type, execs_by_name=sorted_execs_by_name, rules_with_size=rules_with_size))
-
-
 def export_cmd(state_dir, depfile, config_file, dest_s3_path):
     out = StringIO()
 
@@ -497,10 +408,10 @@ def alt_dot(state_dir, depfile, config_file):
 
 
 def superdot(state_dir, depfile, config_file):
-    from .scheduler import construct_graph, graph_to_dot
+    from .scheduler import construct_dataflow, graph_to_dot
 
     rules = read_rules(state_dir, depfile, config_file)
-    g = construct_graph(rules)
+    g = construct_dataflow(rules)
 
     with open("dump.dot", "w") as fd:
         fd.write(graph_to_dot(g))

@@ -522,3 +522,64 @@ by any artifacts by running:
 ```
 $ conseq gc
 ```
+
+## Remote execution
+
+You can define custom "execution profiles" which tell conseq how to launch
+jobs on remote machines.
+
+You need only configure:
+1. a template for the command used to submit the job and get a job ID conseq
+can use to track the job.
+2. a template for the command used to poll the job and ask whether the job has completed or not.   
+
+Here's a configuration for submitting via dsub:
+
+```
+exec-profile dsub-tda-img {
+ "type": "async-delegate",
+ "label": "dsub-runner-img",
+ "resources": { "slots": "5" },
+ "HELPER_PATH": "python3 /helper.py",
+ "COMMAND_TEMPLATE": """{{config.DSUB_PATH}}/dsub \
+     --project broad-achilles \
+     --zones "us-east1*" \
+     --logging gs://conseq-logging/logging/{JOB} \
+     --image us.gcr.io/broad-achilles/depmap-pipeline-tda:v4 \
+     --env AWS_ACCESS_KEY_ID={{config.AWS_ACCESS_KEY_ID}} \
+     --env AWS_SECRET_ACCESS_KEY={{config.AWS_SECRET_ACCESS_KEY}} \
+     --min-ram 10 \
+     --command '{COMMAND}'""", # AWS keys needed for boto
+ "CHECK_COMMAND_TEMPLATE": """{{config.DSUB_PATH}}/dstat \
+     --project broad-achilles \
+     --jobs {job_id} \
+     --status 'RUNNING'""",
+ "IS_RUNNING_PATTERN": "Status", # Really anything because we are only
+                                 # listing running jobs. Just make sure
+                                 # there's some output
+ "TERMINATE_CMD_TEMPLATE": "{{config.DSUB_PATH}}/ddel --project broad-achilles --jobs {job_id}",
+ "JOB_ID_PATTERN": "{{ config.DSUB_JOB_ID_PATTERN }}"
+}
+```
+
+Configuration for running via docker:
+
+```
+exec-profile async-docker-tda-img {
+  "type": "async-delegate",
+  "label": "ddddd",
+  "resources": { "slots": "1" },
+  "HELPER_PATH": "python3 /helper.py",
+  "COMMAND_TEMPLATE": """docker run \
+      --rm \
+      -d \
+      -e AWS_ACCESS_KEY_ID={{config.AWS_ACCESS_KEY_ID}} \
+      -e AWS_SECRET_ACCESS_KEY={{config.AWS_SECRET_ACCESS_KEY}} \
+      us.gcr.io/broad-achilles/depmap-pipeline-tda:v4 \
+      {COMMAND}""", # AWS keys needed for boto
+  "JOB_ID_PATTERN": """(\S+)""",
+  "CHECK_COMMAND_TEMPLATE": "docker ps -f id={job_id} --format running",
+  "IS_RUNNING_PATTERN": "running", # this is the only output if the job is running
+  "TERMINATE_CMD_TEMPLATE": "docker kill {job_id}"
+}
+```

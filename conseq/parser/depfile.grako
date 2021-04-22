@@ -99,7 +99,7 @@ rule_parameters = ("inputs" ":" input_specs |
     "uses" ":" file_list )
     ;
 
-rule = "rule" identifier ":" { rule_parameters } * { run_statement } *
+rule = "rule" name:identifier ":" params:{ rule_parameters } * stmts:{ run_statement } *
     ;
 
 add_if_missing = "add-if-missing" json_obj ;

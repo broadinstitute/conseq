@@ -13,23 +13,18 @@ from boto.s3.key import Key
 
 log = logging.getLogger(__name__)
 
-
-def parse_remote(path: str, accesskey: Optional[str] = None, secretaccesskey: Optional[str] = None) -> Tuple[
-    Bucket, str]:
+def _parse_remote(path: str) -> Tuple[
+    str, str]:
     m = re.match("^s3://([^/]+)/(.*)$", path)
     assert m != None, "invalid remote path: {}".format(path)
     bucket_name = m.group(1)
     path = m.group(2)
-
-    c = S3Connection(accesskey, secretaccesskey)
-    bucket = c.get_bucket(bucket_name, validate=False)
-
-    return bucket, path
+    return bucket_name, path
 
 
 def download_s3_as_string(remote):
     assert remote.startswith("s3:")
-    bucket, remote_path = parse_remote(remote)
+    bucket, remote_path = _parse_remote(remote)
 
     key = bucket.get_key(remote_path)
     if key == None:
@@ -39,16 +34,37 @@ def download_s3_as_string(remote):
     return value.decode("utf-8")
 
 
+class StorageConnection:
+    def get_bucket(self, bucket_name):
+        raise NotImplemented()
+
+class S3StorageConnection(StorageConnection):
+    def __init__(self, accesskey, secretaccesskey):
+        self.c = S3Connection(accesskey, secretaccesskey)
+    def get_bucket(self, bucket_name):
+        return self.c.get_bucket(bucket_name, validate=False)
+    def get_generation_id(self, key_obj):
+        raise NotImplemented
+
+def new_remote(remote_url, local_dir, accesskey, secretaccesskey):
+    sc = S3StorageConnection(accesskey, secretaccesskey)
+    return Remote(remote_url, local_dir, sc)
+
 class Remote:
-    def __init__(self, remote_url: str, local_dir: str, accesskey: Optional[str] = None,
-                 secretaccesskey: Optional[str] = None) -> None:
+    def __init__(self, remote_url: str, local_dir: str, sc : StorageConnection):
+        self.connection = sc
         self.remote_url = remote_url
         self.local_dir = local_dir
-        self.bucket, self.remote_path = parse_remote(remote_url, accesskey, secretaccesskey)
+        self.bucket_name, self.remote_path = _parse_remote(remote_url)
+        self.bucket = self.get_bucket(self.bucket_name)
+
+    def get_bucket(self, bucket_name : str):
+        return self.connection.get_bucket(bucket_name)
 
     def exists(self, remote: str) -> bool:
         if remote.startswith("s3:"):
-            bucket, remote_path = parse_remote(remote)
+            bucket_name, remote_path = _parse_remote(remote)
+            bucket = self.get_bucket(bucket_name)
         else:
             bucket = self.bucket
             remote_path = os.path.normpath(self.remote_path + "/" + remote)
@@ -56,45 +72,64 @@ class Remote:
         key = bucket.get_key(remote_path)
         return key != None
 
-    # TODO: make download atomic by dl and rename (assuming get_contents_to_filename doesn't already)
-    def download(self, remote, local, ignoreMissing=False, skipExisting=True, stage_dir=None):
+    def _download_object(self, source_bucket, source_key, dest_path, stage_dir, skipExisting):
+        if os.path.exists(dest_path) and skipExisting:
+            log.info("Already s3://%s/%s downloaded as %s", source_bucket, source_key, dest_path)
+            return
+
+        bucket = self.get_bucket(source_bucket)
+        key = bucket.get_key(source_key)
+        assert key
+
+        def download_to(dest):
+            if not os.path.exists(os.path.dirname(dest)):
+                os.makedirs(os.path.dirname(dest))
+            for i in range(100):
+                temp_name = dest + ".in.progress." + str(i)
+                if not os.path.exists(temp_name):
+                    break
+
+            key.get_contents_to_filename(temp_name)
+            os.rename(temp_name, dest)
+
+        if stage_dir is not None:
+            # if hash is defined for this object, use this for caching
+            hash = key.get_metadata("sha256")
+            if hash is not None:
+                stage_path = os.path.join(stage_dir, "CAS", hash)
+            else:
+                # otherwise, fall back to using path and generation ID/etag
+                etag = key.get_etag()
+                stage_path = os.path.join(stage_dir, "gcs", source_bucket, source_key, etag)
+
+            download_to(stage_path)
+
+            if not os.path.exists(os.path.dirname(dest_path)):
+                os.makedirs(os.path.dirname(dest_path))
+            os.link(stage_path, dest_path)
+        else:
+            download_to(dest_path)
+
+    def download(self, remote: str, local : str, ignoreMissing=False, skipExisting=True, stage_dir=None):
         # maybe upload and download should use trailing slash to indicate directory should be uploaded instead of just a file
         if not local.startswith("/"):
             local = os.path.normpath(self.local_dir + "/" + local)
 
         if remote.startswith("s3:"):
-            bucket, remote_path = parse_remote(remote)
+            bucket_name, remote_path = _parse_remote(remote)
+            bucket = self.get_bucket(bucket_name)
         else:
             bucket = self.bucket
+            bucket_name = self.bucket_name
             remote_path = os.path.normpath(self.remote_path + "/" + remote)
 
-        # maybe upload and download should use trailing slash to indicate directory should be uploaded instead of just a file
         key = bucket.get_key(remote_path)
         if key != None:
             # if it's a file, download it
             abs_local = os.path.abspath(local)
             log.info("Downloading file %s to %s", remote_path, abs_local)
-            if not os.path.exists(os.path.dirname(abs_local)):
-                os.makedirs(os.path.dirname(abs_local))
 
-            hash = key.get_metadata("sha256")
-            if (stage_dir is not None) and (hash is not None):
-                stage_path = os.path.join(stage_dir, hash)
-                if os.path.exists(stage_path) and skipExisting:
-                    log.info("Already %s downloaded as %s", remote, stage_path)
-                else:
-                    key.get_contents_to_filename(stage_path)
-                os.link(stage_path, abs_local)
-            else:
-                for i in range(100):
-                    temp_name = abs_local + ".in.progress." + str(i)
-                    if not os.path.exists(temp_name):
-                        break
-
-                key.get_contents_to_filename(temp_name)
-                os.rename(temp_name, abs_local)
-
-            assert os.path.exists(local)
+            self._download_object(bucket_name, remote_path, abs_local, stage_dir,skipExisting)
         else:
             # download everything with the prefix
             transferred = 0
@@ -104,7 +139,7 @@ class Remote:
                     os.makedirs(local)
                 local_path = os.path.join(local, rest)
                 log.info("Downloading dir %s (%s to %s)", remote, key.name, local_path)
-                key.get_contents_to_filename(local_path)
+                self._download(bucket_name, key.name, local_path, stage_dir=stage_dir)
                 transferred += 1
 
             if transferred == 0 and not ignoreMissing:
@@ -164,7 +199,8 @@ class Remote:
 
     def download_as_str(self, remote: str, timeout: int = 5) -> str:
         if remote.startswith("s3:"):
-            bucket, remote_path = parse_remote(remote)
+            bucket_name, remote_path = _parse_remote(remote)
+            bucket = self.get_bucket(bucket_name)
         else:
             bucket = self.bucket
             remote_path = os.path.normpath(self.remote_path + "/" + remote)
@@ -179,7 +215,8 @@ class Remote:
 
     def upload_str(self, remote, text):
         if remote.startswith("s3:"):
-            bucket, remote_path = parse_remote(remote)
+            bucket_name, remote_path = _parse_remote(remote)
+            bucket = self.get_bucket(bucket_name)
         else:
             bucket = self.bucket
             remote_path = os.path.normpath(self.remote_path + "/" + remote)

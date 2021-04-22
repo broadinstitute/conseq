@@ -390,15 +390,22 @@ class depfileParser(Parser):
     def _rule_(self):  # noqa
         self._token('rule')
         self._identifier_()
+        self.name_last_node('name')
         self._token(':')
 
-        def block0():
+        def block2():
             self._rule_parameters_()
-        self._closure(block0)
+        self._closure(block2)
+        self.name_last_node('params')
 
-        def block1():
+        def block4():
             self._run_statement_()
-        self._closure(block1)
+        self._closure(block4)
+        self.name_last_node('stmts')
+        self.ast._define(
+            ['name', 'params', 'stmts'],
+            []
+        )
 
     @tatsumasu()
     def _add_if_missing_(self):  # noqa

@@ -20,6 +20,15 @@ from conseq.xref import Resolver
 _basestring = str
 
 log = logging.getLogger(__name__)
+SgeState = collections.namedtuple("SgeState", ["update_timestamp", "status", "refresh_id"])
+
+SGE_STATUS_SUBMITTED = "submitted"
+SGE_STATUS_PENDING = "pending"
+SGE_STATUS_RUNNING = "running"
+SGE_STATUS_COMPLETE = "complete"
+SGE_STATUS_UNKNOWN = "unknown"
+
+import tempfile
 
 
 class PidProcStub:
@@ -355,7 +364,7 @@ class DelegateExecution(Execution):
         if retcode_content is not None:
             retcode = json.loads(retcode_content)['retcode']
         else:
-            log.debug("got no retcode")
+            log.warning("Attempted to read retcode.json but got None")
             retcode = None
 
         if retcode != 0:
@@ -514,7 +523,7 @@ class ResolveState:
 class NullResolveState(ResolveState):
     def __init__(self, files_to_copy: List[Any]) -> None:
         self.files_to_copy = files_to_copy
-        print("self.files_to_copy", self.files_to_copy)
+#        print("self.files_to_copy", self.files_to_copy)
 
     def add_script(self, script):
         pass
@@ -531,7 +540,8 @@ class ExternProc:
         check_cmd = self.check_cmd_template.format(job_id=self.job_id)
         output = subprocess.check_output(check_cmd, shell=True)
         output = output.decode("utf8")
-        # print("Check_cmd: {}".format(check_cmd))
+        print("Check_cmd: {}".format(check_cmd))
+        print("output: {}".format(output))
         m = re.search(self.is_running_pattern, output)
         # print("output={} is_running_pattern={}, m={}".format(repr(output), self.is_running_pattern, m))
         if m is None:
@@ -559,7 +569,20 @@ def bind_inputs(rule, inputs : Tuple[Tuple[str, any]]):
     by_name = {input.variable : input for input in rule.inputs}
     return [BoundInput(name, value, by_name[name].copy_to) for name, value in inputs]
 
-class LocalExecClient:
+class ExecClient:
+    def reattach(self, external_ref):
+        raise NotImplementedError()
+
+    def preprocess_inputs(self, resolver: Resolver, inputs: Tuple[BoundInput]) -> Tuple[
+        Dict[str, Dict[str, str]], NullResolveState]:
+        raise NotImplementedError()
+
+    def exec_script(self, name: str, id: int, job_dir: str, run_stmts: List[str], outputs: List[Any],
+                    capture_output: bool, prologue: str, desc_name: str, resolve_state: NullResolveState,
+                    resources: Dict[str, int], watch_regex) -> Execution:
+        raise NotImplementedError()
+
+class LocalExecClient(ExecClient):
     def __init__(self, resources: Dict[Any, Any]) -> None:
         self.resources = resources
 
@@ -610,21 +633,12 @@ class LocalExecClient:
                     resources: Dict[str, int], watch_regex) -> Execution:
 
         for src, dst in resolve_state.files_to_copy:
-            print("copying ", src, os.path.join(job_dir, dst))
+            #print("copying ", src, os.path.join(job_dir, dst))
             shutil.copy(src, os.path.join(job_dir, dst))
 
         return local_exec_script(name, id, job_dir, run_stmts, outputs, capture_output, prologue, desc_name, watch_regex)
 
 
-SgeState = collections.namedtuple("SgeState", ["update_timestamp", "status", "refresh_id"])
-
-SGE_STATUS_SUBMITTED = "submitted"
-SGE_STATUS_PENDING = "pending"
-SGE_STATUS_RUNNING = "running"
-SGE_STATUS_COMPLETE = "complete"
-SGE_STATUS_UNKNOWN = "unknown"
-
-import tempfile
 
 
 def drop_prefix(prefix, value):
@@ -787,7 +801,7 @@ def load_existing_results(id, remote, results_path, transform):
 
 class PublishExecClient:
     def __init__(self, cas_remote_url, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY):
-        self.cas_remote = helper.Remote(cas_remote_url, ".", AWS_ACCESS_KEY_ID,
+        self.cas_remote = helper.new_remote(cas_remote_url, ".", AWS_ACCESS_KEY_ID,
                                         AWS_SECRET_ACCESS_KEY)
 
     def preprocess_inputs(self, resolver, inputs):
@@ -816,14 +830,18 @@ class AsyncDelegateExecClient:
         self.recycle_past_runs = recycle_past_runs
 
     def _extract_job_id(self, output):
-        m = re.match(self.x_job_id_pattern, output)
+        m = re.search(self.x_job_id_pattern, output)
         if m is None:
             raise Exception("Pattern {} could not be found in {}".format(self.x_job_id_pattern, output))
-        return m.group(1)
+        print("output", output)
+        job_id = m.group(1)
+        assert job_id is not None
+
+        return job_id
 
     def reattach(self, external_ref):
         d = json.loads(external_ref)
-        remote = helper.Remote(d['remote_url'], d['local_job_dir'], self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
+        remote = helper.new_remote(d['remote_url'], d['local_job_dir'], self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
         file_fetcher = self._mk_file_fetcher(remote)
         proc = ExternProc(d['x_job_id'], self.check_cmd_template, self.is_running_pattern, self.terminate_cmd_template)
         return DelegateExecution(d['transform'], d['id'], d['job_dir'], proc, d['outputs'], d['captured_stdouts'],
@@ -860,8 +878,8 @@ class AsyncDelegateExecClient:
 
         write_wrapper_script(local_wrapper_path, None, prologue, run_stmts, None)
 
-        remote = helper.Remote(remote_url, local_job_dir, self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
-        cas_remote = helper.Remote(self.cas_remote_url, local_job_dir, self.AWS_ACCESS_KEY_ID,
+        remote = helper.new_remote(remote_url, local_job_dir, self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
+        cas_remote = helper.new_remote(self.cas_remote_url, local_job_dir, self.AWS_ACCESS_KEY_ID,
                                    self.AWS_SECRET_ACCESS_KEY)
         for _, dest in source_and_dest:
             assert dest[0] != '/'
@@ -954,7 +972,7 @@ class DelegateExecClient:
     def reattach(self, external_ref: str) -> DelegateExecution:
         print("reattach", repr(external_ref))
         d = json.loads(external_ref)
-        remote = helper.Remote(d['remote_url'], d['local_job_dir'], self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
+        remote = helper.new_remote(d['remote_url'], d['local_job_dir'], self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
         file_fetcher = self._mk_file_fetcher(remote)
         return DelegateExecution(d['transform'], d['id'], d['job_dir'], PidProcStub(d['pid']), d['outputs'],
                                  d['captured_stdouts'], d['desc_name'], remote, file_fetcher, d['label'],
@@ -995,8 +1013,8 @@ class DelegateExecClient:
 
         write_wrapper_script(local_wrapper_path, None, prologue, run_stmts, None)
 
-        remote = helper.Remote(remote_url, local_job_dir, self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
-        cas_remote = helper.Remote(self.cas_remote_url, local_job_dir, self.AWS_ACCESS_KEY_ID,
+        remote = helper.new_remote(remote_url, local_job_dir, self.AWS_ACCESS_KEY_ID, self.AWS_SECRET_ACCESS_KEY)
+        cas_remote = helper.new_remote(self.cas_remote_url, local_job_dir, self.AWS_ACCESS_KEY_ID,
                                    self.AWS_SECRET_ACCESS_KEY)
         for _, dest in source_and_dest:
             assert dest[0] != '/'

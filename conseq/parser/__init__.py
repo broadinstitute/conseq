@@ -39,6 +39,8 @@ class CustomRuleEncoder(json.JSONEncoder):
 class Rule:
     def __init__(self, name):
         self.name = name
+        self.filename = None
+        self.lineno = None
         self.inputs = []
         self.outputs = None
         self.run_stmts = []
@@ -115,6 +117,9 @@ def unquote(s):
 
 
 class Semantics(object):
+    def __init__(self, filename):
+        self.filename = filename
+
     def rule_parameters(self, ast):
         # print("rule_parameters", ast)
         return tuple(ast)
@@ -206,11 +211,14 @@ class Semantics(object):
         return expectations
 
     def rule(self, ast):
+        #raise Exception()
         # print("rule", repr(ast))
-        rule_name = ast[1]
-        rule_parameters = ast[3]
-        runs = ast[4]
+        rule_name = ast.name
+        rule_parameters = ast.params
+        runs = ast.stmts
         rule = Rule(rule_name)
+        rule.lineno = ast.parseinfo.line
+        rule.filename = self.filename
         for statement in rule_parameters:
             if statement[0] == "inputs":
                 rule.inputs = statement[2]
@@ -323,7 +331,8 @@ def parse_str(text, filename=None):
         filename=filename,
         trace=False,
         nameguard=None,
-        semantics=Semantics(),
+        parseinfo=True,
+        semantics=Semantics(filename),
     )
     if statements is None:
         return []

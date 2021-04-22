@@ -7,7 +7,21 @@
         body {
             margin: 10px;
         }
+
+        table.obj-table {
+            table-layout: fixed;
+        }
+
+        .obj-table td, .obj-table th {
+            width: 60px;
+            overflow: hidden;
+            white-space: nowrap;
+              overflow: hidden;
+              text-overflow: ellipsis;
+            text-align: left;
+        }
     </style>
+
     {% endblock %}
 </head>
 <body>

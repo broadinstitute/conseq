@@ -299,6 +299,7 @@ def _amend_outputs(artifacts: List[Artifact], properties_to_add: List[Tuple[str,
     return [_amend(x) for x in artifacts]
 
 
+
 def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, rules: Rules, state_dir: str,
               executing: List[DelegateExecution], capture_output: bool, req_confirm: bool, maxfail: int,
               maxstart: None,
@@ -779,7 +780,8 @@ def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars:
          force_no_targets: bool = False,
          reattach_existing=None,
          remove_unknown_artifacts=None,
-         properties_to_add=[]) -> int:
+         properties_to_add=[],
+         rule_filter=None) -> int:
     assert max_concurrent_executions > 0
 
     if not os.path.exists(state_dir):
@@ -793,6 +795,12 @@ def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars:
         forced_rule_names = force_execution_of_rules(j, forced_targets)
     else:
         forced_rule_names = []
+
+    if rule_filter:
+        assert len(forced_targets) == 0, "Cannot specify allowed rules and forced rules"
+        # because force_execution_of_rules() call limitStartToTemplates
+        # and one will clobber the state of the other
+        j.limitStartToTemplates([rule_filter])
 
     rules = read_rules(state_dir, depfile, config_file, initial_config={})
     rule_specifications = rules.get_rule_specifications()

@@ -8,6 +8,42 @@
     </a>
 {%- endmacro %}
 
+{% macro obj_table(objs) -%}
+    {% set keys = objs | all_objs_props %}
+    <table class="obj-table" style="width: 100%">
+<colgroup>
+    <col span="1" style="width: 20px;"/>
+                {% for key in keys %}
+       <col span="1" style="width: 100px;"/>
+                {% endfor %}
+
+    </colgroup>
+
+        <thead>
+            <tr>
+                <th>ID</th>
+                {% for key in keys %}
+                <th>
+                    {{ key }}
+                </th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for obj in objs %}
+            <tr>
+                <td><a href="obj_{{obj.id}}.html">{{ obj.id }}</a></td>
+                {% for key in keys %}
+                <td>
+                    {{ obj.props.get(key, "") }}
+                </td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{%- endmacro %}
+
 {% macro execution_inputs(execution) -%}
     {% if execution.inputs %}
         <ul>
