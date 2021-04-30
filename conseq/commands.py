@@ -10,7 +10,11 @@ from conseq import helper
 from conseq import xref
 from conseq.config import read_rules
 from conseq.dep import Obj, DEFAULT_SPACE
-from conseq.depexec import convert_input_spec_to_queries, get_job_dir, remove_obj_and_children
+from conseq.depexec import (
+    convert_input_spec_to_queries,
+    get_job_dir,
+    remove_obj_and_children,
+)
 from conseq.parser import ExpectKeyIs
 from conseq.util import indent_str
 import re
@@ -18,9 +22,16 @@ import re
 log = logging.getLogger(__name__)
 
 
-def print_rules(state_dir, depfile, config_file):
+def print_rules(state_dir, depfile, config_file, mode, rule_name):
     rules = read_rules(state_dir, depfile, config_file)
-    names = [rule.name for rule in rules]
+    if mode == all:
+        names = [rule.name for rule in rules]
+    elif mode == "up":
+        pass
+    elif mode == "down":
+        pass
+    else:
+        raise Exception(f"Expected {mode} to be all, up or down")
     names.sort()
     for name in names:
         print(name)
@@ -46,8 +57,11 @@ def print_history(state_dir):
                 for k, v in value.props.items():
                     lines.append("    {}: {}".format(k, v))
 
-        print("rule {}: (execution id: {}, status: {})".format(
-            exec_.transform, exec_.id, exec_.status))
+        print(
+            "rule {}: (execution id: {}, status: {})".format(
+                exec_.transform, exec_.id, exec_.status
+            )
+        )
         for line in lines:
             print(line)
 
@@ -72,7 +86,11 @@ def localize_cmd(state_dir, space, predicates, depfile, config_file):
 
 
 def _print_execution(execution):
-    print("Executed {} (id={}, state={}, dir={}):".format(repr(execution.transform), execution.id, execution.status, execution.job_dir))
+    print(
+        "Executed {} (id={}, state={}, dir={}):".format(
+            repr(execution.transform), execution.id, execution.status, execution.job_dir
+        )
+    )
     if len(execution.inputs) > 0:
         print("  inputs:")
         for name, artifact in execution.inputs:
@@ -98,6 +116,7 @@ def downstream_cmd(state_dir, space, predicates):
         space = j.get_current_space()
 
     from collections import defaultdict
+
     rules_by_obj_id = defaultdict(lambda: set())
 
     all_rules = j.get_all_executions()
@@ -111,7 +130,7 @@ def downstream_cmd(state_dir, space, predicates):
             for v in value:
                 rules_by_obj_id[v.id].add(rule.transform)
 
-    #print(rules_by_obj_id)
+    # print(rules_by_obj_id)
 
     subset = j.find_objs(space, dict(predicates))
     for o in subset:
@@ -143,10 +162,17 @@ def ls_cmd(state_dir, space, predicates, groupby, columns):
             common_keys, variable_keys = depquery.split_props_by_counts(counts)
             common_table = [[subset[0][k] for k in common_keys]]
             if len(common_keys) > 0:
-                print(indent_str(
-                    "Properties shared by all {} rows:".format(len(subset)), indent))
-                print(indent_str(tabulate(common_table,
-                                          common_keys, tablefmt="simple"), indent + 2))
+                print(
+                    indent_str(
+                        "Properties shared by all {} rows:".format(len(subset)), indent
+                    )
+                )
+                print(
+                    indent_str(
+                        tabulate(common_table, common_keys, tablefmt="simple"),
+                        indent + 2,
+                    )
+                )
 
         elif columns != None:
             variable_keys = columns
@@ -165,8 +191,11 @@ def ls_cmd(state_dir, space, predicates, groupby, columns):
                         v = {"$filename": cache_rec[0]}
                 full_row.append(str(v))
             variable_table.append(full_row)
-        print(indent_str(tabulate(variable_table,
-                                  variable_keys, tablefmt="simple"), indent))
+        print(
+            indent_str(
+                tabulate(variable_table, variable_keys, tablefmt="simple"), indent
+            )
+        )
 
     if groupby == None:
         print_table(subset, 0)
@@ -212,13 +241,18 @@ def export_cmd(state_dir, depfile, config_file, dest_s3_path):
     print(len(objs))
     vars = rules.vars
 
-    cas_remote = helper.Remote(vars["S3_STAGING_URL"], '.', vars['AWS_ACCESS_KEY_ID'],
-                               vars['AWS_SECRET_ACCESS_KEY'])
+    cas_remote = helper.Remote(
+        vars["S3_STAGING_URL"],
+        ".",
+        helper.S3StorageConnection(
+            vars["AWS_ACCESS_KEY_ID"], vars["AWS_SECRET_ACCESS_KEY"]
+        ),
+    )
 
     def process_value(value):
         if isinstance(value, dict):
-            if '$filename' in value:
-                url = cas_remote.upload_to_cas(value['$filename'])
+            if "$filename" in value:
+                url = cas_remote.upload_to_cas(value["$filename"])
                 value = {"$file_url": url}
         return value
 
@@ -232,7 +266,7 @@ def export_cmd(state_dir, depfile, config_file, dest_s3_path):
             translated[key] = value
 
         if "$manually-added" not in translated:
-            translated["$manually-added"] = {'$value': 'false'}
+            translated["$manually-added"] = {"$value": "false"}
 
         return translated
 
@@ -246,13 +280,17 @@ def export_cmd(state_dir, depfile, config_file, dest_s3_path):
         try:
             props = process_filenames(obj)
         except Exception as e:
-            raise Exception("Could not process filenames in artifact: {}".format(repr(obj))) from e
+            raise Exception(
+                "Could not process filenames in artifact: {}".format(repr(obj))
+            ) from e
         out.write("add-if-missing {}\n\n".format(reindent(json.dumps(props), 3)))
 
     def get_key_props(obj):
         props = {}
         for key, value in obj.props.items():
-            if isinstance(value, dict) and (("$filename" in value) or ("$file_url" in value) or ("$value" in value)):
+            if isinstance(value, dict) and (
+                ("$filename" in value) or ("$file_url" in value) or ("$value" in value)
+            ):
                 continue
             props[key] = value
         return props
@@ -270,17 +308,20 @@ def export_cmd(state_dir, depfile, config_file, dest_s3_path):
             skipped += 1
             continue
 
-        out.write(
-            "remember-executed transform : \"{}\"\n".format(execution.transform))
+        out.write('remember-executed transform : "{}"\n'.format(execution.transform))
         for input in execution.inputs:
-            out.write("   input \"{}\" : {}\n".format(
-                input[0], reindent(value_as_json(input[1]), 3)))
+            out.write(
+                '   input "{}" : {}\n'.format(
+                    input[0], reindent(value_as_json(input[1]), 3)
+                )
+            )
         for output in execution.outputs:
-            out.write("   output : {}\n".format(
-                reindent(value_as_json(output), 3)))
+            out.write("   output : {}\n".format(reindent(value_as_json(output), 3)))
         out.write("\n")
 
-    log.info("Skipping export of %d executions which did not complete successfully", skipped)
+    log.info(
+        "Skipping export of %d executions which did not complete successfully", skipped
+    )
     if dest_s3_path.startswith("s3://"):
         log.info("Uploading artifact metadata to %s", dest_s3_path)
         cas_remote.upload_str(dest_s3_path, out.getvalue())
@@ -302,29 +343,38 @@ def debugrun(state_dir, depfile, target, override_vars, config_file):
 
     rule = rules.get_rule(target)
     queries, predicates = convert_input_spec_to_queries(
-        rules.jinja2_env, rule, rules.vars)
+        rules.jinja2_env, rule, rules.vars
+    )
     for q in queries:
         t = dep.Template([q], [], rule.name)
         applications = j.query_template(t)
         log.info("{} matches for {}".format(len(applications), q))
 
-    applications = j.query_template(
-        dep.Template(queries, predicates, rule.name))
+    applications = j.query_template(dep.Template(queries, predicates, rule.name))
     log.info("{} matches for entire rule".format(len(applications)))
-
 
 
 def gc(state_dir):
     db_path = os.path.join(state_dir, "db.sqlite3")
 
     if not os.path.exists(state_dir) or not os.path.exists(db_path):
-        log.warning("Nothing to do (No such directory: {} or missing db.sqlite3 file)".format(state_dir))
+        log.warning(
+            "Nothing to do (No such directory: {} or missing db.sqlite3 file)".format(
+                state_dir
+            )
+        )
         return
 
     j = dep.open_job_db(db_path)
 
-    all_job_dirs = [ os.path.join(state_dir, fn)  for fn in os.listdir(state_dir) if re.match("r[0-9]+", fn)]
-    job_dirs_in_use = set([e.job_dir for e in j.get_all_executions() if e.job_dir is not None])
+    all_job_dirs = [
+        os.path.join(state_dir, fn)
+        for fn in os.listdir(state_dir)
+        if re.match("r[0-9]+", fn)
+    ]
+    job_dirs_in_use = set(
+        [e.job_dir for e in j.get_all_executions() if e.job_dir is not None]
+    )
 
     # make sure the jobdirs are a subset of all the job dirs we've found
     # print("job in use", list(job_dirs_in_use)[:10])
@@ -353,14 +403,14 @@ def _rules_to_dot(rules):
 
     def add_obj(type):
         if type in objs:
-            return objs[type]['id']
+            return objs[type]["id"]
         id = len(objs)
         objs[type] = dict(id=id, type=type)
         return id
 
     def add_rule(rule_name, filename):
         if rule_name in rule_nodes:
-            return rule_nodes[rule_name]['id']
+            return rule_nodes[rule_name]["id"]
         id = len(rule_nodes)
         rule_nodes[rule_name] = dict(id=id, name=rule_name, filename=filename)
         return id
@@ -391,13 +441,15 @@ def _rules_to_dot(rules):
 
     for node in rule_nodes.values():
         stmts.append(
-            "r{} [shape=box, style=\"filled\", fillcolor=\"gray\", label=\"{}\n{}\"]".format(node['id'], node['name'],
-                                                                                             node['filename']))
+            'r{} [shape=box, style="filled", fillcolor="gray", label="{}\n{}"]'.format(
+                node["id"], node["name"], node["filename"]
+            )
+        )
 
     for obj in objs.values():
-        prop_values = ["type=" + obj['type']]
+        prop_values = ["type=" + obj["type"]]
         label = "\\n".join(prop_values)
-        stmts.append("o{} [label=\"{}\"]".format(obj['id'], label))
+        stmts.append('o{} [label="{}"]'.format(obj["id"], label))
 
     return "digraph { " + (";\n".join(set(stmts))) + " } "
 

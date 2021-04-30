@@ -34,9 +34,7 @@
             <tr>
                 <td><a href="obj_{{obj.id}}.html">{{ obj.id }}</a></td>
                 {% for key in keys %}
-                <td>
-                    {{ obj.props.get(key, "") }}
-                </td>
+                {{ obj.props.get(key, "") | value_cell }}
                 {% endfor %}
             </tr>
             {% endfor %}

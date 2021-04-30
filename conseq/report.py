@@ -84,8 +84,20 @@ def generate_report_cmd(state_dir, dest_dir):
             result.append((name, value))
         return sorted(result)
 
+    import jinja2
+    def value_cell(value):
+        if isinstance(value, dict):
+            if "$value" in value:
+                return jinja2.Markup(f"<td class='transient-value'>{jinja2.escape(value['$value'])}</td>")
+            elif "$filename" in value:
+                return jinja2.Markup(f"<td class='filename-value'>{jinja2.escape(value['$filename'])}</td>")
+            elif "$file_url" in value:
+                return jinja2.Markup(f"<td class='file-url-value'>{jinja2.escape(value['$file_url'])}</td>")
+        return jinja2.Markup(f"<td>{jinja2.escape(str(value))}</td>")
+
     jinja2_env.filters.update({"all_objs_props": all_objs_props,
                                "prop_summary": prop_summary,
+                               "value_cell": value_cell,
                         'is_tuple': lambda x: isinstance(x, tuple)})
     j = open_job_db(os.path.join(state_dir, "db.sqlite3"))
 

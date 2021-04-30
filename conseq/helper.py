@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Tuple
 from boto.s3.bucket import Bucket
 from boto.s3.connection import S3Connection
 from boto.s3.key import Key
+import traceback
 
 log = logging.getLogger(__name__)
 
@@ -384,8 +385,15 @@ def exec_config(args, config):
     stdout_path = config['stdout']
     stderr_path = config['stderr']
     exec_summary_path = config['exec_summary']
-
-    exec_command_with_capture(command, stderr_path, stdout_path, exec_summary_path, args.local_dir)
+    try:
+        exec_command_with_capture(command, stderr_path, stdout_path, exec_summary_path, args.local_dir)
+    except Exception:
+        tb = traceback.format_exc()
+        message = "Got exception in exec_command_with_capture():\n"+tb
+        print("Got an exception and now desperately attempting to gracefully to communicate it back by writing it to the stderr log")
+        print(message)
+        with open(stderr_path, "at") as fd:
+            fd.write(message)
 
     # push results
     for r in config['push']:
@@ -430,7 +438,11 @@ def exec_command_with_capture(command, stderr_path, stdout_path, retcode_path, l
         stdout_fd = os.open(os.path.join(local_dir, stdout_path), os.O_WRONLY | os.O_APPEND | os.O_CREAT)
 
     log.info("executing {}".format(command))
-    retcode = subprocess.call(command, stdout=stdout_fd, stderr=stderr_fd, cwd=local_dir)
+    try:
+        retcode = subprocess.call(command, stdout=stdout_fd, stderr=stderr_fd, cwd=local_dir)
+    finally:
+        os.close(stdout_fd)
+        os.close(stderr_fd)
     log.info("Command returned {}".format(retcode))
 
     if retcode_path is not None:

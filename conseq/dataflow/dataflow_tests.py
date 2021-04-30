@@ -1,5 +1,5 @@
 from .models import ANY_VALUE
-from .dataflow import DataFlow, RuleModel
+from .dataflow import DataFlow, RuleModel, construct_dataflow
 
 def test_execution_graph():
     g = DataFlow()
@@ -10,6 +10,44 @@ def test_execution_graph():
 
     assert len(g.get_artifacts()) == 3
     assert len(g.get_rules()) == 2
+
+
+def test_upstream(tmpdir):
+    from conseq.config import read_rules
+    state_dir = tmpdir.join("state")
+    state_dir.mkdir()
+
+    depfile = tmpdir.join("dep.conseq")
+    depfile.write("""
+rule a:
+    outputs: {"type": "a"}
+
+rule b:
+    inputs: in = {"type": "a"}
+    outputs: {"type": "b"}
+
+rule c:
+    inputs: in = {"type": "b"}
+    outputs: {"type": "c"}
+
+rule d:
+    inputs: in = {"type": "c"}
+    outputs: {"type": "d"}
+
+rule e:
+    inputs: in = {"type": "d"}
+    outputs: {"type": "e"}
+
+    """)
+
+    configfile = tmpdir.join("config.conseq")
+    configfile.write("")
+
+    rules = read_rules(str(state_dir), str(depfile), str(configfile))
+    g = construct_dataflow(rules)
+
+    assert sorted(g.get_upstream_rules("c")) == ["a", "b"]
+    assert sorted(g.get_downstream_rules("c") ) == ["d", "e"]
 
     # for visualization of execution profile we want a list of Rule1 -> output, output -> Rule2 and a definition for output
 

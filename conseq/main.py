@@ -261,9 +261,23 @@ def add_run(sub):
 def add_rules(sub):
     parser = sub.add_parser("rules", help="Print the names all rules in the file")
     parser.add_argument('file', metavar="FILE", help="the input file to parse")
+    parser.add_argument('--up', metavar="RULE", help="If specified, will report only rules upstream of the given rule")
+    parser.add_argument('--down', metavar="RULE", help="If specified, will report only rules downstream of the given rule")
 
     def rules(args):
-        commands.print_rules(args.dir, args.file, _get_config_file_path(args))
+        if (args.up is None and args.down is None):
+            mode = "all"
+            rule_name = None
+        else:
+            assert args.up is None or args.down is None, "Cannot specify both --up and --down"
+            if args.up:
+                mode = "up"
+                rule_name = args.up
+            else:
+                mode = "down"
+                rule_name = args.down
+
+        commands.print_rules(args.dir, args.file, _get_config_file_path(args), mode, rule_name)
 
     parser.set_defaults(func=rules)
 
