@@ -24,12 +24,12 @@ log = logging.getLogger(__name__)
 
 def print_rules(state_dir, depfile, config_file, mode, rule_name):
     rules = read_rules(state_dir, depfile, config_file)
-    if mode == all:
+    if mode == "all":
         names = [rule.name for rule in rules]
     elif mode == "up":
-        pass
+        raise NotImplemented()
     elif mode == "down":
-        pass
+        raise NotImplemented()
     else:
         raise Exception(f"Expected {mode} to be all, up or down")
     names.sort()
