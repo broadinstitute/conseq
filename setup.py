@@ -16,7 +16,7 @@ setup(name='conseq',
       description='ConSeq dependency tracker',
       author='Philip Montgomery',
       author_email='pmontgom@broadinstitute.org',
-      packages=['conseq', 'conseq.parser', 'conseq.templates'],
+      packages=['conseq', 'conseq.parser', 'conseq.templates', 'conseq.dataflow'],
       package_data={"":["*.html"]},
       entry_points={'console_scripts': ['conseq=conseq.main:conseq_command_entry']
                     },
