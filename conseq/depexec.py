@@ -88,7 +88,10 @@ def publish_manifest(location, dictionary, config):
     from conseq import helper
     accesskey = config['AWS_ACCESS_KEY_ID']
     secretaccesskey = config['AWS_SECRET_ACCESS_KEY']
-    remote = helper.Remote(os.path.dirname(location), ".", accesskey=accesskey, secretaccesskey=secretaccesskey)
+    remote = helper.Remote(os.path.dirname(location), ".",
+                           helper.S3StorageConnection(
+                               accesskey, secretaccesskey
+                           ))
     remote.upload_str(os.path.basename(location), json.dumps(dictionary, indent=2))
 
 
