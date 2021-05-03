@@ -209,6 +209,19 @@ def ls_cmd(state_dir, space, predicates, groupby, columns):
             print_table(rows, 2)
             print()
 
+def forget_cmd(state_dir, rule_name, is_pattern):
+    j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
+
+    if is_pattern:
+        pattern = re.compile(rule_name)
+        transforms = [x.transform for x in j.get_all_executions() if pattern.match(x.transform)]
+    else:
+        transforms = [rule_name]
+
+    for transform in transforms:
+        j.invalidate_rule_execution(transform)
+
+
 
 def rm_cmd(state_dir, dry_run, space, query):
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))

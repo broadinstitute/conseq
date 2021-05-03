@@ -95,6 +95,15 @@ def add_lsexec(sub):
 
     parser.set_defaults(func=lsexec)
 
+def add_forget(sub):
+    parser = sub.add_parser("forget", help="Remove records of execution having been completed")
+    parser.add_argument('--regex', action="store_true", dest="is_pattern")
+    parser.add_argument('rule_name')
+
+    def forget(args):
+        commands.forget_cmd(args.dir, args.rule_name, args.is_pattern)
+
+    parser.set_defaults(func=forget)
 
 def add_rm(sub):
     parser = sub.add_parser("rm", help="Remove objects that satisfy given query")
@@ -408,6 +417,7 @@ def main(args=None):
     add_lsexec(sub)
     add_gc(sub)
     add_rm(sub)
+    add_forget(sub)
     add_run(sub)
     add_rules(sub)
     add_debugrun(sub)

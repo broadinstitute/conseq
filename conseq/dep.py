@@ -1207,10 +1207,6 @@ class Jobs:
                     self.log.delete(x.id)
             self.objects.remove(obj_id)
 
-    def get_all_rules(self):
-        with transaction(self.db):
-            return self.get_all()
-
     def find_all_reachable_downstream_objs(self, obj_ids):
         with transaction(self.db):
             obj_ids = self.log.find_all_reachable_downstream_objs(obj_ids)
@@ -1335,7 +1331,6 @@ class Jobs:
     def cleanup_unsuccessful(self) -> None:
         with transaction(self.db):
             self.rule_set.remove_unsuccessful()
-            # self.log.mark_incomplete()
 
     def find_rule_output_ids(self, transform):
         with transaction(self.db):

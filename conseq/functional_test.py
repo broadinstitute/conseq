@@ -389,6 +389,46 @@ def test_gc_with_real_cleanup(tmpdir):
     assert os.path.exists(os.path.join(state_dir, "r3"))
     assert not os.path.exists(os.path.join(state_dir, "r4"))
 
+def test_forget(tmpdir):
+    config = """
+        rule a1:
+            outputs: {"type":"a1"}
+        rule a2:
+            outputs: {"type":"a2"}
+    """
+    config_file = str(tmpdir.join("t.conseq"))
+    with open(config_file, "wt") as fd:
+        fd.write(config)
+
+    state_dir = str(tmpdir.join("state"))
+
+    from conseq.main import main
+
+    def was_run(rule_name):
+        j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
+        return rule_name in [x.transform for x in j.get_all_executions()]
+
+    main(["--dir", state_dir, "run", config_file])
+    assert was_run("a1")
+    assert was_run("a2")
+
+    main(["--dir", state_dir, "forget", "a1"])
+    assert not was_run("a1")
+    assert was_run("a2")
+
+    main(["--dir", state_dir, "run", config_file])
+    assert was_run("a1")
+    assert was_run("a2")
+
+    main(["--dir", state_dir, "forget", ".2", "--regex"])
+    assert was_run("a1")
+    assert not was_run("a2")
+
+    main(["--dir", state_dir, "run", config_file])
+    assert was_run("a1")
+    assert was_run("a2")
+
+
 
 def test_commands(tmpdir):
     # don't actually test any of the functionality of these commands, only that they execute error free
