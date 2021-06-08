@@ -5,26 +5,33 @@ import logging
 import os
 import re
 import subprocess
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Literal
 
-from boto.s3.bucket import Bucket
-from boto.s3.connection import S3Connection
-from boto.s3.key import Key
+from boto3.session import Session
+from botocore.client import Config
+from botocore.handlers import set_list_objects_encoding_type_url
+import boto3
+
+
+from google.cloud import storage
 import traceback
 
 log = logging.getLogger(__name__)
 
-def _parse_remote(path: str) -> Tuple[
-    str, str]:
-    m = re.match("^s3://([^/]+)/(.*)$", path)
-    assert m != None, "invalid remote path: {}".format(path)
+
+def _parse_remote(path: str) -> Tuple[str, str]:
+    m = re.match("^(?:s3|gs)://([^/]+)/(.*)$", path)
+    try:
+        assert m is not None, "invalid remote path: {}".format(path)
+    except AssertionError:
+        __import__("pdb").set_trace()
     bucket_name = m.group(1)
     path = m.group(2)
     return bucket_name, path
 
 
 def download_s3_as_string(remote):
-    assert remote.startswith("s3:")
+    assert remote.startswith("s3:") or remote.startswith("gs:")
     bucket, remote_path = _parse_remote(remote)
 
     key = bucket.get_key(remote_path)
@@ -39,43 +46,117 @@ class StorageConnection:
     def get_bucket(self, bucket_name):
         raise NotImplemented()
 
+
+class Key:
+    def __init__(self, obj):
+        self.obj = obj
+
+    def get_contents_as_string(self):
+        __import__("pdb").set_trace()
+        return self.obj.get()["Body"].read().decode("utf-8")
+
+
+class Bucket:
+    def __init__(self, bucket_name, s3):
+        self.bucket_name = bucket_name
+        self.s3 = s3
+
+    def get_key(self, path: str):
+        bucket_name, path = _parse_remote(path)
+        obj = self.s3.Object(self.bucket_name, path)
+        return Key(obj)
+
+
 class S3StorageConnection(StorageConnection):
-    def __init__(self, accesskey, secretaccesskey):
-        self.c = S3Connection(accesskey, secretaccesskey)
+    def __init__(self, accesskey, secretaccesskey, provider=None):
+        if provider is None:
+            provider = "s3"
+        else:
+            assert provider in ["s3", "gs"], "Expected s3 or gs"
+        session = Session(
+            aws_access_key_id=accesskey,
+            aws_secret_access_key=secretaccesskey,
+            region_name="US-CENTRAL1",  # do I need this?
+        )
+        if provider == "gs":
+            # Taken from https://gist.github.com/gleicon/2b8acb9f9c0f22753eaac227ff997b34
+            session.events.unregister(
+                "before-parameter-build.s3.ListObjects",
+                set_list_objects_encoding_type_url,
+            )
+            self.s3 = session.resource(
+                "s3",
+                endpoint_url="https://storage.googleapis.com",
+                config=Config(signature_version="s3v4"),
+            )
+        elif provider == "s3":
+            self.s3 = session.resource(
+                "s3",
+                endpoint_url="https://storage.googleapis.com",
+                config=Config(signature_version="s3v4"),
+            )
+
     def get_bucket(self, bucket_name):
-        return self.c.get_bucket(bucket_name, validate=False)
+        return Bucket(bucket_name, self.s3)
+
     def get_generation_id(self, key_obj):
         raise NotImplemented
+
 
 def new_remote(remote_url, local_dir, accesskey, secretaccesskey):
     sc = S3StorageConnection(accesskey, secretaccesskey)
     return Remote(remote_url, local_dir, sc)
 
+
 class Remote:
-    def __init__(self, remote_url: str, local_dir: str, sc : StorageConnection):
+    def __init__(
+        self,
+        remote_url: str,
+        local_dir: str,
+        sc: StorageConnection,
+        storage_provider=None,
+    ):
         self.connection = sc
         self.remote_url = remote_url
         self.local_dir = local_dir
         self.bucket_name, self.remote_path = _parse_remote(remote_url)
         self.bucket = self.get_bucket(self.bucket_name)
+        if storage_provider is None:
+            storage_provider = "s3"
+        else:
+            assert (
+                storage_provider == "s3" or storage_provider == "gs"
+            ), "Only support GCP or AWS cloud storage"
+        self.storage_provider = storage_provider
+        assert (
+            self.storage_provider in remote_url
+        ), f"Expected to see {self.storage_provider}:// in remote_url {self.remote_url}"
 
-    def get_bucket(self, bucket_name : str):
+    def get_bucket(self, bucket_name: str):
         return self.connection.get_bucket(bucket_name)
 
     def exists(self, remote: str) -> bool:
-        if remote.startswith("s3:"):
+        if remote.startswith("s3:") or remote.startswith("gs:"):
             bucket_name, remote_path = _parse_remote(remote)
             bucket = self.get_bucket(bucket_name)
         else:
             bucket = self.bucket
-            remote_path = os.path.normpath(self.remote_path + "/" + remote)
+            remote_path = f"{self.storage_provider}://{self.remote_path}/{remote}"
 
         key = bucket.get_key(remote_path)
         return key != None
 
-    def _download_object(self, source_bucket, source_key, dest_path, stage_dir, skipExisting):
+    def _download_object(
+        self, source_bucket, source_key, dest_path, stage_dir, skipExisting
+    ):
         if os.path.exists(dest_path) and skipExisting:
-            log.info("Already s3://%s/%s downloaded as %s", source_bucket, source_key, dest_path)
+            log.info(
+                "Already %s://%s/%s downloaded as %s",
+                self.storage_provider,
+                source_bucket,
+                source_key,
+                dest_path,
+            )
             return
 
         bucket = self.get_bucket(source_bucket)
@@ -101,7 +182,9 @@ class Remote:
             else:
                 # otherwise, fall back to using path and generation ID/etag
                 etag = key.get_etag()
-                stage_path = os.path.join(stage_dir, "gcs", source_bucket, source_key, etag)
+                stage_path = os.path.join(
+                    stage_dir, "gcs", source_bucket, source_key, etag
+                )
 
             download_to(stage_path)
 
@@ -111,7 +194,14 @@ class Remote:
         else:
             download_to(dest_path)
 
-    def download(self, remote: str, local : str, ignoreMissing=False, skipExisting=True, stage_dir=None):
+    def download(
+        self,
+        remote: str,
+        local: str,
+        ignoreMissing=False,
+        skipExisting=True,
+        stage_dir=None,
+    ):
         # maybe upload and download should use trailing slash to indicate directory should be uploaded instead of just a file
         if not local.startswith("/"):
             local = os.path.normpath(self.local_dir + "/" + local)
@@ -130,7 +220,9 @@ class Remote:
             abs_local = os.path.abspath(local)
             log.info("Downloading file %s to %s", remote_path, abs_local)
 
-            self._download_object(bucket_name, remote_path, abs_local, stage_dir,skipExisting)
+            self._download_object(
+                bucket_name, remote_path, abs_local, stage_dir, skipExisting
+            )
         else:
             # download everything with the prefix
             transferred = 0
@@ -192,7 +284,12 @@ class Remote:
                             hash = calc_hash(local_path)
                             k.set_metadata("sha256", hash)
                         else:
-                            log.info("Uploading dir %s (%s to %s), skiping existing file", local_path, fn, fn)
+                            log.info(
+                                "Uploading dir %s (%s to %s), skiping existing file",
+                                local_path,
+                                fn,
+                                fn,
+                            )
         elif not ignoreMissing:
             raise Exception("Could not find {}".format(local))
 
@@ -229,14 +326,16 @@ class Remote:
 
 
 def drop_prefix(prefix, value):
-    assert value[:len(prefix)] == prefix, "Expected {} to be prefixed with {}".format(repr(value), repr(prefix))
-    return value[len(prefix):]
+    assert value[: len(prefix)] == prefix, "Expected {} to be prefixed with {}".format(
+        repr(value), repr(prefix)
+    )
+    return value[len(prefix) :]
 
 
 def calc_hash(filename: str) -> str:
     h = hashlib.sha256()
     with open(filename, "rb") as fd:
-        for chunk in iter(lambda: fd.read(10000), b''):
+        for chunk in iter(lambda: fd.read(10000), b""):
             h.update(chunk)
     return h.hexdigest()
 
@@ -247,13 +346,17 @@ def push_str_to_cas(remote, content, filename="<unknown>"):
 
     remote_name = "CAS/{}".format(hash)
     if remote.exists(remote_name):
-        log.info("Skipping upload of %s because %s already exists", filename, remote_name)
+        log.info(
+            "Skipping upload of %s because %s already exists", filename, remote_name
+        )
     else:
         remote.upload_str(remote_name, content)
     return remote_name
 
 
-def push_to_cas(remote: Remote, filenames: List[str], return_full_url: bool = False) -> Dict[str, str]:
+def push_to_cas(
+    remote: Remote, filenames: List[str], return_full_url: bool = False
+) -> Dict[str, str]:
     "upload multiple files to CAS and return mapping of filename to url"
     name_mapping = {}
 
@@ -262,7 +365,9 @@ def push_to_cas(remote: Remote, filenames: List[str], return_full_url: bool = Fa
         hash = calc_hash(local_filename)
         remote_name = "CAS/{}".format(hash)
         if remote.exists(remote_name):
-            log.info("Skipping upload of %s because %s already exists", filename, remote_name)
+            log.info(
+                "Skipping upload of %s because %s already exists", filename, remote_name
+            )
         else:
             remote.upload(filename, remote_name, hash=hash)
         if return_full_url:
@@ -292,7 +397,12 @@ def push(remote, filenames):
 
 
 def push_cmd(args, config):
-    remote = Remote(args.remote_url, args.local_dir, config["AWS_ACCESS_KEY_ID"], config["AWS_SECRET_ACCESS_KEY"])
+    remote = Remote(
+        args.remote_url,
+        args.local_dir,
+        config["AWS_ACCESS_KEY_ID"],
+        config["AWS_SECRET_ACCESS_KEY"],
+    )
     if args.cas:
         push_to_cas(remote, args.filenames)
     else:
@@ -302,12 +412,22 @@ def push_cmd(args, config):
 def pull(remote, file_mappings, ignoreMissing=False, skipExisting=True, stage_dir=None):
     for remote_path, local_path in file_mappings:
         log.debug("pull remote_path=%s local_path=%s", remote_path, local_path)
-        remote.download(remote_path, local_path, ignoreMissing=ignoreMissing, skipExisting=skipExisting,
-                        stage_dir=stage_dir)
+        remote.download(
+            remote_path,
+            local_path,
+            ignoreMissing=ignoreMissing,
+            skipExisting=skipExisting,
+            stage_dir=stage_dir,
+        )
 
 
 def pull_cmd(args, config):
-    remote = Remote(args.remote_url, args.local_dir, config["AWS_ACCESS_KEY_ID"], config["AWS_SECRET_ACCESS_KEY"])
+    remote = Remote(
+        args.remote_url,
+        args.local_dir,
+        config["AWS_ACCESS_KEY_ID"],
+        config["AWS_SECRET_ACCESS_KEY"],
+    )
     pull(remote, args.file_mappings)
 
 
@@ -315,7 +435,7 @@ def read_config(filename):
     config = {}
     with open(filename, "rt") as fd:
         for line in fd.readlines():
-            m = re.match("\\s*(\\S+)\\s*=\\s*\"([^\"]+)\"", line)
+            m = re.match('\\s*(\\S+)\\s*=\\s*"([^"]+)"', line)
             assert m != None
             config[m.group(1)] = m.group(2)
     return config
@@ -323,13 +443,15 @@ def read_config(filename):
 
 def publish_results(results_json_file, remote, published_files_root, results_json_dest):
     if not os.path.exists(results_json_file):
-        log.info("Skipping publishing results back. %s does not exist", results_json_file)
+        log.info(
+            "Skipping publishing results back. %s does not exist", results_json_file
+        )
         return
     with open(results_json_file) as fd:
         results = json.load(fd)
 
     outputs_to_publish = []
-    for output in results['outputs']:
+    for output in results["outputs"]:
         rewritten_output = {}
         for k, v in output.items():
             if isinstance(v, dict) and "$filename" in v:
@@ -349,9 +471,9 @@ def publish_results(results_json_file, remote, published_files_root, results_jso
 
 def convert_json_mapping(d):
     result = []
-    for rec in d['mapping']:
-        remote = rec['remote']
-        local = rec['local']
+    for rec in d["mapping"]:
+        remote = rec["remote"]
+        local = rec["local"]
         assert not local.startswith("/")
         result.append((remote, local))
     return result
@@ -372,38 +494,51 @@ def exec_config(args, config):
         raise Exception("Could not open {}".format(args.url))
     config = json.loads(config_content)
 
-    remote = Remote(config['remote_url'], args.local_dir)
-    for r in config['pull']:
-        remote.download(r['src'], r['dest'])
+    remote = Remote(config["remote_url"], args.local_dir)
+    for r in config["pull"]:
+        remote.download(r["src"], r["dest"])
 
-    for dirname in config['mkdir']:
+    for dirname in config["mkdir"]:
         if not os.path.exists(dirname):
             os.makedirs(dirname)
 
     # execute command
-    command = config['command']
-    stdout_path = config['stdout']
-    stderr_path = config['stderr']
-    exec_summary_path = config['exec_summary']
+    command = config["command"]
+    stdout_path = config["stdout"]
+    stderr_path = config["stderr"]
+    exec_summary_path = config["exec_summary"]
     try:
-        exec_command_with_capture(command, stderr_path, stdout_path, exec_summary_path, args.local_dir)
+        exec_command_with_capture(
+            command, stderr_path, stdout_path, exec_summary_path, args.local_dir
+        )
     except Exception:
         tb = traceback.format_exc()
-        message = "Got exception in exec_command_with_capture():\n"+tb
-        print("Got an exception and now desperately attempting to gracefully to communicate it back by writing it to the stderr log")
+        message = "Got exception in exec_command_with_capture():\n" + tb
+        print(
+            "Got an exception and now desperately attempting to gracefully to communicate it back by writing it to the stderr log"
+        )
         print(message)
         with open(stderr_path, "at") as fd:
             fd.write(message)
 
     # push results
-    for r in config['push']:
-        remote.upload(r['src'], r['dest'], force=True)
+    for r in config["push"]:
+        remote.upload(r["src"], r["dest"], force=True)
 
 
 def exec_cmd(args, config):
-    remote = Remote(args.remote_url, args.local_dir, config["AWS_ACCESS_KEY_ID"], config["AWS_SECRET_ACCESS_KEY"])
-    cas_remote = Remote(args.cas_remote_url, args.local_dir, config["AWS_ACCESS_KEY_ID"],
-                        config["AWS_SECRET_ACCESS_KEY"])
+    remote = Remote(
+        args.remote_url,
+        args.local_dir,
+        config["AWS_ACCESS_KEY_ID"],
+        config["AWS_SECRET_ACCESS_KEY"],
+    )
+    cas_remote = Remote(
+        args.cas_remote_url,
+        args.local_dir,
+        config["AWS_ACCESS_KEY_ID"],
+        config["AWS_SECRET_ACCESS_KEY"],
+    )
 
     pull_map = []
     if args.download_pull_map is not None:
@@ -415,9 +550,17 @@ def exec_cmd(args, config):
         for mapping_str in args.download:
             pull_map.append(parse_mapping_str(mapping_str))
 
-    pull(remote, pull_map, ignoreMissing=True, skipExisting=not args.forcedl, stage_dir=args.stage_dir)
+    pull(
+        remote,
+        pull_map,
+        ignoreMissing=True,
+        skipExisting=not args.forcedl,
+        stage_dir=args.stage_dir,
+    )
 
-    exec_command_with_capture(args.command, args.stderr, args.stdout, args.retcode, args.local_dir)
+    exec_command_with_capture(
+        args.command, args.stderr, args.stdout, args.retcode, args.local_dir
+    )
 
     if args.upload is not None:
         push(remote, args.upload)
@@ -425,21 +568,31 @@ def exec_cmd(args, config):
     if args.uploadresults is not None:
         results_json_file = "./results.json"
         published_files_root = args.local_dir
-        publish_results(results_json_file, cas_remote, published_files_root, args.uploadresults)
+        publish_results(
+            results_json_file, cas_remote, published_files_root, args.uploadresults
+        )
 
 
-def exec_command_with_capture(command, stderr_path, stdout_path, retcode_path, local_dir):
+def exec_command_with_capture(
+    command, stderr_path, stdout_path, retcode_path, local_dir
+):
     stderr_fd = None
     if stderr_path is not None:
-        stderr_fd = os.open(os.path.join(local_dir, stderr_path), os.O_WRONLY | os.O_APPEND | os.O_CREAT)
+        stderr_fd = os.open(
+            os.path.join(local_dir, stderr_path), os.O_WRONLY | os.O_APPEND | os.O_CREAT
+        )
 
     stdout_fd = None
     if stdout_path is not None:
-        stdout_fd = os.open(os.path.join(local_dir, stdout_path), os.O_WRONLY | os.O_APPEND | os.O_CREAT)
+        stdout_fd = os.open(
+            os.path.join(local_dir, stdout_path), os.O_WRONLY | os.O_APPEND | os.O_CREAT
+        )
 
     log.info("executing {}".format(command))
     try:
-        retcode = subprocess.call(command, stdout=stdout_fd, stderr=stderr_fd, cwd=local_dir)
+        retcode = subprocess.call(
+            command, stdout=stdout_fd, stderr=stderr_fd, cwd=local_dir
+        )
     finally:
         os.close(stdout_fd)
         os.close(stderr_fd)
@@ -459,7 +612,9 @@ def main(varg=None):
     subparsers = parser.add_subparsers()
 
     push_parser = subparsers.add_parser("push")
-    push_parser.add_argument("--cas", help="Use content addressable storage", action='store_true')
+    push_parser.add_argument(
+        "--cas", help="Use content addressable storage", action="store_true"
+    )
     push_parser.add_argument("remote_url", help="base remote url to use")
     push_parser.add_argument("local_dir")
     push_parser.add_argument("filenames", nargs="+")
@@ -475,10 +630,17 @@ def main(varg=None):
     exec_parser.add_argument("--stdout", "-o")
     exec_parser.add_argument("--stderr", "-e")
     exec_parser.add_argument("--retcode", "-r")
-    exec_parser.add_argument("--forcedl", help="Force download of files even if the destination already exists")
-    exec_parser.add_argument("--stage", help="directory to use for staging in local CAS", dest="stage_dir")
-    exec_parser.add_argument("--uploadresults",
-                             help="If set, upload results.json to this location and all other associated files to CAS")
+    exec_parser.add_argument(
+        "--forcedl",
+        help="Force download of files even if the destination already exists",
+    )
+    exec_parser.add_argument(
+        "--stage", help="directory to use for staging in local CAS", dest="stage_dir"
+    )
+    exec_parser.add_argument(
+        "--uploadresults",
+        help="If set, upload results.json to this location and all other associated files to CAS",
+    )
     exec_parser.add_argument("command", nargs=argparse.REMAINDER)
     exec_parser.set_defaults(func=exec_cmd)
 
@@ -490,8 +652,11 @@ def main(varg=None):
     pull_parser = subparsers.add_parser("pull")
     pull_parser.add_argument("remote_url", help="base remote url to pull from")
     pull_parser.add_argument("local_dir")
-    pull_parser.add_argument("file_mappings", help="mappings of remote paths to local paths of the form 'remote:local'",
-                             nargs="+")
+    pull_parser.add_argument(
+        "file_mappings",
+        help="mappings of remote paths to local paths of the form 'remote:local'",
+        nargs="+",
+    )
     pull_parser.set_defaults(func=pull_cmd)
 
     log.info("helper.main parameters: %s", varg)
