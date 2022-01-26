@@ -540,8 +540,9 @@ class ExternProc:
         check_cmd = self.check_cmd_template.format(job_id=self.job_id)
         output = subprocess.check_output(check_cmd, shell=True)
         output = output.decode("utf8")
-        print("Check_cmd: {}".format(check_cmd))
-        print("output: {}".format(output))
+        # TODO: Would be nice to write this and the output to the delegate log for debugging
+        #print("Check_cmd: {}".format(check_cmd))
+        #print("output: {}".format(output))
         m = re.search(self.is_running_pattern, output)
         # print("output={} is_running_pattern={}, m={}".format(repr(output), self.is_running_pattern, m))
         if m is None:

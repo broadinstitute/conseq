@@ -805,7 +805,8 @@ def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars:
         # and one will clobber the state of the other
         j.limitStartToTemplates([rule_filter])
 
-    rules = read_rules(state_dir, depfile, config_file, initial_config={})
+    # pass in override_vars as the initial config so we can write conditions which reference those variables
+    rules = read_rules(state_dir, depfile, config_file, initial_config=override_vars)
     rule_specifications = rules.get_rule_specifications()
     jinja2_env = rules.jinja2_env
 
@@ -813,9 +814,6 @@ def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars:
         rules.add_client("default", exec_client.LocalExecClient({}))
     # override with max_concurrent_executions
     rules.get_client("default").resources["slots"] = max_concurrent_executions
-
-    for var, value in override_vars.items():
-        rules.set_var(var, value)
 
     # handle the "add-if-missing" objects and changes to rules
     reconcile_db(j, jinja2_env, rule_specifications, rules.objs, rules.vars, force=remove_unknown_artifacts)

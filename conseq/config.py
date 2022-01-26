@@ -6,6 +6,9 @@ from conseq.hashcache import HashCache
 from conseq.template import LazyConfig
 from conseq.template import create_jinja2_env, render_template
 
+import logging
+
+log = logging.getLogger(__name__)
 
 class Rules:
     def __init__(self):
@@ -16,6 +19,7 @@ class Rules:
         self.exec_clients = {}
         self.remember_executed = []
         self.jinja2_env = create_jinja2_env()
+        self.override_names = set()
 
     def get_rule_specifications(self):
         result = {}
@@ -29,8 +33,16 @@ class Rules:
     def add_if_missing(self, obj):
         self.objs.append(obj)
 
-    def set_var(self, name, value):
-        self.vars[name] = value
+    def set_var(self, name, value, is_override=False):
+        if is_override:
+            assert name not in self.vars
+            self.override_names.add(name)
+            self.vars[name] = value
+        else:
+            if name in self.override_names:
+                log.warning("Skipping assignment of %s to %s, because that variable is overriden (value: %s)", repr(name), repr(value), repr(self.vars[name]))
+            else:
+                self.vars[name] = value
 
     def get_vars(self):
         return dict(self.vars)

@@ -341,11 +341,17 @@ def add_report(sub):
 
 def add_export(sub):
     def export(args):
-        commands.export_cmd(args.dir, args.file, args.config, args.dest)
+        if args.exclude_patterns:
+            exclude_patterns = args.exclude_patterns
+        else:
+            exclude_patterns = []
+
+        commands.export_cmd(args.dir, args.file, args.config, args.dest, exclude_patterns)
 
     parser = sub.add_parser("export", help="Write all artifacts to S3 so that they can be imported somewhere else")
     parser.add_argument("file", help="the conseq config to use")
     parser.add_argument("dest", help="the path to write the index json file to. (If it starts with s3://.. it will upload to an s3 path)")
+    parser.add_argument("--exclude-remember", help="regexp of rule names to skip in the export (can be specified multiple times)", dest="exclude_patterns", action="append")
     parser.set_defaults(func=export)
 
 

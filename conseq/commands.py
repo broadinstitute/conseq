@@ -244,28 +244,38 @@ def list_cmd(state_dir):
     j.dump()
 
 
-def export_cmd(state_dir, depfile, config_file, dest_s3_path):
+def export_cmd(state_dir, depfile, config_file, dest_s3_path, exclude_patterns):
     out = StringIO()
 
     rules = read_rules(state_dir, depfile, config_file)
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
 
     objs = j.find_objs(DEFAULT_SPACE, {})
-    print(len(objs))
     vars = rules.vars
 
-    cas_remote = helper.Remote(
-        vars["S3_STAGING_URL"],
-        ".",
-        helper.S3StorageConnection(
-            vars["AWS_ACCESS_KEY_ID"], vars["AWS_SECRET_ACCESS_KEY"]
-        ),
-    )
+    cas_remote = None
+    def get_cas_remote():
+        nonlocal cas_remote
+
+        if cas_remote is None:
+            required = ["S3_STAGING_URL", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
+            for name in required:
+                if name not in vars:
+                    raise Exception("When pushing to S3, need the following configuartio")
+
+            cas_remote = helper.Remote(
+                vars["S3_STAGING_URL"],
+                ".",
+                helper.S3StorageConnection(
+                    vars["AWS_ACCESS_KEY_ID"], vars["AWS_SECRET_ACCESS_KEY"]
+                ),
+            )
+        return cas_remote
 
     def process_value(value):
         if isinstance(value, dict):
             if "$filename" in value:
-                url = cas_remote.upload_to_cas(value["$filename"])
+                url = get_cas_remote().upload_to_cas(value["$filename"])
                 value = {"$file_url": url}
         return value
 
@@ -314,11 +324,23 @@ def export_cmd(state_dir, depfile, config_file, dest_s3_path):
         else:
             return json.dumps(get_key_props(value), indent=3)
 
+    def skip_remember(name):
+        for exclude_pattern in exclude_patterns:
+            m = re.match(exclude_pattern, name)
+            if m is not None:
+                return True
+        return False
+
     executions = j.get_all_executions()
     skipped = 0
+    excluded = 0
     for execution in executions:
         if execution.status != "completed":
             skipped += 1
+            continue
+
+        if skip_remember(execution.transform):
+            excluded += 1
             continue
 
         out.write('remember-executed transform : "{}"\n'.format(execution.transform))
@@ -335,9 +357,12 @@ def export_cmd(state_dir, depfile, config_file, dest_s3_path):
     log.info(
         "Skipping export of %d executions which did not complete successfully", skipped
     )
+    log.info(
+        "Skipping export of %d executions which were filtered out via --exclude-remember", excluded
+    )
     if dest_s3_path.startswith("s3://"):
         log.info("Uploading artifact metadata to %s", dest_s3_path)
-        cas_remote.upload_str(dest_s3_path, out.getvalue())
+        get_cas_remote().upload_str(dest_s3_path, out.getvalue())
     else:
         log.info("Writing artifacts to %s", dest_s3_path)
         with open(dest_s3_path, "wt") as fd:
