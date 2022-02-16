@@ -2,13 +2,13 @@ import collections
 import datetime
 import json
 import logging
-import os
 import textwrap
 import time
 from typing import Any, Callable, Dict, List, Tuple, Union
 
 import six
 from jinja2.environment import Environment
+import os
 
 from conseq import debug_log
 from conseq import dep
@@ -26,8 +26,11 @@ from conseq.util import indent_str
 from conseq.xref import Resolver
 import re
 from .parser import RegEx
+from .timeline import TimelineLog
 
 log = logging.getLogger(__name__)
+
+Artifact = Dict[str, Union[str, Dict[str, str]]]
 
 
 class FatalUserError(Exception):
@@ -251,31 +254,6 @@ def get_satisfiable_jobs(rules: Rules, resources_per_client: Dict[str, Dict[str,
     return ready
 
 
-class TimelineLog:
-    def __init__(self, filename: str) -> None:
-        if filename is not None:
-            import csv
-            is_new = not os.path.exists(filename)
-            self.fd = open(filename, "at")
-            self.w = csv.writer(self.fd)
-            if is_new:
-                self.w.writerow(["timestamp", "jobid", "status"])
-
-        else:
-            self.fd = None
-            self.w = None
-
-    def log(self, job_id: int, status: str) -> None:
-        if self.fd is None:
-            return
-        self.w.writerow([datetime.datetime.now().isoformat(), job_id, status])
-        self.fd.flush()
-
-    def close(self):
-        self.fd.close()
-        self.fd = None
-        self.w = None
-
 
 class Lazy:
     def __init__(self, fn: Callable) -> None:
@@ -289,7 +267,6 @@ class Lazy:
         return self.result
 
 
-Artifact = Dict[str, Union[str, Dict[str, str]]]
 
 
 def _amend_outputs(artifacts: List[Artifact], properties_to_add: List[Tuple[str, str]]) -> List[Artifact]:
@@ -409,15 +386,15 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
 
                 rule = rules.get_rule(job.transform)
 
-                timings.log(job.id, "preprocess_xrefs")
+                timings.log(job.id, job.transform, "preprocess_xrefs")
                 # process xrefs which might require rewriting an artifact
                 xrefs_resolved = exec_client.preprocess_xref_inputs(j, resolver, job.inputs)
                 if xrefs_resolved:
                     log.info("Resolved xrefs on rule, new version will be executed next pass")
-                    timings.log(job.id, "resolved_xrefs")
+                    timings.log(job.id, job.transform, "resolved_xrefs")
                     continue
 
-                timings.log(job.id, "preprocess_inputs")
+                timings.log(job.id, job.transform, "preprocess_inputs")
                 if rule.is_publish_rule:
                     client = _client_for_publishing()
                 else:
@@ -447,7 +424,7 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
                 # maybe record_started and update_exec_xref should be merged so anything started
                 # always has an xref
                 exec_id = j.record_started(job.id)
-                timings.log(job.id, "start")
+                timings.log(job.id, job.transform, "start")
 
                 job_dir = get_job_dir(state_dir, exec_id)
                 if not os.path.exists(job_dir):
@@ -494,14 +471,14 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
                     job_id = j.record_completed(timestamp, e.id, dep.STATUS_FAILED, {})
                     failures.append((e.transform, e.job_dir))
                     debug_log.log_completed(job_id, dep.STATUS_FAILED, completion)
-                    timings.log(job_id, "fail")
+                    timings.log(job_id, job.transform, "fail")
                 elif completion is not None:
                     amended_outputs = _amend_outputs(completion, properties_to_add)
 
                     job_id = j.record_completed(timestamp, e.id, dep.STATUS_COMPLETED, amended_outputs)
                     debug_log.log_completed(job_id, dep.STATUS_COMPLETED, completion)
                     success_count += 1
-                    timings.log(job_id, "complete")
+                    timings.log(job_id, job.transform, "complete")
 
                 did_useful_work = True
 
@@ -519,11 +496,10 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
         log.warning("%d jobs failed: %s", len(failures), ", ".join(["{} ({})".format(job_dir, transform) for transform, job_dir in failures]))
         return -1
 
+    timings.close()
+
     return 0
 
-
-def _datetimefromiso(isostr):
-    return datetime.datetime.strptime(isostr, "%Y-%m-%dT%H:%M:%S.%f")
 
 
 def add_artifact_if_missing(j: Jobs, obj: Dict[str, Union[str, Dict[str, str]]]) -> int:
