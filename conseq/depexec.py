@@ -18,7 +18,14 @@ from conseq import xref
 from conseq.config import Rules
 from conseq.config import read_rules
 from conseq.dep import ForEach, Jobs, RuleExecution, Template
-from conseq.exec_client import DelegateExecClient, DelegateExecution, Execution, LocalExecClient, ResolveState, bind_inputs
+from conseq.exec_client import (
+    DelegateExecClient,
+    DelegateExecution,
+    Execution,
+    LocalExecClient,
+    ResolveState,
+    bind_inputs,
+)
 from conseq.parser import QueryVariable
 from conseq.parser import Rule, RunStmt
 from conseq.template import MissingTemplateVar, render_template
@@ -41,21 +48,36 @@ class JobFailedError(FatalUserError):
     pass
 
 
-def to_template(jinja2_env: Environment, rule: Rule, config: Dict[str, Union[str, Dict[str, str]]]) -> Template:
+def to_template(
+    jinja2_env: Environment, rule: Rule, config: Dict[str, Union[str, Dict[str, str]]]
+) -> Template:
     queries, predicates = convert_input_spec_to_queries(jinja2_env, rule, config)
-    return dep.Template(queries, predicates, rule.name, output_matches_expectation=rule.output_matches_expectation)
+    return dep.Template(
+        queries,
+        predicates,
+        rule.name,
+        output_matches_expectation=rule.output_matches_expectation,
+    )
 
 
 ConfigType = Dict[str, Union[str, Dict[str, str]]]
 
 
-def generate_run_stmts(job_dir: str, command_and_bodies: List[RunStmt], jinja2_env: Environment, config: ConfigType,
-                       resolver_state: ResolveState, **kwargs) -> List[str]:
+def generate_run_stmts(
+    job_dir: str,
+    command_and_bodies: List[RunStmt],
+    jinja2_env: Environment,
+    config: ConfigType,
+    resolver_state: ResolveState,
+    **kwargs,
+) -> List[str]:
     run_stmts = []
     for i, x in enumerate(command_and_bodies):
         exec_profile, command, script_body = x
         assert exec_profile == "default"
-        command, script_body = expand_run(jinja2_env, command, script_body, config, **kwargs)
+        command, script_body = expand_run(
+            jinja2_env, command, script_body, config, **kwargs
+        )
         if script_body != None:
             formatted_script_body = textwrap.dedent(script_body)
             script_name = os.path.abspath(os.path.join(job_dir, "script_%d" % i))
@@ -89,12 +111,12 @@ def format_inputs(inputs: Dict[str, Dict[str, str]]) -> str:
 
 def publish_manifest(location, dictionary, config):
     from conseq import helper
-    accesskey = config['AWS_ACCESS_KEY_ID']
-    secretaccesskey = config['AWS_SECRET_ACCESS_KEY']
-    remote = helper.Remote(os.path.dirname(location), ".",
-                           helper.S3StorageConnection(
-                               accesskey, secretaccesskey
-                           ))
+
+    accesskey = config["AWS_ACCESS_KEY_ID"]
+    secretaccesskey = config["AWS_SECRET_ACCESS_KEY"]
+    remote = helper.new_remote(
+        os.path.dirname(location), ".", accesskey, secretaccesskey
+    )
     remote.upload_str(os.path.basename(location), json.dumps(dictionary, indent=2))
 
 
@@ -107,57 +129,92 @@ def publish(jinja2_env, location_template, config, inputs):
 def _compute_task_hash(rule_name, inputs):
     task_def_str = json.dumps(dict(rule=rule_name, inputs=inputs), sort_keys=True)
     from hashlib import sha256
+
     return sha256(task_def_str.encode("utf8")).hexdigest()
 
 
-def execute(name: str, resolver: Resolver, jinja2_env: Environment, id: int, job_dir: str,
-            inputs: Dict[str, Dict[str, str]], rule: Rule, config: Dict[str, Union[str, Dict[str, str]]],
-            capture_output: bool, resolver_state: ResolveState,
-            client: Union[DelegateExecClient, LocalExecClient]) -> Execution:
+def execute(
+    name: str,
+    resolver: Resolver,
+    jinja2_env: Environment,
+    id: int,
+    job_dir: str,
+    inputs: Dict[str, Dict[str, str]],
+    rule: Rule,
+    config: Dict[str, Union[str, Dict[str, str]]],
+    capture_output: bool,
+    resolver_state: ResolveState,
+    client: Union[DelegateExecClient, LocalExecClient],
+) -> Execution:
     try:
         prologue = render_template(jinja2_env, config["PROLOGUE"], config)
 
-        task_vars = {'HASH': _compute_task_hash(name, inputs)}
+        task_vars = {"HASH": _compute_task_hash(name, inputs)}
 
         if rule.outputs == None:
             outputs = None
         else:
-            outputs = [expand_outputs(jinja2_env, output, config, inputs=inputs, task=task_vars) for output in rule.outputs]
+            outputs = [
+                expand_outputs(
+                    jinja2_env, output, config, inputs=inputs, task=task_vars
+                )
+                for output in rule.outputs
+            ]
         assert isinstance(inputs, dict)
 
-        log.info("Executing %s in %s with inputs:\n%s", name, job_dir, format_inputs(inputs))
-        desc_name = "{} with inputs {} ({})".format(name, format_inputs(inputs), job_dir)
+        log.info(
+            "Executing %s in %s with inputs:\n%s", name, job_dir, format_inputs(inputs)
+        )
+        desc_name = "{} with inputs {} ({})".format(
+            name, format_inputs(inputs), job_dir
+        )
 
         if len(rule.run_stmts) > 0:
-            run_stmts = generate_run_stmts(job_dir, rule.run_stmts, jinja2_env, config, resolver_state, inputs=inputs, task=task_vars)
+            run_stmts = generate_run_stmts(
+                job_dir,
+                rule.run_stmts,
+                jinja2_env,
+                config,
+                resolver_state,
+                inputs=inputs,
+                task=task_vars,
+            )
 
             debug_log.log_execute(name, id, job_dir, inputs, run_stmts)
-            execution = client.exec_script(name,
-                                           id,
-                                           job_dir,
-                                           run_stmts,
-                                           outputs,
-                                           capture_output,
-                                           prologue,
-                                           desc_name,
-                                           resolver_state,
-                                           rule.resources,
-                                           rule.watch_regex)
+            execution = client.exec_script(
+                name,
+                id,
+                job_dir,
+                run_stmts,
+                outputs,
+                capture_output,
+                prologue,
+                desc_name,
+                resolver_state,
+                rule.resources,
+                rule.watch_regex,
+            )
         elif outputs != None:
             log.warning("No commands to run for rule %s", name)
             # fast path when there's no need to spawn an external process.  (mostly used by tests)
             execution = exec_client.SuccessfulExecutionStub(id, outputs, transform=name)
         else:
-            assert rule.is_publish_rule, "No body, nor outputs specified and not a publish rule.  This rule does nothing."
+            assert (
+                rule.is_publish_rule
+            ), "No body, nor outputs specified and not a publish rule.  This rule does nothing."
             execution = exec_client.SuccessfulExecutionStub(id, [], transform=name)
 
         return execution
 
     except MissingTemplateVar as ex:
-        return exec_client.FailedExecutionStub(id, ex.get_error(), transform=name, job_dir=job_dir)
+        return exec_client.FailedExecutionStub(
+            id, ex.get_error(), transform=name, job_dir=job_dir
+        )
 
 
-def reattach(j: Jobs, rules: Rules, pending_jobs: List[Execution]) -> List[DelegateExecution]:
+def reattach(
+    j: Jobs, rules: Rules, pending_jobs: List[Execution]
+) -> List[DelegateExecution]:
     executing = []
     for e in pending_jobs:
         if e.exec_xref != None:
@@ -176,32 +233,39 @@ def get_job_dir(state_dir: str, job_id: int) -> str:
     return os.path.join(state_dir, "r" + str(job_id))
 
 
-def get_long_execution_summary(executing: Union[List[Execution], List[DelegateExecution]],
-                               pending: List[RuleExecution]) -> str:
+def get_long_execution_summary(
+    executing: Union[List[Execution], List[DelegateExecution]],
+    pending: List[RuleExecution],
+) -> str:
     from tabulate import tabulate
+
     counts = collections.defaultdict(lambda: dict(count=0, dirs=[]))
     for e in executing:
         k = (e.get_state_label(), e.transform)
         rec = counts[k]
-        rec['count'] += 1
-        rec['dirs'].append(e.job_dir)
+        rec["count"] += 1
+        rec["dirs"].append(e.job_dir)
 
     for p in pending:
         k = ("pending", p.transform)
         rec = counts[k]
-        rec['count'] += 1
+        rec["count"] += 1
 
     rows = []
     for k, rec in counts.items():
         state, transform = k
-        dirs = " ".join(rec['dirs'])
+        dirs = " ".join(rec["dirs"])
         if len(dirs) > 30:
-            dirs = dirs[:30 - 4] + " ..."
-        rows.append([state, transform, rec['count'], dirs])
-    return indent_str(tabulate(rows, ["state", "transform", "count", "dirs"], tablefmt="simple"), 4)
+            dirs = dirs[: 30 - 4] + " ..."
+        rows.append([state, transform, rec["count"], dirs])
+    return indent_str(
+        tabulate(rows, ["state", "transform", "count", "dirs"], tablefmt="simple"), 4
+    )
 
 
-def get_execution_summary(executing: Union[List[Execution], List[DelegateExecution]]) -> str:
+def get_execution_summary(
+    executing: Union[List[Execution], List[DelegateExecution]]
+) -> str:
     counts = collections.defaultdict(lambda: 0)
     for e in executing:
         counts[e.get_state_label()] += 1
@@ -210,18 +274,25 @@ def get_execution_summary(executing: Union[List[Execution], List[DelegateExecuti
     return ", ".join(["%s:%d" % (k, counts[k]) for k in keys])
 
 
-def get_satisfiable_jobs(rules: Rules, resources_per_client: Dict[str, Dict[str, Union[float, int]]],
-                         pending_jobs: List[RuleExecution],
-                         executions: Union[List[Execution], List[DelegateExecution]]) -> List[RuleExecution]:
+def get_satisfiable_jobs(
+    rules: Rules,
+    resources_per_client: Dict[str, Dict[str, Union[float, int]]],
+    pending_jobs: List[RuleExecution],
+    executions: Union[List[Execution], List[DelegateExecution]],
+) -> List[RuleExecution]:
     # print("get_satisfiable_jobs", len(pending_jobs), executions)
     ready = []
 
     # copy resources_per_client to a version we'll decrement as we consume
-    resources_remaining_per_client = dict([(name, dict(resources)) for name, resources in resources_per_client.items()])
+    resources_remaining_per_client = dict(
+        [(name, dict(resources)) for name, resources in resources_per_client.items()]
+    )
 
     # print("max resources", resources_remaining_per_client)
 
-    def get_remaining(job):  # returns the remaining resources for the client used by a given job
+    def get_remaining(
+        job,
+    ):  # returns the remaining resources for the client used by a given job
         rule = rules.get_rule(job.transform)
         return resources_remaining_per_client[rule.executor]
 
@@ -254,7 +325,6 @@ def get_satisfiable_jobs(rules: Rules, resources_per_client: Dict[str, Dict[str,
     return ready
 
 
-
 class Lazy:
     def __init__(self, fn: Callable) -> None:
         self.evaled = False
@@ -267,9 +337,9 @@ class Lazy:
         return self.result
 
 
-
-
-def _amend_outputs(artifacts: List[Artifact], properties_to_add: List[Tuple[str, str]]) -> List[Artifact]:
+def _amend_outputs(
+    artifacts: List[Artifact], properties_to_add: List[Tuple[str, str]]
+) -> List[Artifact]:
     def _amend(artifact: Artifact):
         new_artifact = dict(artifact)
         for name, value in properties_to_add:
@@ -279,15 +349,26 @@ def _amend_outputs(artifacts: List[Artifact], properties_to_add: List[Tuple[str,
     return [_amend(x) for x in artifacts]
 
 
-
-def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, rules: Rules, state_dir: str,
-              executing: List[DelegateExecution], capture_output: bool, req_confirm: bool, maxfail: int,
-              maxstart: None,
-              properties_to_add=[]) -> None:
+def main_loop(
+    jinja2_env: Environment,
+    j: Jobs,
+    new_object_listener: Callable,
+    rules: Rules,
+    state_dir: str,
+    executing: List[DelegateExecution],
+    capture_output: bool,
+    req_confirm: bool,
+    maxfail: int,
+    maxstart: None,
+    properties_to_add=[],
+) -> None:
     from conseq.exec_client import create_publish_exec_client
+
     _client_for_publishing = Lazy(lambda: create_publish_exec_client(rules.get_vars()))
 
-    resources_per_client = dict([(name, client.resources) for name, client in rules.exec_clients.items()])
+    resources_per_client = dict(
+        [(name, client.resources) for name, client in rules.exec_clients.items()]
+    )
     timings = TimelineLog(state_dir + "/timeline.log")
     active_job_ids = set([e.id for e in executing])
 
@@ -321,7 +402,9 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
                 we_should_stop = True
                 if len(executing) > 0:
                     # if we have other tasks which are still running, ask user if we really want to abort now.
-                    we_should_stop, maxfail = ui.user_says_we_should_stop(len(failures), executing)
+                    we_should_stop, maxfail = ui.user_says_we_should_stop(
+                        len(failures), executing
+                    )
                 if we_should_stop:
                     break
 
@@ -330,7 +413,11 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
             summary = get_execution_summary(executing)
 
             msg = "%d processes running (%s), %d executions pending, %d skipped" % (
-                len(executing), summary, len(pending_jobs), len(job_ids_to_ignore))
+                len(executing),
+                summary,
+                len(pending_jobs),
+                len(job_ids_to_ignore),
+            )
             if prev_msg != msg:
                 log.info(msg)
                 if len(pending_jobs) + len(executing) > 0:
@@ -338,7 +425,9 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
                     log.info("Summary of queue:\n%s\n", long_summary)
 
             prev_msg = msg
-            cannot_start_more = (maxstart is not None and start_count >= maxstart) or skip_remaining
+            cannot_start_more = (
+                maxstart is not None and start_count >= maxstart
+            ) or skip_remaining
             if len(executing) == 0 and (cannot_start_more or len(pending_jobs) == 0):
                 # now that we've completed everything, check for deferred jobs by marking them as ready.  If we have any, loop again
                 j.enable_deferred()
@@ -374,7 +463,9 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
             # ultimately, I don't think there's a shortcut, and we may need to check the DAG from the previous execution to see
             # if ancestor node is being re-executed, if so, prune that pending rule execution from the pending list until that
             # task is done.
-            ready_jobs = get_satisfiable_jobs(rules, resources_per_client, pending_jobs, executing)
+            ready_jobs = get_satisfiable_jobs(
+                rules, resources_per_client, pending_jobs, executing
+            )
             for job in ready_jobs:
                 assert isinstance(job, dep.RuleExecution)
 
@@ -388,9 +479,13 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
 
                 timings.log(job.id, job.transform, "preprocess_xrefs")
                 # process xrefs which might require rewriting an artifact
-                xrefs_resolved = exec_client.preprocess_xref_inputs(j, resolver, job.inputs)
+                xrefs_resolved = exec_client.preprocess_xref_inputs(
+                    j, resolver, job.inputs
+                )
                 if xrefs_resolved:
-                    log.info("Resolved xrefs on rule, new version will be executed next pass")
+                    log.info(
+                        "Resolved xrefs on rule, new version will be executed next pass"
+                    )
                     timings.log(job.id, job.transform, "resolved_xrefs")
                     continue
 
@@ -400,7 +495,9 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
                 else:
                     # localize paths that will be used in scripts
                     client = rules.get_client(rule.executor)
-                inputs, resolver_state = client.preprocess_inputs(resolver, bind_inputs(rule, job.inputs))
+                inputs, resolver_state = client.preprocess_inputs(
+                    resolver, bind_inputs(rule, job.inputs)
+                )
                 debug_log.log_input_preprocess(job.id, job.inputs, inputs)
 
                 # if we're required confirmation from the user, do this before we continue
@@ -430,8 +527,19 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
                 if not os.path.exists(job_dir):
                     os.makedirs(job_dir)
 
-                e = execute(job.transform, resolver, jinja2_env, exec_id, job_dir, inputs, rule, rules.get_vars(),
-                            capture_output, resolver_state, client)
+                e = execute(
+                    job.transform,
+                    resolver,
+                    jinja2_env,
+                    exec_id,
+                    job_dir,
+                    inputs,
+                    rule,
+                    rules.get_vars(),
+                    capture_output,
+                    resolver_state,
+                    client,
+                )
                 executing.append(e)
                 j.update_exec_xref(e.id, e.get_external_id(), job_dir)
                 start_count += 1
@@ -447,7 +555,7 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
                 timestamp = datetime.datetime.now().isoformat()
 
                 if completion is not None:
-                    rule = rules.get_rule( e.transform)
+                    rule = rules.get_rule(e.transform)
                     if not rule.has_for_all_input():
                         # only do this check if no inputs are marked as "for all"
                         # because we can have cases where a new artifact appears and we _do_ want
@@ -464,7 +572,7 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
                                 _failure = f"Rule {e.transform} ({e.job_dir} generated an output which already exists: {artifact}"
                                 _failures.append(_failure)
                                 log.error(_failure)
-                        if len(_failures) >0:
+                        if len(_failures) > 0:
                             failure = ", ".join(_failures)
 
                 if failure is not None:
@@ -475,7 +583,9 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
                 elif completion is not None:
                     amended_outputs = _amend_outputs(completion, properties_to_add)
 
-                    job_id = j.record_completed(timestamp, e.id, dep.STATUS_COMPLETED, amended_outputs)
+                    job_id = j.record_completed(
+                        timestamp, e.id, dep.STATUS_COMPLETED, amended_outputs
+                    )
                     debug_log.log_completed(job_id, dep.STATUS_COMPLETED, completion)
                     success_count += 1
                     timings.log(job_id, job.transform, "complete")
@@ -493,13 +603,21 @@ def main_loop(jinja2_env: Environment, j: Jobs, new_object_listener: Callable, r
     log.info("%d jobs successfully executed", success_count)
     if len(failures) > 0:
         # maybe also show summary of which jobs failed?
-        log.warning("%d jobs failed: %s", len(failures), ", ".join(["{} ({})".format(job_dir, transform) for transform, job_dir in failures]))
+        log.warning(
+            "%d jobs failed: %s",
+            len(failures),
+            ", ".join(
+                [
+                    "{} ({})".format(job_dir, transform)
+                    for transform, job_dir in failures
+                ]
+            ),
+        )
         return -1
 
     timings.close()
 
     return 0
-
 
 
 def add_artifact_if_missing(j: Jobs, obj: Dict[str, Union[str, Dict[str, str]]]) -> int:
@@ -508,16 +626,26 @@ def add_artifact_if_missing(j: Jobs, obj: Dict[str, Union[str, Dict[str, str]]])
     return j.add_obj(dep.DEFAULT_SPACE, timestamp.isoformat(), d, overwrite=False)
 
 
-def expand_run(jinja2_env: Environment, command: str, script_body: None, config: Dict[str, Union[str, Dict[str, str]]],
-               **kwargs) -> Tuple[str, None]:
+def expand_run(
+    jinja2_env: Environment,
+    command: str,
+    script_body: None,
+    config: Dict[str, Union[str, Dict[str, str]]],
+    **kwargs,
+) -> Tuple[str, None]:
     command = render_template(jinja2_env, command, config, **kwargs)
     if script_body != None:
         script_body = render_template(jinja2_env, script_body, config, **kwargs)
     return (command, script_body)
 
 
-def expand_dict_item(jinja2_env: Environment, k : str,  v: Union[str, Dict[str, str]],
-                config: Dict[str, Union[str, Dict[str, str]]], **kwargs) -> Tuple[str, Union[str, Dict[str, str]]]:
+def expand_dict_item(
+    jinja2_env: Environment,
+    k: str,
+    v: Union[str, Dict[str, str]],
+    config: Dict[str, Union[str, Dict[str, str]]],
+    **kwargs,
+) -> Tuple[str, Union[str, Dict[str, str]]]:
     assert isinstance(config, dict)
 
     k = render_template(jinja2_env, k, config, **kwargs)
@@ -530,8 +658,12 @@ def expand_dict_item(jinja2_env: Environment, k : str,  v: Union[str, Dict[str, 
     return k, v
 
 
-def expand_dict(jinja2_env: Environment, d: Dict[str, Union[str, Dict[str, str]]],
-                config: Dict[str, Union[str, Dict[str, str]]], **kwargs) -> Dict[str, Union[str, Dict[str, str]]]:
+def expand_dict(
+    jinja2_env: Environment,
+    d: Dict[str, Union[str, Dict[str, str]]],
+    config: Dict[str, Union[str, Dict[str, str]]],
+    **kwargs,
+) -> Dict[str, Union[str, Dict[str, str]]]:
     assert isinstance(d, dict)
     assert isinstance(config, dict)
 
@@ -544,13 +676,20 @@ def expand_dict(jinja2_env: Environment, d: Dict[str, Union[str, Dict[str, str]]
     return new_output
 
 
-def expand_outputs(jinja2_env: Environment, output: Dict[str, Union[str, Dict[str, str]]],
-                   config: Dict[str, Union[str, Dict[str, str]]], **kwargs) -> Dict[str, Union[str, Dict[str, str]]]:
+def expand_outputs(
+    jinja2_env: Environment,
+    output: Dict[str, Union[str, Dict[str, str]]],
+    config: Dict[str, Union[str, Dict[str, str]]],
+    **kwargs,
+) -> Dict[str, Union[str, Dict[str, str]]]:
     return expand_dict(jinja2_env, output, config, **kwargs)
 
 
-def expand_input_spec(jinja2_env: Environment, spec: Dict[str, str], config: Dict[str, Union[str, Dict[str, str]]]) -> \
-        Dict[str, str]:
+def expand_input_spec(
+    jinja2_env: Environment,
+    spec: Dict[str, str],
+    config: Dict[str, Union[str, Dict[str, str]]],
+) -> Dict[str, str]:
 
     expanded = {}
 
@@ -570,8 +709,9 @@ def expand_input_spec(jinja2_env: Environment, spec: Dict[str, str], config: Dic
     return expanded
 
 
-def convert_input_spec_to_queries(jinja2_env: Environment, rule: Rule, config: Dict[str, Union[str, Dict[str, str]]]) -> \
-        Tuple[List[ForEach], List[Any]]:
+def convert_input_spec_to_queries(
+    jinja2_env: Environment, rule: Rule, config: Dict[str, Union[str, Dict[str, str]]]
+) -> Tuple[List[ForEach], List[Any]]:
     queries = []
     predicates = []
     pairs_by_var = collections.defaultdict(lambda: [])
@@ -615,6 +755,7 @@ def print_spaces(state_dir):
 
 def force_execution_of_rules(j, forced_targets):
     import re
+
     rule_names = []
     limits = []
     for target in forced_targets:
@@ -631,9 +772,13 @@ def force_execution_of_rules(j, forced_targets):
                 constraint_input = m.group(1)
                 constraint_var = m.group(2)
                 constraint_value = m.group(3)
-                constraint_list.append((constraint_input, constraint_var, constraint_value))
+                constraint_list.append(
+                    (constraint_input, constraint_var, constraint_value)
+                )
 
-            def inputs_has_constraint(inputs, constraint_var, constraint_value, constraint_input):
+            def inputs_has_constraint(
+                inputs, constraint_var, constraint_value, constraint_input
+            ):
                 for name, value in inputs:
                     if name == constraint_input and constraint_var in value.props:
                         v = value.props[constraint_var]
@@ -641,12 +786,23 @@ def force_execution_of_rules(j, forced_targets):
                             return True
                 return False
 
-            def only_rules_with_input(inputs, rule_name, expected_rule_name=rule_name, constraint_list=constraint_list):
+            def only_rules_with_input(
+                inputs,
+                rule_name,
+                expected_rule_name=rule_name,
+                constraint_list=constraint_list,
+            ):
                 if rule_name != expected_rule_name:
                     return False
 
-                for constraint_input, constraint_var, constraint_value in constraint_list:
-                    if not inputs_has_constraint(inputs, constraint_var, constraint_value, constraint_input):
+                for (
+                    constraint_input,
+                    constraint_var,
+                    constraint_value,
+                ) in constraint_list:
+                    if not inputs_has_constraint(
+                        inputs, constraint_var, constraint_value, constraint_input
+                    ):
                         return False
                 return True
 
@@ -654,7 +810,10 @@ def force_execution_of_rules(j, forced_targets):
 
         else:
             rule_name = target
-            limits.append(lambda inputs, name, expected_rule_name=rule_name: name == expected_rule_name)
+            limits.append(
+                lambda inputs, name, expected_rule_name=rule_name: name
+                == expected_rule_name
+            )
         rule_names.append(rule_name)
 
     j.limitStartToTemplates(limits)
@@ -716,9 +875,14 @@ def reconcile_rule_specifications(j: Jobs, latest_rules: Dict[str, str]):
     return stale_object_ids
 
 
-def reconcile_db(j: Jobs, jinja2_env: Environment, rule_specifications: Dict[str, str],
-                 objs: List[Dict[str, Union[str, Dict[str, str]]]],
-                 vars: Dict[str, Union[str, Dict[str, str]]], force: bool = None) -> None:
+def reconcile_db(
+    j: Jobs,
+    jinja2_env: Environment,
+    rule_specifications: Dict[str, str],
+    objs: List[Dict[str, Union[str, Dict[str, str]]]],
+    vars: Dict[str, Union[str, Dict[str, str]]],
+    force: bool = None,
+) -> None:
     # rewrite the objects, expanding templates and marking this as one which was manually added from the config file
     update_rule_specs_in_db = True
     processed = []
@@ -734,7 +898,9 @@ def reconcile_db(j: Jobs, jinja2_env: Environment, rule_specifications: Dict[str
     missing_objs = set(invalidated_objs).union(missing_objs)
 
     if len(missing_objs) > 0:
-        print("The following objects were not specified in the conseq file or were the result of a rule which has changed:")
+        print(
+            "The following objects were not specified in the conseq file or were the result of a rule which has changed:"
+        )
         for obj in missing_objs:
             print("   {}".format(obj))
         if force is None:
@@ -751,16 +917,23 @@ def reconcile_db(j: Jobs, jinja2_env: Environment, rule_specifications: Dict[str
         j.write_rule_specifications(rule_specifications)
 
 
-def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars: Dict[Any, Any],
-         max_concurrent_executions: int, capture_output: bool, req_confirm: bool,
-         config_file: str,
-         maxfail: int = 1,
-         maxstart: None = None,
-         force_no_targets: bool = False,
-         reattach_existing=None,
-         remove_unknown_artifacts=None,
-         properties_to_add=[],
-         rule_filter=None) -> int:
+def main(
+    depfile: str,
+    state_dir: str,
+    forced_targets: List[Any],
+    override_vars: Dict[Any, Any],
+    max_concurrent_executions: int,
+    capture_output: bool,
+    req_confirm: bool,
+    config_file: str,
+    maxfail: int = 1,
+    maxstart: None = None,
+    force_no_targets: bool = False,
+    reattach_existing=None,
+    remove_unknown_artifacts=None,
+    properties_to_add=[],
+    rule_filter=None,
+) -> int:
     assert max_concurrent_executions > 0
 
     if not os.path.exists(state_dir):
@@ -792,7 +965,14 @@ def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars:
     rules.get_client("default").resources["slots"] = max_concurrent_executions
 
     # handle the "add-if-missing" objects and changes to rules
-    reconcile_db(j, jinja2_env, rule_specifications, rules.objs, rules.vars, force=remove_unknown_artifacts)
+    reconcile_db(
+        j,
+        jinja2_env,
+        rule_specifications,
+        rules.objs,
+        rules.vars,
+        force=remove_unknown_artifacts,
+    )
 
     # handle the remember-executed statements
     with j.transaction():
@@ -805,7 +985,7 @@ def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars:
             config = rules.get_vars()
             props = expand_dict(jinja2_env, props, config)
 
-            class VirtualDict():
+            class VirtualDict:
                 def __getitem__(self, key):
                     value = rules.get_vars()[key]
                     return render_template(jinja2_env, value, config)
@@ -825,7 +1005,8 @@ def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars:
     if len(pending_jobs) > 0:
         log.warning(
             "Reattaching jobs that were started in a previous invocation of conseq, but had not terminated before conseq exited: %s",
-            pending_jobs)
+            pending_jobs,
+        )
 
         if reattach_existing is None:
             reattach_existing = ui.user_wants_reattach()
@@ -835,7 +1016,9 @@ def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars:
         else:
             pending_jobs = j.get_started_executions()
             for e in pending_jobs:
-                log.warning("Canceling {} which was started from earlier execution".format(e.id))
+                log.warning(
+                    "Canceling {} which was started from earlier execution".format(e.id)
+                )
                 j.cancel_execution(e.id)
 
     # any jobs killed or other failures need to be removed so we'll attempt to re-run them
@@ -860,8 +1043,19 @@ def main(depfile: str, state_dir: str, forced_targets: List[Any], override_vars:
         j.add_obj(timestamp, obj)
 
     try:
-        ret = main_loop(jinja2_env, j, new_object_listener, rules, state_dir, executing, capture_output, req_confirm, maxfail,
-                        maxstart, properties_to_add=properties_to_add)
+        ret = main_loop(
+            jinja2_env,
+            j,
+            new_object_listener,
+            rules,
+            state_dir,
+            executing,
+            capture_output,
+            req_confirm,
+            maxfail,
+            maxstart,
+            properties_to_add=properties_to_add,
+        )
     except FatalUserError as e:
         print("Error: {}".format(e))
         return -1

@@ -209,18 +209,20 @@ def ls_cmd(state_dir, space, predicates, groupby, columns):
             print_table(rows, 2)
             print()
 
+
 def forget_cmd(state_dir, rule_name, is_pattern):
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
 
     if is_pattern:
         pattern = re.compile(rule_name)
-        transforms = [x.transform for x in j.get_all_executions() if pattern.match(x.transform)]
+        transforms = [
+            x.transform for x in j.get_all_executions() if pattern.match(x.transform)
+        ]
     else:
         transforms = [rule_name]
 
     for transform in transforms:
         j.invalidate_rule_execution(transform)
-
 
 
 def rm_cmd(state_dir, dry_run, space, query):
@@ -254,6 +256,7 @@ def export_cmd(state_dir, depfile, config_file, dest_s3_path, exclude_patterns):
     vars = rules.vars
 
     cas_remote = None
+
     def get_cas_remote():
         nonlocal cas_remote
 
@@ -261,14 +264,15 @@ def export_cmd(state_dir, depfile, config_file, dest_s3_path, exclude_patterns):
             required = ["S3_STAGING_URL", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
             for name in required:
                 if name not in vars:
-                    raise Exception("When pushing to S3, need the following configuartio")
+                    raise Exception(
+                        "When pushing to S3, need the following configuartio"
+                    )
 
-            cas_remote = helper.Remote(
+            cas_remote = helper.new_remote(
                 vars["S3_STAGING_URL"],
                 ".",
-                helper.S3StorageConnection(
-                    vars["AWS_ACCESS_KEY_ID"], vars["AWS_SECRET_ACCESS_KEY"]
-                ),
+                vars["AWS_ACCESS_KEY_ID"],
+                vars["AWS_SECRET_ACCESS_KEY"],
             )
         return cas_remote
 
@@ -358,7 +362,8 @@ def export_cmd(state_dir, depfile, config_file, dest_s3_path, exclude_patterns):
         "Skipping export of %d executions which did not complete successfully", skipped
     )
     log.info(
-        "Skipping export of %d executions which were filtered out via --exclude-remember", excluded
+        "Skipping export of %d executions which were filtered out via --exclude-remember",
+        excluded,
     )
     if dest_s3_path.startswith("s3://"):
         log.info("Uploading artifact metadata to %s", dest_s3_path)

@@ -12,6 +12,7 @@ from boto.s3.connection import S3Connection
 from boto.s3.key import Key
 import traceback
 
+
 log = logging.getLogger(__name__)
 
 
@@ -46,6 +47,14 @@ class StorageConnection:
     def list_keys_with_prefix(self, bucket_name: str, path: str) -> List[str]:
         raise NotImplementedError()
 
+    def set_contents_from_filename(
+        self, filename: str, bucket_name: str, path: str, sha256=None
+    ):
+        raise NotImplementedError()
+
+    def set_contents_from_string(self, bucket_name: str, path: str, text: str):
+        raise NotImplementedError()
+
     def get_contents_as_string(self, bucket_name: str, path: str) -> bytes:
         raise NotImplementedError()
 
@@ -60,6 +69,46 @@ class StorageConnection:
 
 
 # .get_metadata("sha256")
+
+from google.cloud import storage
+
+
+class GSStorageConnection(StorageConnection):
+    def __init__(self):
+        self.c = storage.Client()
+
+    def exists(self, bucket_name: str, key: str) -> bool:
+        return self.c.bucket(bucket_name).get_blob(key) is not None
+
+    def list_keys_with_prefix(self, bucket_name: str, path: str) -> List[str]:
+        bucket = self.c.bucket(bucket_name)
+        return [x.name for x in self.c.list_blobs(bucket, prefix=path)]
+
+    def get_contents_as_string(self, bucket_name: str, path: str) -> bytes:
+        return self.c.bucket(bucket_name).blob(path).download_as_bytes()
+
+    def get_contents_to_filename(self, bucket_name: str, path: str, dest_path: str):
+        self.c.bucket(bucket_name).blob(path).download_to_filename(dest_path)
+
+    def get_sha256(self, bucket_name: str, path: str) -> Optional[str]:
+        metadata = self.c.bucket(bucket_name).get_blob(path).metadata
+        if metadata:
+            return metadata.get("sha256")
+
+    def get_generation_id(self, bucket_name: str, path: str) -> str:
+        return str(self.c.bucket(bucket_name).get_blob(path).generation)
+
+    def set_contents_from_string(self, bucket_name: str, path: str, text: str):
+        self.c.bucket(bucket_name).blob(path).upload_from_string(text)
+
+    def set_contents_from_filename(
+        self, filename: str, bucket_name: str, path: str, sha256=None
+    ):
+        blob = self.c.bucket(bucket_name).blob(path)
+        blob.upload_from_filename(filename)
+
+        if sha256:
+            blob.metadata = {"sha256": sha256}
 
 
 class S3StorageConnection(StorageConnection):
@@ -95,15 +144,30 @@ class S3StorageConnection(StorageConnection):
     def get_generation_id(self, bucket_name: str, path: str) -> str:
         return self.c.get_bucket(bucket_name, validate=False).get_key(path).etag
 
+    def set_contents_from_string(self, bucket_name: str, path: str, text: str):
+        k = self.c.get_bucket(bucket_name, validate=False).get_key(path, validate=False)
+        k.set_contents_from_string(text)
+
+    def set_contents_from_filename(
+        self, filename: str, bucket_name: str, path: str, sha256=None
+    ):
+        k = self.c.get_bucket(bucket_name, validate=False).get_key(path, validate=False)
+        k.set_contents_from_filename(filename)
+        if sha256:
+            k.set_metadata("sha256", sha256)
+
+
 def new_remote(remote_url, local_dir, accesskey, secretaccesskey):
     sc = S3StorageConnection(accesskey, secretaccesskey)
-    return Remote(remote_url, local_dir, {"s3": sc})
+    gs = GSStorageConnection()
+    return Remote(remote_url, local_dir, {"s3": sc, "gs": gs})
 
 
 class Remote:
     def __init__(
         self, remote_url: str, local_dir: str, sc: Dict[str, StorageConnection]
     ):
+        assert isinstance(sc, dict)
         self.connections = sc
         self.remote_url = remote_url
         self.local_dir = local_dir
@@ -118,7 +182,7 @@ class Remote:
     def exists(self, remote: str) -> bool:
         storage_api, bucket_name, remote_path = self._normalize_path(remote)
 
-        return self.connection[storage_api].exists(bucket_name, remote_path)
+        return self._get_conn(storage_api).exists(bucket_name, remote_path)
 
     def _download_object(
         self,
@@ -186,13 +250,14 @@ class Remote:
         skip_existing: bool = True,
         stage_dir: Optional[str] = None,
     ):
-        # maybe upload and download should use trailing slash to indicate directory should be uploaded instead of just a file
+        # maybe upload and download should use trailing slash to indicate directory
+        # should be uploaded instead of just a file
         if not local.startswith("/"):
             local = os.path.normpath(self.local_dir + "/" + local)
 
         storage_api, bucket_name, remote_path = self._normalize_path(remote)
 
-        if self._get_conn(storage_api).exists(bucket_name, storage_api):
+        if self._get_conn(storage_api).exists(bucket_name, remote_path):
             # if it's a file, download it
             abs_local = os.path.abspath(local)
             log.info("Downloading file %s to %s", remote_path, abs_local)
@@ -209,7 +274,7 @@ class Remote:
             # download everything with the prefix
             transferred = 0
             for key in self._get_conn(storage_api).list_keys_with_prefix(
-                bucket_name, remote_path
+                bucket_name, remote_path + "/"
             ):
                 rest = drop_prefix(remote_path + "/", key)
                 if not os.path.exists(local):
@@ -258,15 +323,14 @@ class Remote:
         if os.path.exists(local_path):
             if os.path.isfile(local_path):
                 # if it's a file, upload it
-                uploaded_url = "s3://" + self.bucket.name + "/" + remote_path
-                if self.bucket.get_key(remote_path) is None or force:
-                    key = Key(self.bucket)
-                    key.name = remote_path
+                uploaded_url = f"{self.storage_api}://{self.bucket_name}/{remote_path}"
+                if not self.exists(remote_path) or force:
                     log.info("Uploading file %s to %s", local, uploaded_url)
-                    key.set_contents_from_filename(local_path)
                     if hash is None:
                         hash = calc_hash(local_path)
-                    key.set_metadata("sha256", hash)
+                    self._get_conn(self.storage_api).set_contents_from_filename(
+                        local_path, self.bucket_name, remote_path, sha256=hash
+                    )
             else:
                 # upload everything in the dir
                 assert hash is None
@@ -274,13 +338,12 @@ class Remote:
                     full_fn = os.path.join(local_path, fn)
                     if os.path.isfile(full_fn):
                         r = os.path.join(remote_path, fn)
-                        if self.bucket.get_key(r) is None or force:
-                            k = Key(self.bucket)
-                            k.key = r
+                        if not self.exists(r) or force:
                             log.info("Uploading dir %s (%s to %s)", local_path, fn, fn)
-                            k.set_contents_from_filename(full_fn)
                             hash = calc_hash(local_path)
-                            k.set_metadata("sha256", hash)
+                            self._get_conn(self.storage_api).set_contents_from_filename(
+                                full_fn, self.bucket_name, r, sha256=hash
+                            )
                         else:
                             log.info(
                                 "Uploading dir %s (%s to %s), skiping existing file",
@@ -411,8 +474,9 @@ def push(remote, filenames):
 def pull(
     remote, file_mappings, ignoreMissing=False, skip_existing=True, stage_dir=None
 ):
+    log.info("%s files to download", len(file_mappings))
     for remote_path, local_path in file_mappings:
-        log.debug("pull remote_path=%s local_path=%s", remote_path, local_path)
+        log.info("downloading %s -> %s", remote_path, local_path)
         remote.download(
             remote_path,
             local_path,
@@ -470,7 +534,7 @@ def publish_results(results_json_file, remote, published_files_root, results_jso
     remote.upload_str(results_json_dest, new_results_json)
 
 
-def convert_json_mapping(d):
+def _convert_json_mapping(d):
     result = []
     for rec in d["mapping"]:
         remote = rec["remote"]
@@ -480,7 +544,7 @@ def convert_json_mapping(d):
     return result
 
 
-def parse_mapping_str(file_mapping):
+def _parse_mapping_str(file_mapping):
     assert isinstance(file_mapping, str)
     if ":" in file_mapping:
         remote_path, local_path = file_mapping.split(":")
@@ -527,51 +591,51 @@ def parse_mapping_str(file_mapping):
 #         remote.upload(r["src"], r["dest"], force=True)
 
 
-# def exec_cmd(args, config):
-#     remote = Remote(
-#         args.remote_url,
-#         args.local_dir,
-#         config["AWS_ACCESS_KEY_ID"],
-#         config["AWS_SECRET_ACCESS_KEY"],
-#     )
-#     cas_remote = Remote(
-#         args.cas_remote_url,
-#         args.local_dir,
-#         config["AWS_ACCESS_KEY_ID"],
-#         config["AWS_SECRET_ACCESS_KEY"],
-#     )
+def exec_cmd(args, config):
+    remote = new_remote(
+        args.remote_url,
+        args.local_dir,
+        config["AWS_ACCESS_KEY_ID"],
+        config["AWS_SECRET_ACCESS_KEY"],
+    )
+    cas_remote = new_remote(
+        args.cas_remote_url,
+        args.local_dir,
+        config["AWS_ACCESS_KEY_ID"],
+        config["AWS_SECRET_ACCESS_KEY"],
+    )
 
-#     pull_map = []
-#     if args.download_pull_map is not None:
-#         dl_pull_map_str = remote.download_as_str(args.download_pull_map)
-#         pull_map_dict = json.loads(dl_pull_map_str)
-#         pull_map.extend(convert_json_mapping(pull_map_dict))
+    pull_map = []
+    if args.download_pull_map is not None:
+        dl_pull_map_str = remote.download_as_str(args.download_pull_map)
+        pull_map_dict = json.loads(dl_pull_map_str)
+        pull_map.extend(_convert_json_mapping(pull_map_dict))
 
-#     if args.download is not None:
-#         for mapping_str in args.download:
-#             pull_map.append(parse_mapping_str(mapping_str))
+    if args.download is not None:
+        for mapping_str in args.download:
+            pull_map.append(_parse_mapping_str(mapping_str))
 
-#     pull(
-#         remote,
-#         pull_map,
-#         ignoreMissing=True,
-#         skip_existing=not args.forcedl,
-#         stage_dir=args.stage_dir,
-#     )
+    pull(
+        remote,
+        pull_map,
+        ignoreMissing=True,
+        skip_existing=not args.forcedl,
+        stage_dir=args.stage_dir,
+    )
 
-#     exec_command_with_capture(
-#         args.command, args.stderr, args.stdout, args.retcode, args.local_dir
-#     )
+    exec_command_with_capture(
+        args.command, args.stderr, args.stdout, args.retcode, args.local_dir
+    )
 
-#     if args.upload is not None:
-#         push(remote, args.upload)
+    if args.upload is not None:
+        push(remote, args.upload)
 
-#     if args.uploadresults is not None:
-#         results_json_file = "./results.json"
-#         published_files_root = args.local_dir
-#         publish_results(
-#             results_json_file, cas_remote, published_files_root, args.uploadresults
-#         )
+    if args.uploadresults is not None:
+        results_json_file = "./results.json"
+        published_files_root = args.local_dir
+        publish_results(
+            results_json_file, cas_remote, published_files_root, args.uploadresults
+        )
 
 
 def exec_command_with_capture(
@@ -621,29 +685,29 @@ def main(varg=None):
     # push_parser.add_argument("filenames", nargs="+")
     # push_parser.set_defaults(func=push_cmd)
 
-    # exec_parser = subparsers.add_parser("exec")
-    # exec_parser.add_argument("remote_url")
-    # exec_parser.add_argument("cas_remote_url")
-    # exec_parser.add_argument("local_dir")
-    # exec_parser.add_argument("--download_pull_map", "-f")
-    # exec_parser.add_argument("--download", "-d", default=[], action="append")
-    # exec_parser.add_argument("--upload", "-u", default=[], action="append")
-    # exec_parser.add_argument("--stdout", "-o")
-    # exec_parser.add_argument("--stderr", "-e")
-    # exec_parser.add_argument("--retcode", "-r")
-    # exec_parser.add_argument(
-    #     "--forcedl",
-    #     help="Force download of files even if the destination already exists",
-    # )
-    # exec_parser.add_argument(
-    #     "--stage", help="directory to use for staging in local CAS", dest="stage_dir"
-    # )
-    # exec_parser.add_argument(
-    #     "--uploadresults",
-    #     help="If set, upload results.json to this location and all other associated files to CAS",
-    # )
-    # exec_parser.add_argument("command", nargs=argparse.REMAINDER)
-    # exec_parser.set_defaults(func=exec_cmd)
+    exec_parser = subparsers.add_parser("exec")
+    exec_parser.add_argument("remote_url")
+    exec_parser.add_argument("cas_remote_url")
+    exec_parser.add_argument("local_dir")
+    exec_parser.add_argument("--download_pull_map", "-f")
+    exec_parser.add_argument("--download", "-d", default=[], action="append")
+    exec_parser.add_argument("--upload", "-u", default=[], action="append")
+    exec_parser.add_argument("--stdout", "-o")
+    exec_parser.add_argument("--stderr", "-e")
+    exec_parser.add_argument("--retcode", "-r")
+    exec_parser.add_argument(
+        "--forcedl",
+        help="Force download of files even if the destination already exists",
+    )
+    exec_parser.add_argument(
+        "--stage", help="directory to use for staging in local CAS", dest="stage_dir"
+    )
+    exec_parser.add_argument(
+        "--uploadresults",
+        help="If set, upload results.json to this location and all other associated files to CAS",
+    )
+    exec_parser.add_argument("command", nargs=argparse.REMAINDER)
+    exec_parser.set_defaults(func=exec_cmd)
 
     # exec_config_parser = subparsers.add_parser("exec-config")
     # exec_config_parser.add_argument("url")
