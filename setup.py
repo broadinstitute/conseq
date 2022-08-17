@@ -21,5 +21,5 @@ setup(name='conseq',
       entry_points={'console_scripts': ['conseq=conseq.main:conseq_command_entry']
                     },
       #      install_requires=[ "colorlog", "grako", "jinja2", "paramiko", "requests", "boto", "tabulate", "six" ]
-      install_requires=[ "colorlog>=3.0.1", "requests>=2.9.1", "boto>=2.38.0", "tabulate>=0.7.7", "six>=1.10.0", "jinja2==2.11.3", "tatsu==4.2.6", "pytest", "google-cloud-storage"]
+      install_requires=[ "colorlog>=3.0.1", "requests>=2.9.1", "boto>=2.38.0", "tabulate>=0.7.7", "six>=1.10.0", "jinja2==2.11.3", "tatsu==4.2.6", "pytest", "google-cloud-storage", "markupsafe==1.1.1"]
       )
