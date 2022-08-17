@@ -61,7 +61,9 @@ def _poll_until_next_completion(status: Status) -> List[Completion]:
 
         # now poll the jobs which are running and look for which have completed
         for i, e in reversed(list(enumerate(executing))):
-            failure, completion = e.get_completion()
+            result = e.get_completion()
+            failure = result.failure_result
+            completion = result.outputs
 
             if failure is None and completion is None:
                 continue

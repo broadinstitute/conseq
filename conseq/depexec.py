@@ -1,3 +1,5 @@
+from functools import cache
+import subprocess
 import collections
 import datetime
 import json
@@ -7,6 +9,7 @@ import time
 from typing import Any, Callable, Dict, List, Tuple, Union
 
 import six
+from .helper import Remote
 from jinja2.environment import Environment
 import os
 
@@ -25,6 +28,7 @@ from conseq.exec_client import (
     LocalExecClient,
     ResolveState,
     bind_inputs,
+    CACHE_KEY_FILENAME
 )
 from conseq.parser import QueryVariable
 from conseq.parser import Rule, RunStmt
@@ -133,6 +137,62 @@ def _compute_task_hash(rule_name, inputs):
     return sha256(task_def_str.encode("utf8")).hexdigest()
 
 
+def _run_locally(job_dir, run_stmts : List[str]):
+    for stmt in run_stmts:
+        completed_proc = subprocess.run(stmt, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=job_dir, shell=True)
+        if completed_proc.returncode != 0:
+            return completed_proc.returncode, completed_proc.stdout
+    return completed_proc.returncode, completed_proc.stdout
+
+def _get_cached_result(key_hash : str, config : Dict[str, Any]):
+    from conseq import helper
+    remote = helper.new_remote(
+            config["CLOUD_STORAGE_CACHE_ROOT"],
+            None,
+            config.get("AWS_ACCESS_KEY_ID"),
+            config.get("AWS_SECRET_ACCESS_KEY"),
+        )
+    results_path = os.path.join(config["CLOUD_STORAGE_CACHE_ROOT"], key_hash, "results.json")
+    if remote.exists(results_path):
+        outputs = json.loads(remote.download_as_str(results_path))
+    else:
+        outputs = None
+    return results_path, outputs
+
+def _read_cache_key(cache_key_path):
+    with open(cache_key_path, "rt") as fd:
+        cache_key = json.load(fd)
+    canonical_key = json.dumps(cache_key, sort_keys=True)
+    from hashlib import sha256
+    key_hash = sha256(canonical_key.encode('utf8')).hexdigest()
+
+    return key_hash, canonical_key
+
+def _compute_cache_key_path(cache_key, config):
+    assert isinstance(cache_key, dict)
+    canonical_key = json.dumps(cache_key, sort_keys=True)
+    from hashlib import sha256
+    key_hash = sha256(canonical_key.encode('utf8')).hexdigest()
+    return os.path.join(config["CLOUD_STORAGE_CACHE_ROOT"], key_hash), canonical_key
+
+def _store_cached_result(cache_key : Dict, amended_outputs : Dict[str, Any], config : Dict[str, Any]):
+    assert isinstance(cache_key, dict)
+    from conseq import helper
+    remote = helper.new_remote(
+            config["CLOUD_STORAGE_CACHE_ROOT"],
+            None,
+            config.get("AWS_ACCESS_KEY_ID"),
+            config.get("AWS_SECRET_ACCESS_KEY"),
+        )
+
+    cache_dir, canonical_key = _compute_cache_key_path(cache_key, config)
+
+    dest_cache_key_path = os.path.join(cache_dir, CACHE_KEY_FILENAME)
+    results_path = os.path.join(cache_dir, "results.json")
+
+    remote.upload_str(dest_cache_key_path, canonical_key)
+    remote.upload_str(results_path, json.dumps(amended_outputs))
+
 def execute(
     name: str,
     resolver: Resolver,
@@ -168,6 +228,35 @@ def execute(
         desc_name = "{} with inputs {} ({})".format(
             name, format_inputs(inputs), job_dir
         )
+
+        # if rule has a way to generate a cache key, do that first
+        if rule.cache_key_constructor:
+            run_stmts = generate_run_stmts(
+                job_dir,
+                rule.cache_key_constructor,
+                jinja2_env,
+                config,
+                resolver_state, # probably should not pass this in, but use some default one?
+                inputs=inputs,
+                task=task_vars,
+            )
+            retcode, cache_key_constructor_output = _run_locally(job_dir, run_stmts)
+            if retcode != 0:
+                return exec_client.FailedExecutionStub(
+                    id, "When running cache key constructor, expected zero exit code but got %s. Output: %s".format(retcode, cache_key_constructor_output), transform=name, job_dir=job_dir
+                )
+            cache_key_path = os.path.join(job_dir, CACHE_KEY_FILENAME)
+            if not os.path.exists(cache_key_path):
+                return exec_client.FailedExecutionStub(
+                    id, "Could not find %s after running cache key constructor".format(CACHE_KEY_FILENAME), transform=name, job_dir=job_dir
+                )
+            key_hash, key_value = _read_cache_key(cache_key_path)
+
+            key_path, prior_cached_results = _get_cached_result(key_hash, config)
+            if prior_cached_results is not None:
+                log.warning("Found existing cached results (key=%s at %s), skipping run and using previous results", key_path, key_value)
+                return exec_client.SuccessfulExecutionStub(id, prior_cached_results, transform=name)
+
 
         if len(rule.run_stmts) > 0:
             run_stmts = generate_run_stmts(
@@ -546,7 +635,9 @@ def main_loop(
 
             # now poll the jobs which are running and look for which have completed
             for i, e in reversed(list(enumerate(executing))):
-                failure, completion = e.get_completion()
+                completeion_result = e.get_completion()
+                failure = completeion_result.failure_msg
+                completion = completeion_result.outputs
 
                 if failure is None and completion is None:
                     continue
@@ -555,6 +646,7 @@ def main_loop(
                 timestamp = datetime.datetime.now().isoformat()
 
                 if completion is not None:
+                    # sanity check that this execution didn't result in an artifact which already existed
                     rule = rules.get_rule(e.transform)
                     if not rule.has_for_all_input():
                         # only do this check if no inputs are marked as "for all"
@@ -582,6 +674,9 @@ def main_loop(
                     timings.log(job_id, job.transform, "fail")
                 elif completion is not None:
                     amended_outputs = _amend_outputs(completion, properties_to_add)
+
+                    if completeion_result.cache_key:
+                        _store_cached_result(json.loads(completeion_result.cache_key), amended_outputs, rules.get_vars())
 
                     job_id = j.record_completed(
                         timestamp, e.id, dep.STATUS_COMPLETED, amended_outputs

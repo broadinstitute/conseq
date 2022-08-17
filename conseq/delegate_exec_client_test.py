@@ -247,13 +247,13 @@ def test_delegate_reattach(conseq_delegate_test_docker_image_name, tmpdir, use_a
     e2 = c2.reattach(extern_id)
 
     while True:
-        failure, output = e2.get_completion()
-        assert failure is None
-        if output is not None:
+        result = e2.get_completion()
+        assert result.failure_message is None
+        if result.outputs is not None:
             break
         time.sleep(1)
 
-    assert output == [{"name": "test_delegate_reattach"}]
+    assert result.outputs == [{"name": "test_delegate_reattach"}]
 
 
 @pytest.mark.parametrize("use_async", [True, False])
@@ -287,9 +287,9 @@ def test_terminate(conseq_delegate_test_docker_image_name, tmpdir, use_async):
         watch_regex=None,
     )
 
-    failure, output = e.get_completion()
-    assert failure is None
-    assert output is None
+    result = e.get_completion()
+    assert result.failure_message is None
+    assert result.outputs is None
 
     e.proc.terminate()
     time.sleep(5)

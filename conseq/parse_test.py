@@ -307,3 +307,11 @@ def test_relative_file_paths(tmpdir):
     assert a is not None
     print(a.inputs)
     a.inputs[0].json_obj["name"] == os.path.abspath(sample_rel_path)
+
+def test_construct_cache_key(tmpdir):
+    statements = parser.parse_str('''
+    rule a:
+        construct-cache-key-run """python""" with """print(0)"""
+    ''')
+    assert len(statements) == 1
+    statements[0].cache_key_constructor == [ ("python", "print(0)") ]

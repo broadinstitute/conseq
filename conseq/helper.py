@@ -15,7 +15,7 @@ import traceback
 
 log = logging.getLogger(__name__)
 
-
+# banana
 def _parse_remote(path: str) -> Tuple[str, str, str]:
     m = re.match("^(s3|gs)://([^/]+)/(.*)$", path)
     assert m != None, f"invalid remote path: {path}"

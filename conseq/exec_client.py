@@ -1,4 +1,5 @@
 import collections
+from dataclasses import dataclass
 import datetime
 import json
 import logging
@@ -16,6 +17,8 @@ from conseq import helper
 from conseq.dep import Jobs, Obj
 from conseq.helper import Remote
 from conseq.xref import Resolver
+
+CACHE_KEY_FILENAME="conseq-cache-key.json"
 
 _basestring = str
 
@@ -118,7 +121,7 @@ class FailedExecutionStub:
 
     def get_completion(self):
         log.error(self.message)
-        return self.message, None
+        return ExecResult(self.message, None)
 
 
 class SuccessfulExecutionStub:
@@ -132,55 +135,8 @@ class SuccessfulExecutionStub:
         return "SuccessfulExecutionStub:{}".format(self.id)
 
     def get_completion(self):
-        return None, self.outputs
+        return ExecResult(None, self.outputs)
 
-
-# Execution(name, id, job_dir, ReportSuccessProcStub(), outputs, None, desc_name)
-#         retcode_file = os.path.join(job_dir, "retcode.txt")
-#         with open(retcode_file, "wt") as fd:
-#             fd.write("0")
-
-# returns None if no errors were found.  Else returns a string with the error to report to the user
-def validate_result_json_obj(obj, types):
-    if not ("outputs" in obj):
-        return "Missing 'outputs' in object"
-
-    outputs = obj["outputs"]
-    if not isinstance(outputs, list):
-        return "Expected outputs to be a list"
-
-    for o in outputs:
-        if not isinstance(o, dict):
-            return "Expected members of outputs to by dictionaries"
-
-        for k, v in o.items():
-            if isinstance(v, dict):
-                if not (len(v) == 1 and "$filename" in v):
-                    return "Expected a dict value to only have a $filename key"
-                if not isinstance(v["$filename"], _basestring):
-                    return "Expected filename to be a string"
-            elif isinstance(v, _basestring):
-                return "Expected value for property {} to be a string".format(k)
-
-        # now validate against defined types
-        if not ("type" in o):
-            continue
-
-        type_name = o["type"]
-        if not (type_name in o):
-            continue
-
-        type = types[type_name]
-        missing = []
-        for prop in type.properties:
-            if not (prop in o):
-                missing.append(prop)
-        if len(missing):
-            return "Artifact had type {} but was missing: {}".format(
-                type_name, ", ".join(missing)
-            )
-
-    return None
 
 
 def grep_logs(log_grep_state: Dict[str, int], output_files: List[str], pattern):
@@ -208,6 +164,11 @@ def grep_logs(log_grep_state: Dict[str, int], output_files: List[str], pattern):
 
     return next_log_grep_state, filtered_lines
 
+@dataclass
+class ExecResult:
+    failure_msg : str
+    outputs : List[Dict[str, Any]]
+    cache_key : Optional[str] = None
 
 class Execution:
     def __init__(
@@ -281,12 +242,13 @@ class Execution:
         Tuple[None, List[Any]],
         Tuple[None, None],
     ]:
-        failure, outputs = self._get_completion()
-        if failure is not None:
-            self._log_failure(failure)
-        return failure, outputs
+        result = self._get_completion()
+        if result.failure_msg is not None:
+            self._log_failure(result.failure_msg)
+        return result
 
-    def _get_completion(self) -> Union[Tuple[None, List[Any]], Tuple[None, None]]:
+    def _get_completion(self) -> ExecResult:
+        # breakpoint()
         if self.watch_regex is not None:
             self.log_grep_state, log_output = grep_logs(
                 self.log_grep_state, self.captured_stdouts, self.watch_regex
@@ -298,25 +260,25 @@ class Execution:
         retcode = self.proc.poll()
 
         if retcode == None:
-            return None, None
+            return ExecResult(None, None)
 
         if retcode != 0:
-            return ("shell command failed with {}".format(retcode), None)
+            return ExecResult("shell command failed with {}".format(retcode), None)
 
         retcode_file = os.path.join(self.job_dir, "retcode.txt")
         try:
             with open(retcode_file) as fd:
                 retcode = int(fd.read())
                 if retcode != 0:
-                    return "failed with {}".format(retcode), None
+                    return ExecResult("failed with {}".format(retcode), None)
         except FileNotFoundError:
-            return "No retcode file {}".format(retcode_file), None
+            return ExecResult("No retcode file {}".format(retcode_file), None)
 
         if self.outputs != None:
             results = {"outputs": self.outputs}
         else:
             if not os.path.exists(self.results_path):
-                return (
+                return ExecResult(
                     "rule {} completed successfully, but no results.json file written to working directory".format(
                         self.transform
                     ),
@@ -348,7 +310,14 @@ class Execution:
                                 if error is not None:
                                     break
                 if error:
-                    return (error, None)
+                    return ExecResult(error, None)
+
+        # breakpoint()
+        cache_key = None
+        cache_key_file =  os.path.join(self.job_dir,CACHE_KEY_FILENAME)
+        if os.path.exists(cache_key_file):
+            with open(cache_key_file, "rt") as fd:
+                cache_key = fd.read()
 
         log.info(
             "Rule {} completed ({}). Results: {}".format(
@@ -370,7 +339,7 @@ class Execution:
                 "\n".join(["\t" + x for x in files_written]),
             )
 
-        return None, outputs
+        return ExecResult(None, outputs, cache_key=cache_key)
 
 
 class DelegateExecution(Execution):
@@ -425,16 +394,14 @@ class DelegateExecution(Execution):
 
     def _get_completion(
         self,
-    ) -> Union[
-        Tuple[None, List[Dict[str, Union[str, Dict[str, str]]]]], Tuple[None, None]
-    ]:
+    ) -> ExecResult:
         retcode = self.proc.poll()
-        # print("_get_completion -> {}".format(retcode))
+
         if retcode == None:
-            return None, None
+            return ExecResult(None, None)
 
         if retcode != 0:
-            return ("shell command failed with {}".format(retcode), None)
+            return ExecResult("shell command failed with {}".format(retcode), None)
 
         log.debug("About to download retcode.json")
 
@@ -446,13 +413,18 @@ class DelegateExecution(Execution):
             retcode = None
 
         if retcode != 0:
-            return ("inner shell command failed with {}".format(repr(retcode)), None)
+            return ExecResult("inner shell command failed with {}".format(repr(retcode)), None)
 
         results_str = self.remote.download_as_str(self._results_path)
         if results_str is None:
-            return ("script reported success but results.json is missing!", None)
+            return ExecResult("script reported success but results.json is missing!", None)
 
         results = json.loads(results_str)
+
+        if self.remote.exists(CACHE_KEY_FILENAME):
+            cache_key = self.remote.download_as_str(CACHE_KEY_FILENAME)
+        else:
+            cache_key = None
 
         log.info(
             "Rule {} completed ({}). Results: {}".format(
@@ -462,7 +434,7 @@ class DelegateExecution(Execution):
         assert type(results["outputs"]) == list
         outputs = [_resolve_filenames(self.remote, o) for o in results["outputs"]]
 
-        return None, outputs
+        return ExecResult(None, outputs, cache_key=cache_key)
 
 
 def write_wrapper_script(

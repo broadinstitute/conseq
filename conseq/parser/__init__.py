@@ -51,6 +51,7 @@ class Rule:
         self.output_expectations = []
         self.publish_location = None
         self.uses_files = []
+        self.cache_key_constructor = []
 
     def to_json(self):
         return json.dumps({
@@ -131,6 +132,15 @@ class Semantics(object):
             ast = ast[2:]
 
         assert ast[0] == "run"
+        if len(ast) > 3:
+            script_body = ast[3]
+        else:
+            script_body = None
+        return RunStmt(exec_profile, ast[1], script_body)
+
+    def construct_cache_key_run(self, ast):
+        exec_profile = "default"
+        assert ast[0] == "construct-cache-key-run"
         if len(ast) > 3:
             script_body = ast[3]
         else:
@@ -249,6 +259,7 @@ class Semantics(object):
             else:
                 raise Exception("unknown {}".format(statement[0]))
         rule.run_stmts.extend(runs)
+        rule.cache_key_constructor.extend(ast.cachekeystmts)
         # print("rule:", repr(rule))
         return rule
 

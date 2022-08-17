@@ -103,9 +103,9 @@ class depfileParser(Parser):
             with self._option():
                 self._dbl_quoted_string_()
             with self._option():
-                self._squoted_string_()
-            with self._option():
                 self._triple_squoted_string_()
+            with self._option():
+                self._squoted_string_()
             self._error('no available options')
 
     @tatsumasu()
@@ -301,6 +301,14 @@ class depfileParser(Parser):
             self._error('no available options')
 
     @tatsumasu()
+    def _construct_cache_key_run_(self):  # noqa
+        self._token('construct-cache-key-run')
+        self._quoted_string_()
+        with self._optional():
+            self._token('with')
+            self._quoted_string_()
+
+    @tatsumasu()
     def _run_statement_(self):  # noqa
         self._token('run')
         self._quoted_string_()
@@ -399,11 +407,16 @@ class depfileParser(Parser):
         self.name_last_node('params')
 
         def block4():
-            self._run_statement_()
+            self._construct_cache_key_run_()
         self._closure(block4)
+        self.name_last_node('cachekeystmts')
+
+        def block6():
+            self._run_statement_()
+        self._closure(block6)
         self.name_last_node('stmts')
         self.ast._define(
-            ['name', 'params', 'stmts'],
+            ['cachekeystmts', 'name', 'params', 'stmts'],
             []
         )
 
@@ -595,6 +608,9 @@ class depfileSemantics(object):
         return ast
 
     def output_specs(self, ast):  # noqa
+        return ast
+
+    def construct_cache_key_run(self, ast):  # noqa
         return ast
 
     def run_statement(self, ast):  # noqa

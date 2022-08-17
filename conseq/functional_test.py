@@ -6,6 +6,9 @@ from conseq import depexec
 
 
 def run_conseq(tmpdir, config, targets=[], assert_clean=True):
+    if not os.path.exists(str(tmpdir)):
+        os.mkdir(str(tmpdir))
+
     state_dir = str(tmpdir) + "/state"
     filename = str(tmpdir) + "/t.conseq"
     with open(filename, "wt") as fd:
@@ -240,6 +243,63 @@ def test_fileref_copy_to(tmpdir):
     assert len(execs) == 1
     assert execs[0].status == "completed"
 
+
+def test_construct_cache_key(tmpdir, monkeypatch):
+    blobs = {}
+
+    class MockRemote:
+        def __init__(self, remote_url, local_dir, accesskey=None, secretaccesskey=None):
+            print("Invoked!!!!")
+            self.local_dir = local_dir
+            self.remote_url = remote_url
+
+        def exists(self, filename):
+            print(f"checking {filename}: {filename in blobs}")
+            return filename in blobs
+        
+        def upload_str(self, path, blob):
+            assert isinstance(blob, str)
+            assert path.startswith("gs://banana")
+            print(f"putting {path}: {blob}")
+            blobs[path] = blob
+
+        def download_as_str(self, path):
+            return blobs[path]
+
+    import conseq.helper
+    monkeypatch.setattr(conseq.helper, 'Remote', MockRemote)
+
+    prolog = """
+    let AWS_ACCESS_KEY_ID="x"
+    let AWS_SECRET_ACCESS_KEY="y"
+    let S3_STAGING_URL="s3://buckey/root"
+    let CLOUD_STORAGE_CACHE_ROOT="gs://banana/key"
+    """
+
+    # run a job which saves the result in cache
+    run_conseq(tmpdir.join("repo1"), prolog + """
+    rule a:
+        construct-cache-key-run "bash" with '''
+            echo '{"a": "val1", "b": "val2"}' > conseq-cache-key.json
+        '''
+        run 'bash' with '''
+        echo '{"outputs": [{"finished": "true"}]}' > results.json
+        '''
+    """)
+
+    # this job has no knowledge of the previous job, except, it should restore the result from the cache
+    j = run_conseq(tmpdir.join("repo2"), prolog + """        
+    rule b:
+        construct-cache-key-run "bash" with '''
+            echo '{"b": "val2", "a": "val1"}' > conseq-cache-key.json
+        '''
+        run "echo hello"
+    """)
+
+    # make sure it got the resulting artifact from the previous run
+    artifacts = j.find_objs("public", {})
+    assert len(artifacts) == 1
+    assert artifacts[0].props == {"finished": "true"}
 
 def test_publish(tmpdir, monkeypatch):
     publish_called = [False]

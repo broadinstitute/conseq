@@ -4,9 +4,9 @@
 # different flavors of strings
 triple_dbl_quoted_string = /"""(?:[^"]|"{1,2}(?!"))+"""/ ;
 dbl_quoted_string = /"[^"]*"/ ;
-triple_squoted_string = /'''(?:[^']|'{1,2}(?!'))+'''/ ;
+triple_squoted_string =    /'''(?:[^']|'{1,2}(?!'))+'''/ ;
 squoted_string = /'[^']*'/ ;
-quoted_string = triple_dbl_quoted_string | dbl_quoted_string | squoted_string | triple_squoted_string ;
+quoted_string = triple_dbl_quoted_string | dbl_quoted_string | triple_squoted_string | squoted_string  ;
 
 identifier = /[A-Za-z]+[A-Za-z0-9_+-]*/ ;
 
@@ -69,6 +69,10 @@ output_specs = json_obj { "," json_obj } [ "," ]
     | "none"
     ;
 
+construct_cache_key_run = 
+    "construct-cache-key-run" quoted_string [ "with" quoted_string ]
+    ;
+
 run_statement =
     "run" quoted_string [ "with" quoted_string ]
     ;
@@ -99,7 +103,10 @@ rule_parameters = ("inputs" ":" input_specs |
     "uses" ":" file_list )
     ;
 
-rule = "rule" name:identifier ":" params:{ rule_parameters } * stmts:{ run_statement } *
+rule = "rule" name:identifier ":" 
+    params:{ rule_parameters } * 
+    cachekeystmts:{ construct_cache_key_run } *
+    stmts:{ run_statement } *
     ;
 
 add_if_missing = "add-if-missing" json_obj ;
