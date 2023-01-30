@@ -5,7 +5,7 @@ import tempfile
 import time
 from sqlite3 import Connection
 from typing import Dict, Union
-
+from google.cloud import storage
 
 from boto.s3.connection import S3Connection
 from six.moves.urllib import request
@@ -62,6 +62,19 @@ def s3_fetch(bucket_name: str, path: str, destination_filename: str,
     k.get_contents_to_filename(destination_filename, res_download_handler=res_download_handler, cb=report_progress)
 
 
+def gs_fetch(bucket_name: str, path: str, destination_filename: str) -> None:
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(path[1:]) # This is to ignore the forward slash at 0th index which adds an extra forward slash in blob's path
+    # e.g. gs://pipeline-preprocessing//conseq
+    blob.download_to_filename(destination_filename)
+    print(
+        "Downloaded storage object {} from bucket {} to local file {}.".format(
+            path, bucket_name, destination_filename
+        )
+    )
+
+
 class Pull:
     def __init__(self, config: Dict[str, Union[str, Dict[str, str]]]) -> None:
         self.ssh_client_cache = {}
@@ -75,6 +88,8 @@ class Pull:
             raise Exception("ssh no longer supported")
         elif parts.scheme in ["s3"]:
             s3_fetch(parts.netloc, parts.path, dest_path, self.config)
+        elif parts.scheme in["gs"]:
+            gs_fetch(parts.netloc, parts.path, dest_path)
         elif parts.scheme in ["http", "https"]:
             http_fetch(url, dest_path)
         else:

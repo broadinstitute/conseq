@@ -105,6 +105,11 @@ class GSStorageConnection(StorageConnection):
         self, filename: str, bucket_name: str, path: str, sha256=None
     ):
         blob = self.c.bucket(bucket_name).blob(path)
+        # GCS has a default chunk size of 100 MB and a default timeout per chunk of 60 seconds, so an upload speed
+        # of 13.3 Mbps is required to be able to log an artifact over 100 MB with the default settings.
+        # So a chunk size of 6 MB is set here which should support >=800kbps upload speed
+        blob._MAX_MULTIPART_SIZE = 6 * 1024 * 1024
+        blob._chunk_size = 6 * 1024 * 1024
         blob.upload_from_filename(filename)
 
         if sha256:
