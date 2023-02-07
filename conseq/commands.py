@@ -265,7 +265,7 @@ def export_cmd(state_dir, depfile, config_file, dest_s3_path, exclude_patterns):
             for name in required:
                 if name not in vars:
                     raise Exception(
-                        "When pushing to S3, need the following configuartio"
+                        "When pushing to S3, need the following configuration"
                     )
 
             cas_remote = helper.new_remote(
@@ -368,6 +368,12 @@ def export_cmd(state_dir, depfile, config_file, dest_s3_path, exclude_patterns):
     if dest_s3_path.startswith("s3://"):
         log.info("Uploading artifact metadata to %s", dest_s3_path)
         get_cas_remote().upload_str(dest_s3_path, out.getvalue())
+    elif dest_s3_path.startswith("gs://"):
+        if not os.path.exists(dest_s3_path):
+            os.makedirs(dest_s3_path)
+        log.info("Writing artifacts to %s", dest_s3_path)
+        with open(dest_s3_path, "wt") as fd:
+            fd.write(out.getvalue())
     else:
         log.info("Writing artifacts to %s", dest_s3_path)
         with open(dest_s3_path, "wt") as fd:
