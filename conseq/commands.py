@@ -369,11 +369,10 @@ def export_cmd(state_dir, depfile, config_file, dest_s3_path, exclude_patterns):
         log.info("Uploading artifact metadata to %s", dest_s3_path)
         get_cas_remote().upload_str(dest_s3_path, out.getvalue())
     elif dest_s3_path.startswith("gs://"):
-        if not os.path.exists(dest_s3_path):
-            os.makedirs(dest_s3_path)
+        # if not os.path.exists(dest_s3_path):
+        #     os.makedirs(dest_s3_path)
         log.info("Writing artifacts to %s", dest_s3_path)
-        with open(dest_s3_path, "wt") as fd:
-            fd.write(out.getvalue())
+        get_cas_remote().upload_str(dest_s3_path, out.getvalue())
     else:
         log.info("Writing artifacts to %s", dest_s3_path)
         with open(dest_s3_path, "wt") as fd:
