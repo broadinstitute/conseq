@@ -68,7 +68,7 @@ def gs_fetch(bucket_name: str, path: str, destination_filename: str) -> None:
     blob = bucket.blob(path[1:]) # This is to ignore the forward slash at 0th index which adds an extra forward slash in blob's path
     # e.g. gs://pipeline-preprocessing//conseq
     blob.download_to_filename(destination_filename)
-    print(
+    log.info(
         "Downloaded storage object {} from bucket {} to local file {}.".format(
             path, bucket_name, destination_filename
         )
