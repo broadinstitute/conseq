@@ -365,10 +365,7 @@ def export_cmd(state_dir, depfile, config_file, dest_gs_path, exclude_patterns):
         "Skipping export of %d executions which were filtered out via --exclude-remember",
         excluded,
     )
-    if dest_gs_path.startswith("s3://"):
-        log.info("Uploading artifact metadata to %s", dest_gs_path)
-        get_cas_remote().upload_str(dest_gs_path, out.getvalue())
-    elif dest_gs_path.startswith("gs://"):
+    if dest_gs_path.startswith("s3://") or dest_gs_path.startswith("gs://"):
         log.info("Uploading artifact metadata to %s", dest_gs_path)
         get_cas_remote().upload_str(dest_gs_path, out.getvalue())
     else:
