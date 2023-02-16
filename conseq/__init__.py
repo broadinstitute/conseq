@@ -1,6 +1,6 @@
 import json
 
-__version__ = '1.26.3'
+__version__ = '1.26.4'
 
 
 def Local(name):
