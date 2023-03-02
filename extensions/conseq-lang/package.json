@@ -1,0 +1,39 @@
+{
+  "name": "conseq-lang",
+  "displayName": "Conseq Lang",
+  "description": "Syntax highlighting for conseq lang",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.65.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "conseq",
+        "aliases": [
+          "Conseq",
+          "conseq"
+        ],
+        "extensions": [
+          ".conseq"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "conseq",
+        "scopeName": "source.conseq",
+        "path": "./syntaxes/conseq.tmLanguage.json",
+        "embeddedLanguages": {
+          "meta.embedded.block.python": "python",
+          "meta.embedded.block.shell": "shell",
+          "meta.embedded.block.r": "r"
+        }
+      }
+    ]
+  }
+}

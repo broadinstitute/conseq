@@ -1,0 +1,295 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Conseq",
+  "scopeName": "source.conseq",
+  "patterns": [
+    {
+      "include": "#jinja"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#embedded-languages"
+    },
+    {
+      "include": "#let-expr"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#comments"
+    }
+  ],
+  "repository": {
+    "jinja": {
+      "patterns": [
+        {
+          "comment": "HACK: Below we are using regexp event though it is semantically incorrect. It just provides really nice highlighting.",
+          "name": "string.regexp.jinja",
+          "begin": "{{",
+          "end": "}}"
+        },
+        {
+          "name": "string.regexp.jinja",
+          "begin": "{%",
+          "end": "%}"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.triple.conseq",
+          "begin": "\\\"\\\"\\\"",
+          "end": "\\\"\\\"\\\"",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.string.begin.conseq"
+            }
+          },
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.string.end.conseq"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#jinja"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.double.conseq",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.conseq",
+              "match": "\\\\."
+            },
+            {
+              "include": "#jinja"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.conseq",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.conseq",
+              "match": "\\\\."
+            },
+            {
+              "include": "#jinja"
+            }
+          ]
+        }
+      ]
+    },
+    "embedded-languages": {
+      "repository": {
+        "jinja-in-python": {
+          "match": "([^\"]*)(\"[^\"]*)({{[^\"]+}})([^\"]*\")([^\"]*)",
+          "captures": [
+            {},
+            { "patterns": [ { "include": "source.python" } ] },
+            { "name": "string.python" },
+            { "name": "string.regexp.jinja" },
+            { "name": "string.python" },
+            { "patterns": [ { "include": "source.python" } ] }
+          ]
+        }
+      },
+      "patterns": [
+        {
+          "name": "meta.embedded.conseq",
+          "contentName": "meta.embedded.block.python",
+          "begin": "(eval|run\\s+.python3?.\\s+with)\\s*('|\\\"\\\"\\\"|\\\")",
+          "end": "\\s*(\\2)",
+          "beginCaptures": [
+            {
+              "patterns": [
+                { "include": "#keywords" }
+              ]
+            }
+          ],
+          "patterns": [
+            {
+              "begin": "(.*)\\($",
+              "end": "\\)$",
+              "beginCaptures": {
+                "1": {
+                  "patterns": [
+                    { "include": "source.python" }
+                  ]
+                }
+              },
+              "patterns": [
+                { "include": "#jinja-in-python" }
+              ]
+            },
+            {
+              "begin": "\\{",
+              "end": "\\}",
+              "patterns": [
+                {
+                  "begin": "\"(?!{{)",
+                  "end": "(?<!}})\"",
+                  "name": "string.python"
+                },
+                { "include": "#jinja-in-python" }
+              ]
+            },
+            {
+              "begin": "\\[",
+              "end": "\\]",
+              "patterns": [
+                {
+                  "begin": "\"(?!{{)",
+                  "end": "(?<!}})\"",
+                  "name": "string.python"
+                },
+                { "include": "#jinja-in-python" }
+              ]
+            },
+            { "include": "#jinja-in-python" },
+            { "include": "source.python" }
+          ]
+        },
+        {
+          "name": "meta.embedded.conseq",
+          "contextName": "meta.embedded.block.r",
+          "begin": "run ['\\\"]Rscript['\\\"] with ('|\\\"\\\"\\\"|\\\")",
+          "end": "\\s*(\\1)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.code.open",
+              "patterns": [
+                {
+                  "include": "#keywords"
+                }
+              ]
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.code.close"
+            }
+          },
+          "patterns": [
+            {
+              "comment": "TODO: Find a way to override parens in order to match jinja"
+            },
+            {
+              "include": "#jinja"
+            },
+            {
+              "include": "source.r"
+            }
+          ]
+        },
+        {
+          "name": "meta.embedded.conseq",
+          "contentName": "meta.embedded.block.shell",
+          "begin": "run\\s*(.bash.\\s+with)? ('|\\\"\\\"\\\"|\\\")",
+          "end": "(\\2)",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.code.open",
+              "patterns": [
+                {
+                  "include": "#keywords"
+                }
+              ]
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.code.close"
+            }
+          },
+          "patterns": [
+            {
+              "comment": "TODO: Find a way to get jinja-in-strings to work here"
+            },
+            {
+              "include": "#jinja"
+            },
+            {
+              "include": "source.shell"
+            }
+          ]
+        }
+      ]
+    },
+    "let-expr": {
+      "patterns": [
+        {
+          "name": "storage.type.conseq",
+          "match": "\\blet\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.conseq",
+          "match": "\\b(if|else|elif|endif)\\b"
+        },
+        {
+          "name": "keyword.other.conseq",
+          "match": "\\b(include|run|rule|add-if-missing|exec_profile)\\b"
+        },
+        {
+          "name": "keyword.operator.expression.eval.conseq",
+          "match": "\\beval\\b"
+        }
+      ]
+    },
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.number-sign.conseq",
+          "contentName": "meta.typehint.comment.conseq",
+          "begin": "(?x)\n  (?:\n  \\# \\s* (type:)\n  \\s*+ \n  (?! $ | \\#)\n  )\n",
+          "end": "(?:$|(?=\\#))",
+          "beginCaptures": {
+            "0": {
+              "name": "meta.typehint.comment.conseq"
+            }
+          }
+        },
+        {
+          "include": "#comments-base"
+        }
+      ]
+    },
+    "codetags": {
+      "match": "(?:\\b(NOTE|XXX|HACK|FIXME|BUG|TODO)\\b)",
+      "captures": {
+        "1": {
+          "name": "keyword.codetag.notation.conseq"
+        }
+      }
+    },
+    "comments-base": {
+      "name": "comment.line.number-sign.conseq",
+      "begin": "(\\#)",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.definition.comment.conseq"
+        }
+      },
+      "end": "($)",
+      "patterns": [
+        {
+          "include": "#codetags"
+        }
+      ]
+    }
+  }
+}
