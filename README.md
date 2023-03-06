@@ -1,6 +1,7 @@
 ##### Table of Contents  
 * [Conseq Config Reference](#conseq-config-reference)
 * [Command Line Reference](#command-line-reference)
+* [Conseq Development](#conseq-development)
 
 # Conseq 
 (Pronounced "con-SIK" as in "consequence")
@@ -9,8 +10,6 @@ Conseq is a tool for running sequences of transformations or other operations.
 
 More on the motivation and details seen this slide deck: https://docs.google.com/a/broadinstitute.com/presentation/d/1LsRymTEKmqDxACDnMIx1z_Y2dQtY7TNpb5PAFyK0OQM/edit?usp=sharing
 or this poster https://drive.google.com/file/d/1FF8ESVbo_LXs4BBfEGAgkbq77ABXyzKu/view?usp=sharing
-
-<a name="conseq-config-reference"/>
 
 ## Installation
 
@@ -50,7 +49,7 @@ Artifacts: A set of key value pairs that model a piece of data that will either 
 Values: The values in the key/value pairs artifacts are strings or file references. 
 The syntax `{'$filename': path}` is used to denote values which are file references.
 
-Rules: A rule has a set of inputs which define which artifacts it consumes, and "run" statements to execute when such artifacts are availible.
+Rules: A rule has a set of inputs which define which artifacts it consumes, and "run" statements to execute when such artifacts are available.
 
 Executions: An execution is the application of a rule on a specific set of artifacts. The rule is essentially a template, and the execution is a combination of a rule and the inputs.
 
@@ -316,8 +315,6 @@ rule runscript:
     """    
 ```
 
-<a name="conseq-command-line-reference"/>
-
 # Command Line Reference
 
 You can get help on all conseq commands by running `conseq --help`
@@ -348,7 +345,7 @@ These tables get very wide, so you can also ask it to only show you select colum
 conseq ls type=dep-matrix columns=library,figshare_id
 ```
 
-## Remove artefacts
+## Remove artifacts
 
 Remove all artifacts
 
@@ -366,7 +363,7 @@ Remove artifacts where type is 'dep-matrix' and library is 'avana'
 conseq rm type=dep-matrix library=avana
 ```
 
-To remove all artefacts AND history of executions, delete the ```state/``` directory. This will reset conseq to a clean slate.
+To remove all artifacts AND history of executions, delete the ```state/``` directory. This will reset conseq to a clean slate.
 
 
 ## Run rules
@@ -383,7 +380,7 @@ Run all possible rules, asking before each rule
 conseq run run-example.conseq --confirm
 ```
 
-Run possible combinations of artefacts for rank_scale_deps, and all downstream rules. This forces running the rule, even if it has been run before.
+Run possible combinations of artifacts for rank_scale_deps, and all downstream rules. This forces running the rule, even if it has been run before.
 
 ```
 conseq run run-example.conseq rank_scale_deps
@@ -504,7 +501,7 @@ $ conseq report html
 The above command will create a directory named "html" and you can 
 open `html/index.html` to browse the report.
 
-## Generate artefacts and rules diagram
+## Generate artifacts and rules diagram
 * ```conseq altdot release_3_vbox.conseq > dag.dot```
 * Open dag.dot in Graphviz (or execute `dot dag.dot -Tpng -o dag.png`)
 
@@ -583,3 +580,18 @@ exec-profile async-docker-tda-img {
   "TERMINATE_CMD_TEMPLATE": "docker kill {job_id}"
 }
 ```
+# Conseq Development
+To ease with the editing of conseq files, there is a experimental package
+available that enables syntax highlighting. It's compatible with any editor that
+supports TextMate grammars. So far we've got it worked with Visual Studio Code
+and PyCharm.
+
+## Visual Studio Code installation
+
+- Copy the `./conseq/extensions/conseq-lang` directory into `~/.vscode/extensions`
+- Restart VS Code
+- Enjoy! 
+
+## PyCharm installation
+Use these instructions to import the `./conseq/extensions/conseq-lang` directory:
+https://www.jetbrains.com/help/pycharm/tutorial-using-textmate-bundles.html#importing-bundles
