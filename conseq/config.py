@@ -172,7 +172,13 @@ def _eval_stmts(rules, statements, filename, hashcache, eval_context=None):
             for input in dec.inputs:
                 if isinstance(input.json_obj, parser.FileRef):
                     fileref = input.json_obj
-                    filename = os.path.abspath(rt(fileref.filename))
+                    assert dec.filename
+                    script_dir = os.path.dirname(dec.filename)
+                    
+                    filename = os.path.abspath(
+                        os.path.join(script_dir, rt(fileref.filename))
+                        )
+                    print("re-anchoring", fileref.filename, "relative to", script_dir, "->", filename)
                     ref_name = os.path.relpath(filename, root_dir)
                     sha256 = hashcache.sha256(filename)
                     new_json_obj = {"type": "$fileref",

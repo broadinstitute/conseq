@@ -1006,6 +1006,7 @@ class Template:
         return bindings
 
     def create_rules(self, obj_set):
+#        breakpoint()
         # print ("create_rules, transform:",self.transform,", queries: ", self.foreach_queries)
         with timeblock(log, "create_rules({})".format(self.transform), min_time=1):
             results = []
@@ -1307,7 +1308,7 @@ class Jobs:
                 raise Exception("Expected to find a single object with properties: {}, but found: {}".format(props, objs))
             return objs[0]
 
-        log.info("Remembering execution: %s, %s", transform, exec_stmt.inputs)
+        log.debug("Remembering execution: %s, %s", transform, exec_stmt.inputs)
         try:
             # find inputs in repo.  Errors if no such object exists
             inputs_json = exec_stmt.inputs

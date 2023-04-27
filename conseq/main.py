@@ -395,6 +395,17 @@ def add_downstream(sub):
 
     parser.set_defaults(func=downstream)
 
+def add_stage(sub):
+    parser = sub.add_parser("stage", help="Stage inputs for a rule and create a test harness for running rule")
+    parser.add_argument("export_file", help="Path to export of full pipeline run to select artifacts from")
+    parser.add_argument("rule_file", help="File containing conseq rules to create test harness for")
+    parser.add_argument("dest_dir", help="directory to write test harness to")
+
+    def stage(args):
+        commands.stage_cmd(args.export_file, args.rule_file, args.dest_dir)
+    
+    parser.set_defaults(func=stage)
+
 def conseq_command_entry():
     # disable stdout/stderr buffering to work better when run non-interactively
     import sys, io
@@ -404,6 +415,7 @@ def conseq_command_entry():
     ret = main()
     if ret is not None:
         sys.exit(ret)
+
 
 
 def main(args=None):
@@ -436,6 +448,7 @@ def main(args=None):
     add_export(sub)
     add_report(sub)
     add_downstream(sub)
+    add_stage(sub)
 
     args = parser.parse_args(args)
     if args.verbose:

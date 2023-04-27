@@ -952,7 +952,7 @@ def reconcile_rule_specifications(j: Jobs, latest_rules: Dict[str, str]):
     existing_rules = dict(j.get_rule_specifications())
     # any rules for which we no longer have a definition are stale
     stale_rules = set(existing_rules.keys()).difference(latest_rules.keys())
-    print("Identified stale rules: {}".format(stale_rules))
+    #print("Identified stale rules: {}".format(stale_rules))
 
     # now for those rules which we existed before and we have a definition now, if their definition is different, it's stale
     for transform in latest_rules.keys():

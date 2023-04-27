@@ -109,6 +109,113 @@ def lsexec(state_dir):
         _print_execution(execution)
 
 
+def stage_cmd(export_file, conseq_file, dest_dir):
+    from conseq import depexec, exec_client
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        print(f"Populating temp repo at {tmpdir}")
+        # First import the export into a temp database
+        db_path = os.path.join(tmpdir, "db.sqlite3")
+        j = dep.open_job_db(db_path)
+
+        export_contents = read_rules(dest_dir, export_file, config_file=None)
+
+        # process add-if-missing statements
+        depexec.reconcile_db(
+            j,
+            export_contents.jinja2_env,
+            export_contents.get_rule_specifications(),
+            export_contents.objs,
+            export_contents.vars
+        )
+
+        # handle the remember-executed statements
+        with j.transaction():
+            for exec_ in export_contents.remember_executed:
+                j.remember_executed(exec_)
+
+        # now try to apply the rules in the conseq file provided to find input artifacts
+
+        rules = read_rules(dest_dir, conseq_file, config_file=None)
+        resolver = xref.Resolver(dest_dir, rules.vars)
+
+        for dec in rules:
+            # try:
+                j.add_template(depexec.to_template(export_contents.jinja2_env, dec, rules.vars))
+            # except MissingTemplateVar as ex:
+            #     log.error("Could not load rule {}: {}".format(dec.name, ex.get_error()))
+            #     return -1
+
+        #breakpoint()
+        j.enable_deferred()
+        pending_jobs = j.get_pending()
+        print(f"Found {len(pending_jobs)} executions which can run")
+
+        inputs_to_hardcode = {}
+
+        def dict_to_key(d):
+            # turn a dict into something which can be used as a key in a dictionary
+            return json.dumps(d, sort_keys=True)
+
+        executor_names = set()
+        for job in pending_jobs:
+            rule = rules.get_rule(job.transform)
+            executor_names.add(rule.executor )
+            assert not rule.is_publish_rule, "Publish rules are not allowed"
+
+            # localize paths that will be used in scripts
+            exec_client.preprocess_xref_inputs(
+                j, resolver, job.inputs
+            )
+            # this could be a problem. Is client always going to be a local client? (Is that what we even want?)
+            #client = rules.get_client(rule.executor)
+            client = exec_client.LocalExecClient({})
+            inputs, resolver_state = client.preprocess_inputs(
+                resolver, depexec.bind_inputs(rule, job.inputs)
+            )
+
+            # deduplicate artifacts
+            for artifacts in inputs.values():
+                if isinstance(artifacts, dict):
+                    artifacts = [artifacts]
+                for artifact in artifacts:
+                    if artifact.get("type") == "$fileref":
+                        # skip these because they should be specified on the rule itself
+                        pass
+                    del artifact["$manually-added"]
+                    inputs_to_hardcode[dict_to_key(artifact)] = artifact
+#            breakpoint()
+
+            # run_stmts = depexec.generate_run_stmts(
+            #     dest_dir,
+            #     rule.run_stmts,
+            #     rules.jinja2_env,
+            #     rules.get_vars(),
+            #     resolver_state,
+            #     inputs=inputs
+            # )
+
+            # job_dir = dest_dir
+            # wrapper_path = os.path.join(job_dir, "wrapper.sh")
+            # prologue = ""
+            # retcode_path = os.path.join(job_dir, "retcode.txt")
+
+            # exec_client.write_wrapper_script(wrapper_path, job_dir, prologue, run_stmts, retcode_path)
+        
+        output_script = os.path.join(dest_dir, "test.conseq")
+        with open(output_script, "wt") as fd:
+            for artifact in inputs_to_hardcode.values():
+                fd.write(f"add-if-missing {json.dumps(artifact, indent=2)}\n\n")
+
+            for executor_name in executor_names:
+                if executor_name == "default":
+                    continue
+                fd.write(f"exec-profile {executor_name} {{\n")
+                fd.write("  \"type\": \"local\", \"resources\": {\"slots\": \"10\"} }\n\n")
+                print(f"Warning: defining an executor profile {executor_name} as local execution")
+            fd.write(f"include \"{os.path.relpath(conseq_file, os.path.dirname(output_script))}\"\n")
+
 def downstream_cmd(state_dir, space, predicates):
 
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
