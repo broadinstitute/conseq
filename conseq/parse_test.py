@@ -242,10 +242,11 @@ def test_file_ref(tmpdir):
     localfile = tmpdir.join("xyz")
     localfile.write("x")
 
-    statements = parser.parse_str("""
+    statements = parser.parse_str(f"""
     rule a:
-        inputs: x=filename("{}")
-    """.format(localfile))
+        inputs: x=filename("{localfile}")
+    """, filename=str(tmpdir.join("sample.conseq")))
+
     _eval_stmts(rules, statements, str(tmpdir)+"/none", HashCache(str(tmpdir.join("hashcache"))))
     a = rules.get_rule("a")
     assert a is not None
@@ -262,10 +263,10 @@ def test_file_ref_with_copy_to(tmpdir):
     localfile = tmpdir.join("xyz")
     localfile.write("x")
 
-    statements = parser.parse_str("""
+    statements = parser.parse_str(f"""
     rule a:
-        inputs: x=filename("{}", copy_to="z")
-    """.format(localfile))
+        inputs: x=filename("{localfile}", copy_to="z")
+    """, filename=str(tmpdir.join("sample.conseq")))
     _eval_stmts(rules, statements, "none", HashCache(str(tmpdir.join("hashcache"))))
 
     a = rules.get_rule("a")
@@ -284,7 +285,7 @@ def test_file_refs_with_vars(tmpdir):
     statements = parser.parse_str("""
     rule a:
         inputs: x=filename("{{config.VARIABLE}}/xyz-{{config.NUMBER}}")
-    """)
+    """, filename=str(tmpdir.join("sample.conseq")))
     _eval_stmts(rules, statements, "none", HashCache(str(tmpdir.join("hashcache"))))
     a = rules.get_rule("a")
     assert a is not None
@@ -293,13 +294,13 @@ def test_file_refs_with_vars(tmpdir):
 
 
 def test_relative_file_paths(tmpdir):
-    sample_rel_path = os.path.relpath(__file__, os.path.abspath("."))
+    sample_rel_path = os.path.relpath(__file__, os.path.abspath(str(tmpdir)))
     assert sample_rel_path[0] != "/"
 
-    statements = parser.parse_str("""
+    statements = parser.parse_str(f"""
     rule a:
-        inputs: x=filename("{}")
-    """.format(sample_rel_path))
+        inputs: x=filename("{sample_rel_path}")
+    """, filename=str(tmpdir.join("sample.conseq")))
 
     rules = Rules()
     _eval_stmts(rules, statements, "none", HashCache(str(tmpdir.join("hashcache"))))

@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import sys
 from subprocess import Popen
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Sequence
 
 from conseq import debug_log
 from conseq import dep
@@ -569,7 +569,7 @@ def flatten_parameters(d: Dict[str, str]) -> Dict[str, str]:
 
 
 def preprocess_xref_inputs(
-    j: Jobs, resolver: Resolver, inputs: Tuple[Tuple[str, Obj]]
+    j: Jobs, resolver: Resolver, inputs: Sequence[Tuple[str, Obj]]
 ) -> bool:
     xrefs_resolved = [False]
 

@@ -140,81 +140,90 @@ def stage_cmd(export_file, conseq_file, dest_dir):
         rules = read_rules(dest_dir, conseq_file, config_file=None)
         resolver = xref.Resolver(dest_dir, rules.vars)
 
-        for dec in rules:
-            # try:
-                j.add_template(depexec.to_template(export_contents.jinja2_env, dec, rules.vars))
-            # except MissingTemplateVar as ex:
-            #     log.error("Could not load rule {}: {}".format(dec.name, ex.get_error()))
-            #     return -1
+        applications = []
+        for rule_name in rules.rule_by_name.keys():
+            rule = rules.get_rule(rule_name)
+            queries, predicates = convert_input_spec_to_queries(
+                rules.jinja2_env, rule, rules.vars
+            )
+            applications.extend(j.query_template(dep.Template(queries, predicates, rule.name)))
+        print("found", applications)
+        breakpoint()
 
-        #breakpoint()
-        j.enable_deferred()
-        pending_jobs = j.get_pending()
-        print(f"Found {len(pending_jobs)} executions which can run")
+        artifact_ids_used_as_inputs = set()
 
-        inputs_to_hardcode = {}
-
-        def dict_to_key(d):
-            # turn a dict into something which can be used as a key in a dictionary
-            return json.dumps(d, sort_keys=True)
+        for application in applications:
+            space, bindings, rule_name = application
+            for bound_name, bound_artifacts in bindings:
+                # if we have a single artifact (as opposed to multiple) turn it into a list so
+                # that bound_artifacts is always a list
+                if isinstance(bound_artifacts, Obj):
+                    bound_artifacts = [bound_artifacts]
+                
+                for bound_artifact in bound_artifacts:
+                    artifact_ids_used_as_inputs.add(bound_artifact.id)
+                
+        # now we've got a set (deduplicated) artifact_ids that were used by all of those
+        # rules. Now, some of those artifacts might be outputs of other rules in this same file
+        # so, we'd like to exclude all the artifact ids which are downstream of all the rules in this 
+        # conseq file.
+        downstream_object_ids = set()
+        for transform in rules.rule_by_name.keys():
+            obj_ids = j.find_rule_output_ids(transform)
+            downstream_object_ids.update(obj_ids)
 
         executor_names = set()
-        for job in pending_jobs:
-            rule = rules.get_rule(job.transform)
+        for transform in rules.rule_by_name.keys():
+            rule = rules.get_rule(transform)
             executor_names.add(rule.executor )
             assert not rule.is_publish_rule, "Publish rules are not allowed"
 
+        breakpoint()
+        # these are the artifacts that we want to add to the conseq file
+        starting_artifact_ids = artifact_ids_used_as_inputs.difference(downstream_object_ids)
+
+        # now localize any props that need it in these artifacts
+        inputs_to_hardcode = []
+        for artifact in j.get_objs_by_ids(starting_artifact_ids):
+            tmp_bindings = [("temp", artifact)]
             # localize paths that will be used in scripts
             exec_client.preprocess_xref_inputs(
-                j, resolver, job.inputs
+                j, resolver, tmp_bindings
             )
             # this could be a problem. Is client always going to be a local client? (Is that what we even want?)
             #client = rules.get_client(rule.executor)
             client = exec_client.LocalExecClient({})
+            from .exec_client import BoundInput
             inputs, resolver_state = client.preprocess_inputs(
-                resolver, depexec.bind_inputs(rule, job.inputs)
+                resolver, [BoundInput("tmp", artifact, None)]
             )
 
-            # deduplicate artifacts
-            for artifacts in inputs.values():
-                if isinstance(artifacts, dict):
-                    artifacts = [artifacts]
-                for artifact in artifacts:
-                    if artifact.get("type") == "$fileref":
-                        # skip these because they should be specified on the rule itself
-                        pass
-                    del artifact["$manually-added"]
-                    inputs_to_hardcode[dict_to_key(artifact)] = artifact
-#            breakpoint()
+            artifact_dict = dict(inputs["tmp"])
+            if artifact_dict.get("type") == "$fileref":
+                # skip these because they should be specified on the rule itself
+                pass
 
-            # run_stmts = depexec.generate_run_stmts(
-            #     dest_dir,
-            #     rule.run_stmts,
-            #     rules.jinja2_env,
-            #     rules.get_vars(),
-            #     resolver_state,
-            #     inputs=inputs
-            # )
+            if "$manually-added" in artifact_dict:
+                del artifact_dict["$manually-added"]
 
-            # job_dir = dest_dir
-            # wrapper_path = os.path.join(job_dir, "wrapper.sh")
-            # prologue = ""
-            # retcode_path = os.path.join(job_dir, "retcode.txt")
+            print("artifact", artifact_dict)
+            inputs_to_hardcode.append(artifact_dict)
 
-            # exec_client.write_wrapper_script(wrapper_path, job_dir, prologue, run_stmts, retcode_path)
-        
         output_script = os.path.join(dest_dir, "test.conseq")
-        with open(output_script, "wt") as fd:
-            for artifact in inputs_to_hardcode.values():
-                fd.write(f"add-if-missing {json.dumps(artifact, indent=2)}\n\n")
+        _write_test_script(conseq_file, inputs_to_hardcode, executor_names, output_script)
 
-            for executor_name in executor_names:
-                if executor_name == "default":
-                    continue
-                fd.write(f"exec-profile {executor_name} {{\n")
-                fd.write("  \"type\": \"local\", \"resources\": {\"slots\": \"10\"} }\n\n")
-                print(f"Warning: defining an executor profile {executor_name} as local execution")
-            fd.write(f"include \"{os.path.relpath(conseq_file, os.path.dirname(output_script))}\"\n")
+def _write_test_script(conseq_file, inputs_to_hardcode, executor_names, output_script):
+    with open(output_script, "wt") as fd:
+        for artifact in inputs_to_hardcode:
+            fd.write(f"add-if-missing {json.dumps(artifact, indent=2)}\n\n")
+
+        for executor_name in executor_names:
+            if executor_name == "default":
+                continue
+            fd.write(f"exec-profile {executor_name} {{\n")
+            fd.write("  \"type\": \"local\", \"resources\": {\"slots\": \"10\"} }\n\n")
+            print(f"Warning: defining an executor profile {executor_name} as local execution")
+        fd.write(f"include \"{os.path.relpath(conseq_file, os.path.dirname(output_script))}\"\n")
 
 def downstream_cmd(state_dir, space, predicates):
 

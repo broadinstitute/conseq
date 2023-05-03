@@ -209,7 +209,9 @@ def execute(
     try:
         prologue = render_template(jinja2_env, config["PROLOGUE"], config)
 
-        task_vars = {"HASH": _compute_task_hash(name, inputs)}
+        task_vars = {"HASH": _compute_task_hash(name, inputs), 
+                     "SCRIPT_PATH": os.path.abspath(rule.filename),
+                     "SCRIPT_DIR": os.path.dirname(os.path.abspath(rule.filename)) }
 
         if rule.outputs == None:
             outputs = None

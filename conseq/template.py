@@ -3,6 +3,9 @@ import json
 import jinja2
 import six
 
+class LazyValue:
+    def __init__(self, callback):
+        self.callback = callback
 
 class LazyConfig:
     def __init__(self, render_template, config_dict):
@@ -20,6 +23,8 @@ class LazyConfig:
 
     def __getitem__(self, name):
         v = self._config_dict[name]
+        if isinstance(v, LazyValue):
+            v = v.callback()
         if isinstance(v, str):
             return self._render_template(v)
         else:
@@ -66,6 +71,20 @@ def render_template(jinja2_env, template_text, config, **kwargs):
         except jinja2.exceptions.UndefinedError as ex:
             raise MissingTemplateVar(ex.message, kwargs, text)
 
+    config = dict(config) # make a copy because we're going to add a variable
+    
+    SCRIPT_DIR = None
+    if "task" in kwargs:
+        SCRIPT_DIR = kwargs["task"]["SCRIPT_DIR"]
+
+    def _get_script_dir():
+        if SCRIPT_DIR is None:
+            breakpoint()
+        
+        return SCRIPT_DIR
+
+
+    config["SCRIPT_DIR"] = LazyValue(_get_script_dir)
     kwargs["config"] = LazyConfig(render_template_callback, config)
 
     return render_template_callback(template_text)

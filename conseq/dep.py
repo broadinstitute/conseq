@@ -1333,6 +1333,10 @@ class Jobs:
         with transaction(self.db):
             self.rule_set.remove_unsuccessful()
 
+    def get_objs_by_ids(self, ids):
+        with transaction(self.db):
+            return [self.objects.get(id) for id in ids]
+
     def find_rule_output_ids(self, transform):
         with transaction(self.db):
             self.rule_set.assert_db_sane()
