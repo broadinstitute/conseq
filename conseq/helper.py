@@ -75,36 +75,41 @@ from google.cloud import storage
 
 class GSStorageConnection(StorageConnection):
     def __init__(self):
-        self.c = storage.Client()
+        self.c = None
+
+    def _get_client(self):
+        if self.c is None:
+            self.c = storage.Client()
+        return self.c
 
     def exists(self, bucket_name: str, key: str) -> bool:
-        return self.c.bucket(bucket_name).get_blob(key) is not None
+        return self._get_client().bucket(bucket_name).get_blob(key) is not None
 
     def list_keys_with_prefix(self, bucket_name: str, path: str) -> List[str]:
-        bucket = self.c.bucket(bucket_name)
-        return [x.name for x in self.c.list_blobs(bucket, prefix=path)]
+        bucket = self._get_client().bucket(bucket_name)
+        return [x.name for x in self._get_client().list_blobs(bucket, prefix=path)]
 
     def get_contents_as_string(self, bucket_name: str, path: str) -> bytes:
-        return self.c.bucket(bucket_name).blob(path).download_as_bytes()
+        return self._get_client().bucket(bucket_name).blob(path).download_as_bytes()
 
     def get_contents_to_filename(self, bucket_name: str, path: str, dest_path: str):
-        self.c.bucket(bucket_name).blob(path).download_to_filename(dest_path)
+        self._get_client().bucket(bucket_name).blob(path).download_to_filename(dest_path)
 
     def get_sha256(self, bucket_name: str, path: str) -> Optional[str]:
-        metadata = self.c.bucket(bucket_name).get_blob(path).metadata
+        metadata = self._get_client().bucket(bucket_name).get_blob(path).metadata
         if metadata:
             return metadata.get("sha256")
 
     def get_generation_id(self, bucket_name: str, path: str) -> str:
-        return str(self.c.bucket(bucket_name).get_blob(path).generation)
+        return str(self._get_client().bucket(bucket_name).get_blob(path).generation)
 
     def set_contents_from_string(self, bucket_name: str, path: str, text: str):
-        self.c.bucket(bucket_name).blob(path).upload_from_string(text)
+        self._get_client().bucket(bucket_name).blob(path).upload_from_string(text)
 
     def set_contents_from_filename(
         self, filename: str, bucket_name: str, path: str, sha256=None
     ):
-        blob = self.c.bucket(bucket_name).blob(path)
+        blob = self._get_client().bucket(bucket_name).blob(path)
         # GCS has a default chunk size of 100 MB and a default timeout per chunk of 60 seconds, so an upload speed
         # of 13.3 Mbps is required to be able to log an artifact over 100 MB with the default settings.
         # So a chunk size of 6 MB is set here which should support >=800kbps upload speed
