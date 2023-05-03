@@ -141,15 +141,21 @@ def stage_cmd(export_file, conseq_file, dest_dir):
         resolver = xref.Resolver(dest_dir, rules.vars)
 
         applications = []
+        from collections import Counter
+        application_count_per_rule = Counter()
         for rule_name in rules.rule_by_name.keys():
             rule = rules.get_rule(rule_name)
             queries, predicates = convert_input_spec_to_queries(
                 rules.jinja2_env, rule, rules.vars
             )
-            applications.extend(j.query_template(dep.Template(queries, predicates, rule.name)))
-        print("found", applications)
-        breakpoint()
+            applications_for_rule = j.query_template(dep.Template(queries, predicates, rule.name))
+            applications.extend(applications_for_rule)
+            application_count_per_rule.update({rule_name: len(applications_for_rule)})
 
+        print(f"Found the following executions:")
+        for rule_name, count in application_count_per_rule.items():
+            print(f"  {rule_name}: {count} applications")
+        
         artifact_ids_used_as_inputs = set()
 
         for application in applications:
@@ -178,7 +184,6 @@ def stage_cmd(export_file, conseq_file, dest_dir):
             executor_names.add(rule.executor )
             assert not rule.is_publish_rule, "Publish rules are not allowed"
 
-        breakpoint()
         # these are the artifacts that we want to add to the conseq file
         starting_artifact_ids = artifact_ids_used_as_inputs.difference(downstream_object_ids)
 
@@ -206,7 +211,7 @@ def stage_cmd(export_file, conseq_file, dest_dir):
             if "$manually-added" in artifact_dict:
                 del artifact_dict["$manually-added"]
 
-            print("artifact", artifact_dict)
+            # print("artifact", artifact_dict)
             inputs_to_hardcode.append(artifact_dict)
 
         output_script = os.path.join(dest_dir, "test.conseq")
