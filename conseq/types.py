@@ -1,4 +1,4 @@
-from typing import Dict, Union, Sequence, Tuple, Optional
+from typing import Dict, Union, Sequence, Tuple, Optional, TypeVar
 from dataclasses import dataclass
 
 
@@ -8,8 +8,9 @@ class BoundInput:
     value: Dict
     copy_to: Optional[str]
 
+PropValue = TypeVar("PropValue", bound=Union[str, Dict[str, str]])
 
-PropsType = Dict[str, Union[str, Dict[str, str]]]
+PropsType = Dict[str, PropValue]
 
 
 class Obj:
@@ -40,5 +41,6 @@ class Obj:
         return "<{}:{} {}>".format(self.space, self.id, repr(self.props))
 
 
-BindingsDict = Dict[str, Union[Obj, Sequence[Obj]]]
+BindingsValue = TypeVar("BindingsValue", bound=Union[Obj, Sequence[Obj]])
+BindingsDict = Dict[str, BindingsValue]
 InputsType = Sequence[Tuple[str, Obj]]

@@ -228,7 +228,7 @@ def execute(
     capture_output: bool,
     resolver_state: ResolveState,
     client: Union[DelegateExecClient, LocalExecClient],
-) -> Execution:
+) -> Union[Execution, exec_client.ExecutionStub]:
     try:
         prologue = render_template(jinja2_env, config["PROLOGUE"], config)
 
@@ -363,31 +363,37 @@ def get_job_dir(state_dir: str, job_id: int) -> str:
     return os.path.join(state_dir, "r" + str(job_id))
 
 
+from dataclasses import dataclass
+@dataclass
+class SummaryRec:
+    count : int
+    dirs : List[str]
+
 def get_long_execution_summary(
     executing: Union[List[Execution], List[DelegateExecution]],
     pending: List[RuleExecution],
 ) -> str:
     from tabulate import tabulate
 
-    counts = collections.defaultdict(lambda: dict(count=0, dirs=[]))
+    counts :Dict[str: Any] = collections.defaultdict(lambda: SummaryRec(count=0, dirs=[]))
     for e in executing:
         k = (e.get_state_label(), e.transform)
         rec = counts[k]
-        rec["count"] += 1
-        rec["dirs"].append(e.job_dir)
+        rec.count += 1
+        rec.dirs.append(e.job_dir)
 
     for p in pending:
         k = ("pending", p.transform)
         rec = counts[k]
-        rec["count"] += 1
+        rec.count += 1
 
     rows = []
     for k, rec in counts.items():
         state, transform = k
-        dirs = " ".join(rec["dirs"])
+        dirs = " ".join(rec.dirs)
         if len(dirs) > 30:
             dirs = dirs[: 30 - 4] + " ..."
-        rows.append([state, transform, rec["count"], dirs])
+        rows.append([state, transform, rec.count, dirs])
     return indent_str(
         tabulate(rows, ["state", "transform", "count", "dirs"], tablefmt="simple"), 4
     )

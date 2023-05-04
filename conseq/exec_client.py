@@ -35,7 +35,7 @@ SGE_STATUS_COMPLETE = "complete"
 SGE_STATUS_UNKNOWN = "unknown"
 
 import tempfile
-
+import signal
 
 class PidProcStub:
     def __init__(self, pid: int) -> None:
@@ -57,6 +57,9 @@ class PidProcStub:
             return None
         except OSError:
             return 0
+    
+    def terminate(self):
+        os.kill(self.pid, signal.SIGTERM)
 
 
 def is_valid_value(v):
@@ -109,8 +112,10 @@ def log_job_output(
         )
         _tail_file(stderr_path)
 
+class ExecutionStub:
+    pass
 
-class FailedExecutionStub:
+class FailedExecutionStub(ExecutionStub):
     def __init__(self, id, message, transform, job_dir=None):
         self.id = id
         self.message = message
@@ -124,13 +129,21 @@ class FailedExecutionStub:
         log.error(self.message)
         return ExecResult(self.message, None)
 
+    @property    
+    def proc(self):
+        raise Exception("This stub doesn't have a real process")
 
-class SuccessfulExecutionStub:
+
+class SuccessfulExecutionStub(ExecutionStub):
     def __init__(self, id, outputs, transform=None, job_dir=None):
         self.id = id
         self.outputs = outputs
         self.transform = transform
         self.job_dir = job_dir
+
+    @property    
+    def proc(self):
+        raise Exception("This stub doesn't have a real process")
 
     def get_external_id(self):
         return "SuccessfulExecutionStub:{}".format(self.id)
@@ -173,6 +186,8 @@ class ExecResult:
 
 
 class Execution:
+    exec_xref : str
+    
     def __init__(
         self,
         transform: str,
@@ -238,10 +253,8 @@ class Execution:
         _log_local_failure(self.captured_stdouts)
 
     def get_completion(
-        self,
-    ) -> Union[
-        Tuple[None, List[PropsType]], Tuple[None, List[Any]], Tuple[None, None],
-    ]:
+        self
+    ) -> ExecResult:
         result = self._get_completion()
         if result.failure_msg is not None:
             self._log_failure(result.failure_msg)
@@ -340,7 +353,6 @@ class Execution:
             )
 
         return ExecResult(None, outputs, cache_key=cache_key)
-
 
 class DelegateExecution(Execution):
     def __init__(
@@ -677,12 +689,12 @@ class ExecClient:
         id: int,
         job_dir: str,
         run_stmts: List[str],
-        outputs: List[Any],
+        outputs: Optional[List[Any]],
         capture_output: bool,
         prologue: str,
         desc_name: str,
         resolve_state: NullResolveState,
-        resources: Dict[str, int],
+        resources: Dict[str, float],
         watch_regex,
     ) -> Execution:
         raise NotImplementedError()
@@ -756,10 +768,11 @@ class LocalExecClient(ExecClient):
         capture_output: bool,
         prologue: str,
         desc_name: str,
-        resolve_state: NullResolveState,
-        resources: Dict[str, int],
+        resolve_state: ResolveState,
+        resources: Dict[str, float],
         watch_regex,
     ) -> Execution:
+        assert isinstance(resolve_state, NullResolveState)
 
         for src, dst in resolve_state.files_to_copy:
             # print("copying ", src, os.path.join(job_dir, dst))
@@ -1304,14 +1317,16 @@ class DelegateExecClient:
         id: int,
         job_dir: str,
         run_stmts: List[str],
-        outputs: List[PropsType],
+        outputs: Optional[List[PropsType]],
         capture_output: bool,
         prologue: str,
         desc_name: str,
-        resolver_state: RemoteResolveState,
-        resources: Dict[str, int],
+        resolver_state: ResolveState,
+        resources: Dict[str, float],
         watch_regex,
     ) -> DelegateExecution:
+        assert isinstance(resolver_state, ResolveState)
+
         assert (
             watch_regex is None
         ), "delegated executors cannot watch logs, watch-regex not allowed"

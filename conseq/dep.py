@@ -988,11 +988,12 @@ class PropsMatch:
             first = False
         return True
 
+from typing import Union
 
 class Template:
     def __init__(
         self,
-        queries: Sequence[ForEach],
+        queries: Sequence[Union[ForEach,ForAll]],
         predicates: Sequence[Any],
         transform: str,
         output_matches_expectation: Callable[[Any], bool] = lambda x: True,

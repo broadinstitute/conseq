@@ -22,7 +22,7 @@ def test_limit_to_rule(tmpdir):
     j.add_template(template3)
 
     # After adding those templates, we should have only created an execution for template1
-    len(j.get_pending()) == 1
+    assert len(j.get_pending()) == 1
 
     # however if we add an object, template3 can also execute
     j.add_obj("public", 1, dict(type="a"))

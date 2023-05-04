@@ -223,7 +223,7 @@ def test_delegate_reattach(conseq_delegate_test_docker_image_name, tmpdir, use_a
         "",
         "desc",
         resolver_state,
-        {"mem": 10},
+        {"mem": 10.0},
         watch_regex=None,
     )
     print(e)
@@ -238,7 +238,7 @@ def test_delegate_reattach(conseq_delegate_test_docker_image_name, tmpdir, use_a
 
     while True:
         result = e2.get_completion()
-        assert result.failure_message is None
+        assert result.failure_msg is None
         if result.outputs is not None:
             break
         time.sleep(1)
@@ -273,16 +273,16 @@ def test_terminate(conseq_delegate_test_docker_image_name, tmpdir, use_async):
         "",
         "desc",
         resolver_state,
-        {"mem": 10},
+        {"mem": 10.0},
         watch_regex=None,
     )
 
     result = e.get_completion()
-    assert result.failure_message is None
+    assert result.failure_msg is None
     assert result.outputs is None
 
     e.proc.terminate()
     time.sleep(5)
-    failure, output = e.get_completion()
-    assert failure
+    result = e.get_completion()
+    assert result.failure_msg
     # assert output is not None
