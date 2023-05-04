@@ -26,6 +26,7 @@ def count_unique_values_per_property(instances):
                     raise Exception("key: {} had dict: {}".format(k, v))
             elif isinstance(v, list):
                 import json
+
                 v = json.dumps(v)
             per_prop[k].add(v)
     return [(property, len(values)) for property, values in per_prop.items()]
@@ -148,4 +149,9 @@ class AugmentedStore:
         counts = count_unique_values_per_property(subset)
         common, varying = split_props_by_counts(counts)
 
-        return {"common": common, "properties": varying, "instances": subset, "next": next}
+        return {
+            "common": common,
+            "properties": varying,
+            "instances": subset,
+            "next": next,
+        }

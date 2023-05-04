@@ -20,73 +20,109 @@ def run_conseq(tmpdir, config, targets=[], assert_clean=True):
     if assert_clean:
         assert not os.path.exists(db_path)
 
-    depexec.main(filename, state_dir, targets, {}, 10, False, False, None, remove_unknown_artifacts=True)
+    depexec.main(
+        filename,
+        state_dir,
+        targets,
+        {},
+        10,
+        False,
+        False,
+        None,
+        remove_unknown_artifacts=True,
+    )
     j = dep.open_job_db(db_path)
     return j
 
 
 def test_rule_with_no_inputs(tmpdir):
     print("test rule with no inputs ------------------------------")
-    j = run_conseq(tmpdir, """
+    j = run_conseq(
+        tmpdir,
+        """
     rule a:
         outputs: {"finished": "true"}
-    """)
+    """,
+    )
     assert len(j.find_objs("public", {})) == 1
     print("objs ------------------------------")
     print(j.find_objs("public", {}))
 
 
 def test_no_results_failure(tmpdir):
-    j = run_conseq(tmpdir, """
+    j = run_conseq(
+        tmpdir,
+        """
     rule a:
         run "bash" with "cat /dev/null"
-    """)
+    """,
+    )
 
 
 def test_rerun_multiple_times(tmpdir):
-    j = run_conseq(tmpdir, """
+    j = run_conseq(
+        tmpdir,
+        """
     rule a:
         outputs: {"finished": "true", "mut":{"$value": "1"}}
-    """)
+    """,
+    )
     objs = j.find_objs("public", {})
     assert len(objs) == 1
     assert objs[0]["mut"] == {"$value": "1"}
 
     # this should result in the object being overwritten because its from a different rule
-    j = run_conseq(tmpdir, """
+    j = run_conseq(
+        tmpdir,
+        """
     rule b:
         outputs: {"finished": "true", "mut":{"$value": "2"}}
-    """, assert_clean=False)
+    """,
+        assert_clean=False,
+    )
     objs = j.find_objs("public", {})
     assert len(objs) == 1
     assert objs[0]["mut"] == {"$value": "2"}
 
     # this should result in the object being overwritten because we forced the rule to execute
-    j = run_conseq(tmpdir, """
+    j = run_conseq(
+        tmpdir,
+        """
     rule b:
         outputs: {"finished": "true", "mut":{"$value": "3"}}
-    """, targets=["b"], assert_clean=False)
+    """,
+        targets=["b"],
+        assert_clean=False,
+    )
     objs = j.find_objs("public", {})
     assert len(objs) == 1
     assert objs[0]["mut"] == {"$value": "3"}
 
 
 def test_nonzero_retcode(tmpdir):
-    j = run_conseq(tmpdir, """
+    j = run_conseq(
+        tmpdir,
+        """
     rule a:
         run "bash non-existant-file"
-    """)
+    """,
+    )
 
 
 def test_non_key_values(tmpdir):
-    j = run_conseq(tmpdir, """
+    j = run_conseq(
+        tmpdir,
+        """
     rule a:
         outputs: {"finished": "true", "other": {"$value": "apple"}}
         run "bash" with "echo test"
-    """)
+    """,
+    )
     assert len(j.find_objs("public", {})) == 1
 
-    j = run_conseq(tmpdir, """
+    j = run_conseq(
+        tmpdir,
+        """
     rule a:
         outputs: {"finished": "true", "other": {"$value": "apple"}}
         run "bash" with "echo test"
@@ -94,7 +130,9 @@ def test_non_key_values(tmpdir):
         inputs: in={"finished": "true"}
         outputs: {"name": "result", "filename": {"$filename":"foo.txt"}}
         run "bash" with "echo {{inputs.in.other}} > foo.txt"
-    """, assert_clean=False)
+    """,
+        assert_clean=False,
+    )
     results = j.find_objs("public", {"name": "result"})
     assert len(results) == 1
     stdout = open(results[0]["filename"]["$filename"]).read()
@@ -106,53 +144,28 @@ def assert_transaction_closed():
         assert dep.current_db_cursor_state.cursor == None
 
 
-def test_spaces(tmpdir):
-    j = run_conseq(tmpdir, """
-
-    rule b:
-        inputs: in={"type": "example"}
-        outputs: {"type": "derived", "value":"{{inputs.in.value}}"}
-
-    rule a:
-        outputs: {"type": "example", "value": "a"}, {"type": "example", "value": "b", "$space": "pocket"}
-
-    """)
-
-    with dep.transaction(j.db):
-        spaces = j.objects.get_spaces()
-    spaces = list(spaces)
-    spaces.sort()
-
-    assert spaces == ['pocket', "public"]
-
-    results = j.find_objs("public", {"type": "example"})
-    assert len(results) == 1
-    results = j.find_objs("public", {"type": "derived"})
-    assert len(results) == 1
-    assert results[0].props["value"] == "a"
-
-    results = j.find_objs("pocket", {"type": "example"})
-    assert len(results) == 1
-    results = j.find_objs("pocket", {"type": "derived"})
-    assert len(results) == 1
-    assert results[0].props["value"] == "b"
-
-
 def test_gc(tmpdir):
     print("---------------------gc")
     assert_transaction_closed()
 
-    j = run_conseq(tmpdir, """
+    j = run_conseq(
+        tmpdir,
+        """
     rule a:
         outputs: {"finished": "true", "other": {"$value": "a"}}
-    """)
+    """,
+    )
     print("objs", j.find_objs("public", {}))
     assert len(j.find_objs("public", {})) == 1
 
-    j = run_conseq(tmpdir, """
+    j = run_conseq(
+        tmpdir,
+        """
     rule b:
         outputs: {"finished": "true", "other": {"$value": "b"}}
-    """, assert_clean=False)
+    """,
+        assert_clean=False,
+    )
     print("objs", j.find_objs("public", {}))
     assert len(j.find_objs("public", {})) == 1
 
@@ -165,7 +178,9 @@ def test_gc(tmpdir):
 
 
 def test_rules_with_all_exec_once(tmpdir):
-    j = run_conseq(tmpdir, """
+    j = run_conseq(
+        tmpdir,
+        """
     rule a:
         outputs: {"type": "thing", "value": "a"}
     rule b:
@@ -173,45 +188,60 @@ def test_rules_with_all_exec_once(tmpdir):
     rule c:
         inputs: x=all {"type": "thing"}
         outputs: {"done": "true"}
-    """)
+    """,
+    )
     assert len(j.find_objs("public", {})) == 3
     assert len(j.get_all_executions()) == 3
 
 
 def test_rule_executes_once(tmpdir):
-    j = run_conseq(tmpdir, """
+    j = run_conseq(
+        tmpdir,
+        """
     rule a:
         outputs: {"type": "thing", "value": "a"}
-    """)
+    """,
+    )
     assert len(j.find_objs("public", {})) == 1
     assert len(j.get_all_executions()) == 1
-    j = run_conseq(tmpdir, """
+    j = run_conseq(
+        tmpdir,
+        """
     rule a:
         outputs: {"type": "thing", "value": "a"}
-    """, assert_clean=False)
+    """,
+        assert_clean=False,
+    )
     assert len(j.find_objs("public", {})) == 1
     assert len(j.get_all_executions()) == 1
 
 
 def test_regexp_queries(tmpdir):
-    j = run_conseq(tmpdir, """
+    j = run_conseq(
+        tmpdir,
+        """
     rule a:
         outputs: {"type": "thing"}
     rule b:
         inputs: in={"type" ~ "t.*"}
         outputs: {"type": "otherthing"}
-    """)
+    """,
+    )
     assert len(j.get_all_executions()) == 2
 
+
 def test_regexp_query_expands_var(tmpdir):
-    j = run_conseq(tmpdir, """
+    j = run_conseq(
+        tmpdir,
+        """
     let samplevar="thing"
     rule a:
         outputs: {"type": "thing"}
     rule b:
         inputs: in={"type" ~ "{{config.samplevar}}"}
         outputs: {"type": "otherthing"}
-    """)
+    """,
+    )
     assert len(j.get_all_executions()) == 2
 
 
@@ -221,7 +251,7 @@ def test_fileref_copy_to(tmpdir):
     file_b = tmpdir.join("b")
     file_b.write("b")
 
-    script="""\"\"\"
+    script = """\"\"\"
         assert open("{{ inputs.a.filename }}").read() == "a"
         assert open("{{ inputs.b.filename }}").read() == "b"
         import os
@@ -231,13 +261,18 @@ def test_fileref_copy_to(tmpdir):
         assert os.path.abspath(os.path.dirname("{{ inputs.b.filename }}")) != cwd
     \"\"\""""
 
-    j = run_conseq(tmpdir, """
+    j = run_conseq(
+        tmpdir,
+        """
     rule a:
         inputs: a=filename("{}", copy_to="z"),
                 b=filename("{}")
         outputs: {}
         run "python" with {}
-    """.format(file_a, file_b, "{'done': 'true'}", script))
+    """.format(
+            file_a, file_b, "{'done': 'true'}", script
+        ),
+    )
 
     execs = j.get_all_executions()
     assert len(execs) == 1
@@ -256,7 +291,7 @@ def test_construct_cache_key(tmpdir, monkeypatch):
         def exists(self, filename):
             print(f"checking {filename}: {filename in blobs}")
             return filename in blobs
-        
+
         def upload_str(self, path, blob):
             assert isinstance(blob, str)
             assert path.startswith("gs://banana")
@@ -267,7 +302,8 @@ def test_construct_cache_key(tmpdir, monkeypatch):
             return blobs[path]
 
     import conseq.helper
-    monkeypatch.setattr(conseq.helper, 'Remote', MockRemote)
+
+    monkeypatch.setattr(conseq.helper, "Remote", MockRemote)
 
     prolog = """
     let AWS_ACCESS_KEY_ID="x"
@@ -277,7 +313,10 @@ def test_construct_cache_key(tmpdir, monkeypatch):
     """
 
     # run a job which saves the result in cache
-    run_conseq(tmpdir.join("repo1"), prolog + """
+    run_conseq(
+        tmpdir.join("repo1"),
+        prolog
+        + """
     rule a:
         construct-cache-key-run "bash" with '''
             echo '{"a": "val1", "b": "val2"}' > conseq-cache-key.json
@@ -285,21 +324,27 @@ def test_construct_cache_key(tmpdir, monkeypatch):
         run 'bash' with '''
         echo '{"outputs": [{"finished": "true"}]}' > results.json
         '''
-    """)
+    """,
+    )
 
     # this job has no knowledge of the previous job, except, it should restore the result from the cache
-    j = run_conseq(tmpdir.join("repo2"), prolog + """        
+    j = run_conseq(
+        tmpdir.join("repo2"),
+        prolog
+        + """        
     rule b:
         construct-cache-key-run "bash" with '''
             echo '{"b": "val2", "a": "val1"}' > conseq-cache-key.json
         '''
         run "echo hello"
-    """)
+    """,
+    )
 
     # make sure it got the resulting artifact from the previous run
     artifacts = j.find_objs("public", {})
     assert len(artifacts) == 1
     assert artifacts[0].props == {"finished": "true"}
+
 
 def test_publish(tmpdir, monkeypatch):
     publish_called = [False]
@@ -307,7 +352,7 @@ def test_publish(tmpdir, monkeypatch):
     def mock_publish_manifest(location, dictionary, config):
         print("dictionary", dictionary)
         assert config is not None
-        dictionary = dictionary['in']
+        dictionary = dictionary["in"]
         assert dictionary["finished"] == "true"
         assert dictionary["name"] == "bongo"
         assert dictionary["file"].startswith("s3://")
@@ -328,11 +373,15 @@ def test_publish(tmpdir, monkeypatch):
             # return {"testfile": "s3://foo/testfile"}
 
     import conseq.depexec
-    monkeypatch.setattr(conseq.depexec, 'publish_manifest', mock_publish_manifest)
-    import conseq.helper
-    monkeypatch.setattr(conseq.helper, 'Remote', MockRemote)
 
-    j = run_conseq(tmpdir, """
+    monkeypatch.setattr(conseq.depexec, "publish_manifest", mock_publish_manifest)
+    import conseq.helper
+
+    monkeypatch.setattr(conseq.helper, "Remote", MockRemote)
+
+    j = run_conseq(
+        tmpdir,
+        """
     let AWS_ACCESS_KEY_ID="x"
     let AWS_SECRET_ACCESS_KEY="y"
     let S3_STAGING_URL="s3://buckey/root"
@@ -342,15 +391,19 @@ def test_publish(tmpdir, monkeypatch):
     rule pub:
         inputs: in={"finished": "true"}
         publish: "manifest-{{ inputs.in.name }}.json"
-    """)
+    """,
+    )
 
     assert publish_called[0]
+
 
 def test_detect_clobber(tmpdir):
     # if two rules emit the same artifact, the second one should fail. Don't allow a rule to clobber an
     # existing artifact.
 
-    j = run_conseq(tmpdir, """
+    j = run_conseq(
+        tmpdir,
+        """
     rule a:
         outputs: {"type": "thing"}
     rule b:
@@ -359,9 +412,11 @@ def test_detect_clobber(tmpdir):
     rule c:
         inputs: in={"type": "thing"}
         outputs: {"type": "derived-thing"}
-    """)
-    status_by_rule = {x.transform : x.status for x in j.get_all_executions()}
+    """,
+    )
+    status_by_rule = {x.transform: x.status for x in j.get_all_executions()}
     assert status_by_rule == {"a": "completed", "c": "completed", "b": "failed"}
+
 
 def test_clobbers_from_rules_with_all_are_okay(tmpdir):
     # if two rules emit the same artifact, the second one should fail. Don't allow a rule to clobber an
@@ -372,18 +427,23 @@ def test_clobbers_from_rules_with_all_are_okay(tmpdir):
         assert len(matches) == 1
         return matches[0]
 
-    j = run_conseq(tmpdir, """
+    j = run_conseq(
+        tmpdir,
+        """
     rule a:
         outputs: {"type": "thing", "value": "1"}
     rule b:
         inputs: in=all {"type": "thing"}
         outputs: {"type": "derived-thing"}
-    """)
+    """,
+    )
     status_by_rule = [f"{x.transform} {x.status}" for x in j.get_all_executions()]
     assert sorted(status_by_rule) == ["a completed", "b completed"]
     orig_b_id = get_exec_id(j, "b")
 
-    j = run_conseq(tmpdir, """
+    j = run_conseq(
+        tmpdir,
+        """
     rule a:
         outputs: {"type": "thing", "value": "1"}
     rule a2:
@@ -391,13 +451,16 @@ def test_clobbers_from_rules_with_all_are_okay(tmpdir):
     rule b:
         inputs: in=all {"type": "thing"}
         outputs: {"type": "derived-thing"}
-    """, assert_clean=False)
+    """,
+        assert_clean=False,
+    )
     b_id = [0]
     status_by_rule = [f"{x.transform} {x.status}" for x in j.get_all_executions()]
     assert sorted(status_by_rule) == ["a completed", "a2 completed", "b completed"]
     new_b_id = get_exec_id(j, "b")
 
     assert new_b_id != orig_b_id
+
 
 def test_gc_with_real_cleanup(tmpdir):
     # do an end-to-end simulation of multiple re-runs and doing GC
@@ -449,6 +512,7 @@ def test_gc_with_real_cleanup(tmpdir):
     assert os.path.exists(os.path.join(state_dir, "r3"))
     assert not os.path.exists(os.path.join(state_dir, "r4"))
 
+
 def test_forget(tmpdir):
     config = """
         rule a1:
@@ -489,7 +553,6 @@ def test_forget(tmpdir):
     assert was_run("a2")
 
 
-
 def test_commands(tmpdir):
     # don't actually test any of the functionality of these commands, only that they execute error free
     # to catch trivial mistakes in setting up parameter passing to these commands
@@ -513,11 +576,9 @@ def test_commands(tmpdir):
         ["--dir", state_dir, "rm", "type=x"],
         ["--dir", state_dir, "rules", config_file],
         ["--dir", state_dir, "debugrun", config_file, "a"],
-        ["--dir", state_dir, "dot"],
-        ["--dir", state_dir, "altdot", config_file],
         ["--dir", state_dir, "history"],
         ["--dir", state_dir, "localize", config_file, "type=x"],
-        ["version"]
+        ["version"],
     ]
 
     from conseq.main import main

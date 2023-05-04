@@ -2,13 +2,14 @@ from typing import Set, Union, Tuple
 from collections import defaultdict
 import re
 
-EACH="each"
-ALL="all"
+EACH = "each"
+ALL = "all"
+
 
 class Graph:
     def __init__(self, edges):
         self.precursors = defaultdict(lambda: set())
-        self.successors = defaultdict(lambda : set())
+        self.successors = defaultdict(lambda: set())
 
         for parent, child, type in edges:
             self.precursors[child].add(parent)
@@ -21,9 +22,12 @@ class Graph:
         def ok(type):
             return (type == EACH and each) or (type == ALL and all)
 
-        return { child for child, type in self.successors[name] if ok(type) }
+        return {child for child, type in self.successors[name] if ok(type)}
 
-def is_fully_complete(graph: Graph, completed : Set[str], in_progress: Set[str], name : str) -> bool :
+
+def is_fully_complete(
+    graph: Graph, completed: Set[str], in_progress: Set[str], name: str
+) -> bool:
     if name in in_progress:
         return False
 
@@ -34,7 +38,9 @@ def is_fully_complete(graph: Graph, completed : Set[str], in_progress: Set[str],
     return True
 
 
-def get_full_completions(graph: Graph, completed : Set[str], in_progress: Set[str], name: str):
+def get_full_completions(
+    graph: Graph, completed: Set[str], in_progress: Set[str], name: str
+):
     new_completions = set()
     for successor in graph.get_successors(name, each=True, all=True):
         if is_fully_complete(graph, completed, in_progress, successor):
@@ -42,7 +48,10 @@ def get_full_completions(graph: Graph, completed : Set[str], in_progress: Set[st
 
     return new_completions
 
-def get_next_steps(graph : Graph, completed : Set[str], in_progress: Set[str], name: str) -> Tuple[Set[str], Set[str]]:
+
+def get_next_steps(
+    graph: Graph, completed: Set[str], in_progress: Set[str], name: str
+) -> Tuple[Set[str], Set[str]]:
     next_steps = set()
     completed = set(completed)
     # import pdb
@@ -75,6 +84,7 @@ def get_next_steps(graph : Graph, completed : Set[str], in_progress: Set[str], n
 
     return completed, next_steps
 
+
 def verify_sequence(productions, steps):
     completed = set()
     in_progress_count = defaultdict(lambda: 0)
@@ -84,7 +94,7 @@ def verify_sequence(productions, steps):
     for starts, stop, expected_next in steps:
         print(f"starts: {starts}, stop: {stop}")
         starts = starts.split(" ")
-        #expected_next = expected_next.split(" ")
+        # expected_next = expected_next.split(" ")
 
         for start in starts:
             if start == "":
@@ -102,10 +112,13 @@ def verify_sequence(productions, steps):
         in_progress = {name for name, count in in_progress_count.items() if count > 0}
         completed, next_steps = get_next_steps(graph, completed, in_progress, stop)
 
-        print(f"completed: {completed}, next_steps: {next_steps}, expected: {expected_next}")
+        print(
+            f"completed: {completed}, next_steps: {next_steps}, expected: {expected_next}"
+        )
 
         assert expected_next == " ".join(sorted(next_steps))
         prev_next_steps = next_steps
+
 
 def parse_graph(productions):
     edges = []
@@ -121,13 +134,16 @@ def parse_graph(productions):
         edges.append((parent, child, type))
     return Graph(edges)
 
+
 def test_simple_chain():
     verify_sequence(
         """
         a->b
         b->c
         """,
-        [("a", "a", "b"), ("b", "b", "c"), ("c", "c", "")])
+        [("a", "a", "b"), ("b", "b", "c"), ("c", "c", "")],
+    )
+
 
 def test_chain_with_multiple_b():
     verify_sequence(
@@ -135,7 +151,9 @@ def test_chain_with_multiple_b():
         a->b
         b->c
         """,
-        [("a", "a", "b"), ("b b", "b", "c"), ("c", "b", "c"), ("", "c", "")])
+        [("a", "a", "b"), ("b b", "b", "c"), ("c", "b", "c"), ("", "c", "")],
+    )
+
 
 def test_fork():
     verify_sequence(
@@ -144,7 +162,9 @@ def test_fork():
         b->c
         b->d
         """,
-        [("a", "a", "b"), ("b", "b", "c d"), ("c d", "c", ""), ("", "d", "")])
+        [("a", "a", "b"), ("b", "b", "c d"), ("c d", "c", ""), ("", "d", "")],
+    )
+
 
 def test_join():
     verify_sequence(
@@ -153,19 +173,23 @@ def test_join():
         b->c
         c->d
         """,
-        [("a b", "a", "c"), ("", "b", "c"), ("c", "c", "d"), ("d", "d", "")])
+        [("a b", "a", "c"), ("", "b", "c"), ("c", "c", "d"), ("d", "d", "")],
+    )
+
 
 def test_chain_with_all():
     verify_sequence(
-    """
+        """
     a->b
     *b->c
     """,
-    [("a", "a", "b"), ("b", "b", "c"), ("c", "c", "")])
+        [("a", "a", "b"), ("b", "b", "c"), ("c", "c", "")],
+    )
 
     verify_sequence(
-    """
+        """
     a->b
     *b->c
     """,
-    [("a", "a", "b"), ("b b", "b", ""), ("", "b", "c"), ("c", "c", "")])
+        [("a", "a", "b"), ("b b", "b", ""), ("", "b", "c"), ("c", "c", "")],
+    )

@@ -25,3 +25,8 @@ class HashCache:
                 sha256 = sha256_from_file(filename)
             cache[key] = sha256
         return sha256
+
+
+# Adorable animals of certain places
+# Japan- Japanese dwarf flying squirrel
+# Arizona- Kangaroo rat

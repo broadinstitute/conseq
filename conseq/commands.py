@@ -9,7 +9,7 @@ from conseq import dep
 from conseq import helper
 from conseq import xref
 from conseq.config import read_rules
-from conseq.dep import Obj, DEFAULT_SPACE
+from conseq.dep import Obj, PUBLIC_SPACE
 from conseq.depexec import (
     convert_input_spec_to_queries,
     get_job_dir,
@@ -127,7 +127,7 @@ def stage_cmd(export_file, conseq_file, dest_dir):
             export_contents.jinja2_env,
             export_contents.get_rule_specifications(),
             export_contents.objs,
-            export_contents.vars
+            export_contents.vars,
         )
 
         # handle the remember-executed statements
@@ -142,20 +142,23 @@ def stage_cmd(export_file, conseq_file, dest_dir):
 
         applications = []
         from collections import Counter
+
         application_count_per_rule = Counter()
         for rule_name in rules.rule_by_name.keys():
             rule = rules.get_rule(rule_name)
             queries, predicates = convert_input_spec_to_queries(
                 rules.jinja2_env, rule, rules.vars
             )
-            applications_for_rule = j.query_template(dep.Template(queries, predicates, rule.name))
+            applications_for_rule = j.query_template(
+                dep.Template(queries, predicates, rule.name)
+            )
             applications.extend(applications_for_rule)
             application_count_per_rule.update({rule_name: len(applications_for_rule)})
 
         print(f"Found the following executions:")
         for rule_name, count in application_count_per_rule.items():
             print(f"  {rule_name}: {count} applications")
-        
+
         artifact_ids_used_as_inputs = set()
 
         for application in applications:
@@ -165,13 +168,13 @@ def stage_cmd(export_file, conseq_file, dest_dir):
                 # that bound_artifacts is always a list
                 if isinstance(bound_artifacts, Obj):
                     bound_artifacts = [bound_artifacts]
-                
+
                 for bound_artifact in bound_artifacts:
                     artifact_ids_used_as_inputs.add(bound_artifact.id)
-                
+
         # now we've got a set (deduplicated) artifact_ids that were used by all of those
         # rules. Now, some of those artifacts might be outputs of other rules in this same file
-        # so, we'd like to exclude all the artifact ids which are downstream of all the rules in this 
+        # so, we'd like to exclude all the artifact ids which are downstream of all the rules in this
         # conseq file.
         downstream_object_ids = set()
         for transform in rules.rule_by_name.keys():
@@ -181,24 +184,27 @@ def stage_cmd(export_file, conseq_file, dest_dir):
         executor_names = set()
         for transform in rules.rule_by_name.keys():
             rule = rules.get_rule(transform)
-            executor_names.add(rule.executor )
+            executor_names.add(rule.executor)
             assert not rule.is_publish_rule, "Publish rules are not allowed"
 
         # these are the artifacts that we want to add to the conseq file
-        starting_artifact_ids = artifact_ids_used_as_inputs.difference(downstream_object_ids)
+        starting_artifact_ids = artifact_ids_used_as_inputs.difference(
+            downstream_object_ids
+        )
 
         # now localize any props that need it in these artifacts
         inputs_to_hardcode = []
+        from .types import InputsType
+
         for artifact in j.get_objs_by_ids(starting_artifact_ids):
-            tmp_bindings = [("temp", artifact)]
+            tmp_bindings: InputsType = [("temp", artifact)]
             # localize paths that will be used in scripts
-            exec_client.preprocess_xref_inputs(
-                j, resolver, tmp_bindings
-            )
+            exec_client.preprocess_xref_inputs(j, resolver, tmp_bindings)
             # this could be a problem. Is client always going to be a local client? (Is that what we even want?)
-            #client = rules.get_client(rule.executor)
+            # client = rules.get_client(rule.executor)
             client = exec_client.LocalExecClient({})
             from .exec_client import BoundInput
+
             inputs, resolver_state = client.preprocess_inputs(
                 resolver, [BoundInput("tmp", artifact, None)]
             )
@@ -215,7 +221,10 @@ def stage_cmd(export_file, conseq_file, dest_dir):
             inputs_to_hardcode.append(artifact_dict)
 
         output_script = os.path.join(dest_dir, "test.conseq")
-        _write_test_script(conseq_file, inputs_to_hardcode, executor_names, output_script)
+        _write_test_script(
+            conseq_file, inputs_to_hardcode, executor_names, output_script
+        )
+
 
 def _write_test_script(conseq_file, inputs_to_hardcode, executor_names, output_script):
     with open(output_script, "wt") as fd:
@@ -226,9 +235,14 @@ def _write_test_script(conseq_file, inputs_to_hardcode, executor_names, output_s
             if executor_name == "default":
                 continue
             fd.write(f"exec-profile {executor_name} {{\n")
-            fd.write("  \"type\": \"local\", \"resources\": {\"slots\": \"10\"} }\n\n")
-            print(f"Warning: defining an executor profile {executor_name} as local execution")
-        fd.write(f"include \"{os.path.relpath(conseq_file, os.path.dirname(output_script))}\"\n")
+            fd.write('  "type": "local", "resources": {"slots": "10"} }\n\n')
+            print(
+                f"Warning: defining an executor profile {executor_name} as local execution"
+            )
+        fd.write(
+            f'include "{os.path.relpath(conseq_file, os.path.dirname(output_script))}"\n'
+        )
+
 
 def downstream_cmd(state_dir, space, predicates):
 
@@ -373,7 +387,7 @@ def export_cmd(state_dir, depfile, config_file, dest_gs_path, exclude_patterns):
     rules = read_rules(state_dir, depfile, config_file)
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
 
-    objs = j.find_objs(DEFAULT_SPACE, {})
+    objs = j.find_objs(PUBLIC_SPACE, {})
     vars = rules.vars
 
     cas_remote = None
@@ -616,18 +630,3 @@ def _rules_to_dot(rules):
         stmts.append('o{} [label="{}"]'.format(obj["id"], label))
 
     return "digraph { " + (";\n".join(set(stmts))) + " } "
-
-
-def alt_dot(state_dir, depfile, config_file):
-    rules = read_rules(state_dir, depfile, config_file)
-    print(_rules_to_dot(rules))
-
-
-def superdot(state_dir, depfile, config_file):
-    from .scheduler import construct_dataflow, graph_to_dot
-
-    rules = read_rules(state_dir, depfile, config_file)
-    g = construct_dataflow(rules)
-
-    with open("dump.dot", "w") as fd:
-        fd.write(graph_to_dot(g))

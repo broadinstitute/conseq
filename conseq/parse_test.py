@@ -67,7 +67,7 @@ def test_parse_constrained_query():
 
 
 def test_parse_vars():
-    decs = parser.parse_str("let a=\"x\"\n")
+    decs = parser.parse_str('let a="x"\n')
     assert len(decs) == 1
     assignment = decs[0]
     assert assignment.name == "a"
@@ -108,7 +108,9 @@ def test_expected_outputs():
     assert rule.output_matches_expectation({"type": "other"})
     assert not rule.output_matches_expectation({"type": "bad", "hasprop": "a"})
     assert not rule.output_matches_expectation({"type": "literal"})
-    assert not rule.output_matches_expectation({"type": "literal", "hasprop": "a", "extra": "bad"})
+    assert not rule.output_matches_expectation(
+        {"type": "literal", "hasprop": "a", "extra": "bad"}
+    )
 
 
 publish_rule = """
@@ -133,57 +135,68 @@ from conseq.parser import depfile
 def _parse_exp(text, nonterminal):
     parser = depfile.depfileParser(parseinfo=True)
     return parser.parse(
-        text,
-        nonterminal,
-        trace=False,
-        nameguard=None,
-        semantics=Semantics("<none>"))
+        text, nonterminal, trace=False, nameguard=None, semantics=Semantics("<none>")
+    )
 
 
 def test_parse_empty():
-    statements = parser.parse_str("""
+    statements = parser.parse_str(
+        """
     # empty
-    """)
+    """
+    )
     assert len(statements) == 0
 
 
 def test_parse_trailing_commas():
     # make sure we tolerate trailing commas
-    statements = parser.parse_str("""
+    statements = parser.parse_str(
+        """
     rule a:
         inputs: x={"a":"b"},
         outputs: {"out": "b",},
         run "cmd"
-    """)
+    """
+    )
     assert len(statements) == 1
     assert len(statements[0].inputs) == 1
     assert len(statements[0].outputs) == 1
 
 
 def test_parse_json():
-    value = _parse_exp("""
+    value = _parse_exp(
+        """
     {"a": "b", "c": '1'}
-    """, "json_obj")
+    """,
+        "json_obj",
+    )
     assert value == {"a": "b", "c": "1"}
 
-    value = _parse_exp("""
+    value = _parse_exp(
+        """
     {"a": ["1", "2"]}
-    """, "json_obj")
+    """,
+        "json_obj",
+    )
     assert value == {"a": ["1", "2"]}
 
 
 def test_parse_if():
     from conseq.config import Rules, _eval_stmts
+
     rules = Rules()
     # from conseq.parser import IfStatement, LetStatement
 
-    statements = parser.parse_str("""
+    statements = parser.parse_str(
+        """
     if "'x' == 'y'":
       let a='1'
     else:
       let a='2'
     endif
-    """, "declarations")
+    """,
+        "declarations",
+    )
     _eval_stmts(rules, statements, "none", None)
     assert rules.vars["a"] == "2"
 
@@ -193,26 +206,31 @@ def test_parse_if():
 
 def test_eval_if():
     from conseq.config import Rules, _eval_stmts
+
     rules = Rules()
     # rules.set_var(name, value)
 
-    statements = parser.parse_str("""
+    statements = parser.parse_str(
+        """
     if "'x' == 'y'":
       let a='1'
     else:
       let a='2'
     endif
-    """)
+    """
+    )
     _eval_stmts(rules, statements, "none", None)
     assert rules.vars["a"] == "2"
 
 
 def test_generic_eval():
     from conseq.config import Rules, _eval_stmts
+
     rules = Rules()
     # rules.set_var(name, value)
 
-    statements = parser.parse_str("""
+    statements = parser.parse_str(
+        """
     eval \"\"\"
         print('here')
         rules.set_var('x', 'y')
@@ -226,7 +244,8 @@ def test_generic_eval():
     else:
       let a='2'
     endif
-    """)
+    """
+    )
     _eval_stmts(rules, statements, "none", None)
     assert rules.vars["a"] == "1"
 
@@ -242,12 +261,20 @@ def test_file_ref(tmpdir):
     localfile = tmpdir.join("xyz")
     localfile.write("x")
 
-    statements = parser.parse_str(f"""
+    statements = parser.parse_str(
+        f"""
     rule a:
         inputs: x=filename("{localfile}")
-    """, filename=str(tmpdir.join("sample.conseq")))
+    """,
+        filename=str(tmpdir.join("sample.conseq")),
+    )
 
-    _eval_stmts(rules, statements, str(tmpdir)+"/none", HashCache(str(tmpdir.join("hashcache"))))
+    _eval_stmts(
+        rules,
+        statements,
+        str(tmpdir) + "/none",
+        HashCache(str(tmpdir.join("hashcache"))),
+    )
     a = rules.get_rule("a")
     assert a is not None
     print(a.inputs)
@@ -256,6 +283,7 @@ def test_file_ref(tmpdir):
     assert a.inputs[0].copy_to is None
     assert len(rules.objs) == 1
 
+
 def test_file_ref_with_copy_to(tmpdir):
     rules = Rules()
     # rules.set_var(name, value)
@@ -263,15 +291,19 @@ def test_file_ref_with_copy_to(tmpdir):
     localfile = tmpdir.join("xyz")
     localfile.write("x")
 
-    statements = parser.parse_str(f"""
+    statements = parser.parse_str(
+        f"""
     rule a:
         inputs: x=filename("{localfile}", copy_to="z")
-    """, filename=str(tmpdir.join("sample.conseq")))
+    """,
+        filename=str(tmpdir.join("sample.conseq")),
+    )
     _eval_stmts(rules, statements, "none", HashCache(str(tmpdir.join("hashcache"))))
 
     a = rules.get_rule("a")
     assert a is not None
     assert a.inputs[0].copy_to == "z"
+
 
 def test_file_refs_with_vars(tmpdir):
     # make sure we can use variables work in filenames
@@ -282,10 +314,13 @@ def test_file_refs_with_vars(tmpdir):
     localfile = tmpdir.join("xyz-2")
     localfile.write("x")
 
-    statements = parser.parse_str("""
+    statements = parser.parse_str(
+        """
     rule a:
         inputs: x=filename("{{config.VARIABLE}}/xyz-{{config.NUMBER}}")
-    """, filename=str(tmpdir.join("sample.conseq")))
+    """,
+        filename=str(tmpdir.join("sample.conseq")),
+    )
     _eval_stmts(rules, statements, "none", HashCache(str(tmpdir.join("hashcache"))))
     a = rules.get_rule("a")
     assert a is not None
@@ -297,10 +332,13 @@ def test_relative_file_paths(tmpdir):
     sample_rel_path = os.path.relpath(__file__, os.path.abspath(str(tmpdir)))
     assert sample_rel_path[0] != "/"
 
-    statements = parser.parse_str(f"""
+    statements = parser.parse_str(
+        f"""
     rule a:
         inputs: x=filename("{sample_rel_path}")
-    """, filename=str(tmpdir.join("sample.conseq")))
+    """,
+        filename=str(tmpdir.join("sample.conseq")),
+    )
 
     rules = Rules()
     _eval_stmts(rules, statements, "none", HashCache(str(tmpdir.join("hashcache"))))
@@ -309,10 +347,13 @@ def test_relative_file_paths(tmpdir):
     print(a.inputs)
     a.inputs[0].json_obj["name"] == os.path.abspath(sample_rel_path)
 
+
 def test_construct_cache_key(tmpdir):
-    statements = parser.parse_str('''
+    statements = parser.parse_str(
+        '''
     rule a:
         construct-cache-key-run """python""" with """print(0)"""
-    ''')
+    '''
+    )
     assert len(statements) == 1
-    statements[0].cache_key_constructor == [ ("python", "print(0)") ]
+    statements[0].cache_key_constructor == [("python", "print(0)")]

@@ -1,12 +1,14 @@
 from conseq import depquery
 
-store = depquery.AugmentedStore([
-    dict(type="atlantis", name="alpha", id="A"),
-    dict(type="demeter", library="ach21", id="D"),
-    dict(type="atlantis", name="beta", id="B"),
-    dict(type="atlantis", name="gamma", id="C"),
-    dict(type="demeter", library="ach22", id="E")
-])
+store = depquery.AugmentedStore(
+    [
+        dict(type="atlantis", name="alpha", id="A"),
+        dict(type="demeter", library="ach21", id="D"),
+        dict(type="atlantis", name="beta", id="B"),
+        dict(type="atlantis", name="gamma", id="C"),
+        dict(type="demeter", library="ach22", id="E"),
+    ]
+)
 
 
 def test_get_instances():

@@ -6,7 +6,7 @@ import json
 import logging
 import textwrap
 import time
-from typing import Any, Callable, Dict, List, Tuple, Union
+from typing import Any, Callable, Dict, List, Tuple, Union, Optional
 
 import six
 from .helper import Remote
@@ -28,7 +28,7 @@ from conseq.exec_client import (
     LocalExecClient,
     ResolveState,
     bind_inputs,
-    CACHE_KEY_FILENAME
+    CACHE_KEY_FILENAME,
 )
 from conseq.parser import QueryVariable
 from conseq.parser import Rule, RunStmt
@@ -38,10 +38,11 @@ from conseq.xref import Resolver
 import re
 from .parser import RegEx
 from .timeline import TimelineLog
+from .types import PropsType
 
 log = logging.getLogger(__name__)
 
-Artifact = Dict[str, Union[str, Dict[str, str]]]
+Artifact = PropsType
 
 
 class FatalUserError(Exception):
@@ -52,9 +53,7 @@ class JobFailedError(FatalUserError):
     pass
 
 
-def to_template(
-    jinja2_env: Environment, rule: Rule, config: Dict[str, Union[str, Dict[str, str]]]
-) -> Template:
+def to_template(jinja2_env: Environment, rule: Rule, config: PropsType) -> Template:
     queries, predicates = convert_input_spec_to_queries(jinja2_env, rule, config)
     return dep.Template(
         queries,
@@ -64,7 +63,7 @@ def to_template(
     )
 
 
-ConfigType = Dict[str, Union[str, Dict[str, str]]]
+ConfigType = PropsType
 
 
 def generate_run_stmts(
@@ -137,53 +136,76 @@ def _compute_task_hash(rule_name, inputs):
     return sha256(task_def_str.encode("utf8")).hexdigest()
 
 
-def _run_locally(job_dir, run_stmts : List[str]):
+def _run_locally(job_dir, run_stmts: List[str]):
+    last_returncode = 0
+    last_stdout = ""
     for stmt in run_stmts:
-        completed_proc = subprocess.run(stmt, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=job_dir, shell=True)
+        completed_proc = subprocess.run(
+            stmt,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            cwd=job_dir,
+            shell=True,
+        )
         if completed_proc.returncode != 0:
             return completed_proc.returncode, completed_proc.stdout
-    return completed_proc.returncode, completed_proc.stdout
+        last_returncode, last_stdout = completed_proc.returncode, completed_proc.stdout
+    return last_returncode, last_stdout
 
-def _get_cached_result(key_hash : str, config : Dict[str, Any]):
+
+def _get_cached_result(key_hash: str, config: Dict[str, Any]):
     from conseq import helper
+
     remote = helper.new_remote(
-            config["CLOUD_STORAGE_CACHE_ROOT"],
-            None,
-            config.get("AWS_ACCESS_KEY_ID"),
-            config.get("AWS_SECRET_ACCESS_KEY"),
-        )
-    results_path = os.path.join(config["CLOUD_STORAGE_CACHE_ROOT"], key_hash, "results.json")
+        config["CLOUD_STORAGE_CACHE_ROOT"],
+        None,
+        config.get("AWS_ACCESS_KEY_ID"),
+        config.get("AWS_SECRET_ACCESS_KEY"),
+    )
+    results_path = os.path.join(
+        config["CLOUD_STORAGE_CACHE_ROOT"], key_hash, "results.json"
+    )
     if remote.exists(results_path):
-        outputs = json.loads(remote.download_as_str(results_path))
+        content = remote.download_as_str(results_path)
+        assert isinstance(content, str)
+        outputs = json.loads(content)
     else:
         outputs = None
     return results_path, outputs
+
 
 def _read_cache_key(cache_key_path):
     with open(cache_key_path, "rt") as fd:
         cache_key = json.load(fd)
     canonical_key = json.dumps(cache_key, sort_keys=True)
     from hashlib import sha256
-    key_hash = sha256(canonical_key.encode('utf8')).hexdigest()
+
+    key_hash = sha256(canonical_key.encode("utf8")).hexdigest()
 
     return key_hash, canonical_key
+
 
 def _compute_cache_key_path(cache_key, config):
     assert isinstance(cache_key, dict)
     canonical_key = json.dumps(cache_key, sort_keys=True)
     from hashlib import sha256
-    key_hash = sha256(canonical_key.encode('utf8')).hexdigest()
+
+    key_hash = sha256(canonical_key.encode("utf8")).hexdigest()
     return os.path.join(config["CLOUD_STORAGE_CACHE_ROOT"], key_hash), canonical_key
 
-def _store_cached_result(cache_key : Dict, amended_outputs : Dict[str, Any], config : Dict[str, Any]):
+
+def _store_cached_result(
+    cache_key: Dict, amended_outputs: Dict[str, Any], config: Dict[str, Any]
+):
     assert isinstance(cache_key, dict)
     from conseq import helper
+
     remote = helper.new_remote(
-            config["CLOUD_STORAGE_CACHE_ROOT"],
-            None,
-            config.get("AWS_ACCESS_KEY_ID"),
-            config.get("AWS_SECRET_ACCESS_KEY"),
-        )
+        config["CLOUD_STORAGE_CACHE_ROOT"],
+        None,
+        config.get("AWS_ACCESS_KEY_ID"),
+        config.get("AWS_SECRET_ACCESS_KEY"),
+    )
 
     cache_dir, canonical_key = _compute_cache_key_path(cache_key, config)
 
@@ -193,6 +215,7 @@ def _store_cached_result(cache_key : Dict, amended_outputs : Dict[str, Any], con
     remote.upload_str(dest_cache_key_path, canonical_key)
     remote.upload_str(results_path, json.dumps(amended_outputs))
 
+
 def execute(
     name: str,
     resolver: Resolver,
@@ -201,7 +224,7 @@ def execute(
     job_dir: str,
     inputs: Dict[str, Dict[str, str]],
     rule: Rule,
-    config: Dict[str, Union[str, Dict[str, str]]],
+    config: PropsType,
     capture_output: bool,
     resolver_state: ResolveState,
     client: Union[DelegateExecClient, LocalExecClient],
@@ -209,11 +232,12 @@ def execute(
     try:
         prologue = render_template(jinja2_env, config["PROLOGUE"], config)
 
-        task_vars = {"HASH": _compute_task_hash(name, inputs), 
-                     "SCRIPT_PATH": os.path.abspath(rule.filename),
-                     "SCRIPT_DIR": os.path.dirname(os.path.abspath(rule.filename)) }
+        task_vars = {"HASH": _compute_task_hash(name, inputs)}
+        if rule.filename is not None:
+            task_vars["SCRIPT_PATH"] = os.path.abspath(rule.filename)
+            task_vars["SCRIPT_DIR"] = os.path.dirname(os.path.abspath(rule.filename))
 
-        if rule.outputs == None:
+        if rule.outputs is None:
             outputs = None
         else:
             outputs = [
@@ -238,27 +262,42 @@ def execute(
                 rule.cache_key_constructor,
                 jinja2_env,
                 config,
-                resolver_state, # probably should not pass this in, but use some default one?
+                resolver_state,  # probably should not pass this in, but use some default one?
                 inputs=inputs,
                 task=task_vars,
             )
             retcode, cache_key_constructor_output = _run_locally(job_dir, run_stmts)
             if retcode != 0:
                 return exec_client.FailedExecutionStub(
-                    id, "When running cache key constructor, expected zero exit code but got %s. Output: %s".format(retcode, cache_key_constructor_output), transform=name, job_dir=job_dir
+                    id,
+                    "When running cache key constructor, expected zero exit code but got %s. Output: %s".format(
+                        retcode, cache_key_constructor_output
+                    ),
+                    transform=name,
+                    job_dir=job_dir,
                 )
             cache_key_path = os.path.join(job_dir, CACHE_KEY_FILENAME)
             if not os.path.exists(cache_key_path):
                 return exec_client.FailedExecutionStub(
-                    id, "Could not find %s after running cache key constructor".format(CACHE_KEY_FILENAME), transform=name, job_dir=job_dir
+                    id,
+                    "Could not find %s after running cache key constructor".format(
+                        CACHE_KEY_FILENAME
+                    ),
+                    transform=name,
+                    job_dir=job_dir,
                 )
             key_hash, key_value = _read_cache_key(cache_key_path)
 
             key_path, prior_cached_results = _get_cached_result(key_hash, config)
             if prior_cached_results is not None:
-                log.warning("Found existing cached results (key=%s at %s), skipping run and using previous results", key_path, key_value)
-                return exec_client.SuccessfulExecutionStub(id, prior_cached_results, transform=name)
-
+                log.warning(
+                    "Found existing cached results (key=%s at %s), skipping run and using previous results",
+                    key_path,
+                    key_value,
+                )
+                return exec_client.SuccessfulExecutionStub(
+                    id, prior_cached_results, transform=name
+                )
 
         if len(rule.run_stmts) > 0:
             run_stmts = generate_run_stmts(
@@ -285,7 +324,7 @@ def execute(
                 rule.resources,
                 rule.watch_regex,
             )
-        elif outputs != None:
+        elif outputs is not None:
             log.warning("No commands to run for rule %s", name)
             # fast path when there's no need to spawn an external process.  (mostly used by tests)
             execution = exec_client.SuccessfulExecutionStub(id, outputs, transform=name)
@@ -678,7 +717,11 @@ def main_loop(
                     amended_outputs = _amend_outputs(completion, properties_to_add)
 
                     if completeion_result.cache_key:
-                        _store_cached_result(json.loads(completeion_result.cache_key), amended_outputs, rules.get_vars())
+                        _store_cached_result(
+                            json.loads(completeion_result.cache_key),
+                            amended_outputs,
+                            rules.get_vars(),
+                        )
 
                     job_id = j.record_completed(
                         timestamp, e.id, dep.STATUS_COMPLETED, amended_outputs
@@ -717,17 +760,17 @@ def main_loop(
     return 0
 
 
-def add_artifact_if_missing(j: Jobs, obj: Dict[str, Union[str, Dict[str, str]]]) -> int:
+def add_artifact_if_missing(j: Jobs, obj: PropsType) -> int:
     timestamp = datetime.datetime.now()
     d = dict(obj)
-    return j.add_obj(dep.DEFAULT_SPACE, timestamp.isoformat(), d, overwrite=False)
+    return j.add_obj(dep.PUBLIC_SPACE, timestamp.isoformat(), d, overwrite=False)
 
 
 def expand_run(
     jinja2_env: Environment,
     command: str,
     script_body: None,
-    config: Dict[str, Union[str, Dict[str, str]]],
+    config: PropsType,
     **kwargs,
 ) -> Tuple[str, None]:
     command = render_template(jinja2_env, command, config, **kwargs)
@@ -740,7 +783,7 @@ def expand_dict_item(
     jinja2_env: Environment,
     k: str,
     v: Union[str, Dict[str, str]],
-    config: Dict[str, Union[str, Dict[str, str]]],
+    config: PropsType,
     **kwargs,
 ) -> Tuple[str, Union[str, Dict[str, str]]]:
     assert isinstance(config, dict)
@@ -756,11 +799,8 @@ def expand_dict_item(
 
 
 def expand_dict(
-    jinja2_env: Environment,
-    d: Dict[str, Union[str, Dict[str, str]]],
-    config: Dict[str, Union[str, Dict[str, str]]],
-    **kwargs,
-) -> Dict[str, Union[str, Dict[str, str]]]:
+    jinja2_env: Environment, d: PropsType, config: PropsType, **kwargs,
+) -> PropsType:
     assert isinstance(d, dict)
     assert isinstance(config, dict)
 
@@ -774,18 +814,13 @@ def expand_dict(
 
 
 def expand_outputs(
-    jinja2_env: Environment,
-    output: Dict[str, Union[str, Dict[str, str]]],
-    config: Dict[str, Union[str, Dict[str, str]]],
-    **kwargs,
-) -> Dict[str, Union[str, Dict[str, str]]]:
+    jinja2_env: Environment, output: PropsType, config: PropsType, **kwargs,
+) -> PropsType:
     return expand_dict(jinja2_env, output, config, **kwargs)
 
 
 def expand_input_spec(
-    jinja2_env: Environment,
-    spec: Dict[str, str],
-    config: Dict[str, Union[str, Dict[str, str]]],
+    jinja2_env: Environment, spec: Dict[str, str], config: PropsType,
 ) -> Dict[str, str]:
 
     expanded = {}
@@ -807,7 +842,7 @@ def expand_input_spec(
 
 
 def convert_input_spec_to_queries(
-    jinja2_env: Environment, rule: Rule, config: Dict[str, Union[str, Dict[str, str]]]
+    jinja2_env: Environment, rule: Rule, config: PropsType
 ) -> Tuple[List[ForEach], List[Any]]:
     queries = []
     predicates = []
@@ -924,12 +959,12 @@ def force_execution_of_rules(j, forced_targets):
 
 def reconcile_add_if_missing(j, objs):
     unseen_objs = {}
-    for obj in j.find_objs(dep.DEFAULT_SPACE, {"$manually-added": "true"}):
+    for obj in j.find_objs(dep.PUBLIC_SPACE, {"$manually-added": "true"}):
         unseen_objs[obj.id] = obj
 
     new_objs = []
     for obj in objs:
-        existing_id = j.get_existing_id(dep.DEFAULT_SPACE, obj)
+        existing_id = j.get_existing_id(dep.PUBLIC_SPACE, obj)
         if existing_id is None:
             new_objs.append(obj)
         else:
@@ -954,7 +989,7 @@ def reconcile_rule_specifications(j: Jobs, latest_rules: Dict[str, str]):
     existing_rules = dict(j.get_rule_specifications())
     # any rules for which we no longer have a definition are stale
     stale_rules = set(existing_rules.keys()).difference(latest_rules.keys())
-    #print("Identified stale rules: {}".format(stale_rules))
+    # print("Identified stale rules: {}".format(stale_rules))
 
     # now for those rules which we existed before and we have a definition now, if their definition is different, it's stale
     for transform in latest_rules.keys():
@@ -976,9 +1011,9 @@ def reconcile_db(
     j: Jobs,
     jinja2_env: Environment,
     rule_specifications: Dict[str, str],
-    objs: List[Dict[str, Union[str, Dict[str, str]]]],
-    vars: Dict[str, Union[str, Dict[str, str]]],
-    force: bool = None,
+    objs: List[PropsType],
+    vars: PropsType,
+    force: Optional[bool] = None,
 ) -> None:
     # rewrite the objects, expanding templates and marking this as one which was manually added from the config file
     update_rule_specs_in_db = True

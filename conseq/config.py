@@ -10,6 +10,7 @@ import logging
 
 log = logging.getLogger(__name__)
 
+
 class Rules:
     def __init__(self):
         self.rule_by_name = {}
@@ -40,7 +41,12 @@ class Rules:
             self.vars[name] = value
         else:
             if name in self.override_names:
-                log.warning("Skipping assignment of %s to %s, because that variable is overriden (value: %s)", repr(name), repr(value), repr(self.vars[name]))
+                log.warning(
+                    "Skipping assignment of %s to %s, because that variable is overriden (value: %s)",
+                    repr(name),
+                    repr(value),
+                    repr(self.vars[name]),
+                )
             else:
                 self.vars[name] = value
 
@@ -82,7 +88,7 @@ class Rules:
         self.remember_executed.extend(other.remember_executed)
 
         for t in other.types.values():
-            self.types.add_type(t)
+            self.add_type(t)
 
     def __repr__(self):
         return "<Rules vars:{}, rules:{}>".format(self.vars, list(self))
@@ -96,13 +102,17 @@ def load_config(config_file):
         if isinstance(dec, parser.LetStatement):
             config[dec.name] = dec.value
         else:
-            raise Exception("Initial config is only allowed to use 'let' statements but encountered {}".format(dec))
+            raise Exception(
+                "Initial config is only allowed to use 'let' statements but encountered {}".format(
+                    dec
+                )
+            )
 
     return config
 
 
 def _get_dlcache_dir(state_dir):
-    dlcache = os.path.join(state_dir, 'dlcache')
+    dlcache = os.path.join(state_dir, "dlcache")
     if not os.path.exists(dlcache):
         os.makedirs(dlcache)
     return dlcache
@@ -110,18 +120,24 @@ def _get_dlcache_dir(state_dir):
 
 def _make_uuid():
     import uuid
+
     return uuid.uuid4().hex
 
 
-def _load_initial_config(state_dir, depfile, config_file):
+from typing import Optional
+
+
+def _load_initial_config(state_dir: str, depfile: str, config_file: Optional[str]):
     dlcache = _get_dlcache_dir(state_dir)
     script_dir = os.path.dirname(os.path.abspath(depfile))
-    initial_config = dict(DL_CACHE_DIR=dlcache,
-                          SCRIPT_DIR=script_dir,
-                          PROLOGUE="",
-                          WORKING_DIR=state_dir,
-                          EXECUTION_ID=_make_uuid(),
-                          ENV=dict(os.environ))
+    initial_config = dict(
+        DL_CACHE_DIR=dlcache,
+        SCRIPT_DIR=script_dir,
+        PROLOGUE="",
+        WORKING_DIR=state_dir,
+        EXECUTION_ID=_make_uuid(),
+        ENV=dict(os.environ),
+    )
 
     if config_file is not None:
         initial_config.update(load_config(config_file))
@@ -129,15 +145,21 @@ def _load_initial_config(state_dir, depfile, config_file):
     return initial_config
 
 
+def _not_callable(x):
+    raise Exception("internal error")
+
+
 def _eval_stmts(rules, statements, filename, hashcache, eval_context=None):
     root_dir = os.path.dirname(os.path.abspath(filename))
 
     if eval_context is None:
         # circular reference needed
-        __render_template = [None]
+        __render_template = [_not_callable]
         _render_template = lambda x: __render_template[0](x)
         config = LazyConfig(_render_template, rules.vars)
-        __render_template[0] = lambda x: render_template(rules.jinja2_env, x, rules.vars)
+        __render_template[0] = lambda x: render_template(
+            rules.jinja2_env, x, rules.vars
+        )
         eval_context = dict(rules=rules, config=config)
 
     def rt(x):
@@ -155,7 +177,9 @@ def _eval_stmts(rules, statements, filename, hashcache, eval_context=None):
         elif isinstance(dec, parser.IncludeStatement):
             _filename = os.path.expanduser(dec.filename)
             statements = parser.parse(_filename)
-            _eval_stmts(rules, statements, _filename, hashcache, eval_context=eval_context)
+            _eval_stmts(
+                rules, statements, _filename, hashcache, eval_context=eval_context
+            )
         elif isinstance(dec, parser.TypeDefStmt):
             rules.add_type(dec)
         elif isinstance(dec, parser.ExecProfileStmt):
@@ -174,22 +198,32 @@ def _eval_stmts(rules, statements, filename, hashcache, eval_context=None):
                     fileref = input.json_obj
                     assert dec.filename
                     script_dir = os.path.dirname(dec.filename)
-                    
+
                     filename = os.path.abspath(
                         os.path.join(script_dir, rt(fileref.filename))
-                        )
-                    print("re-anchoring", fileref.filename, "relative to", script_dir, "->", filename)
+                    )
+                    print(
+                        "re-anchoring",
+                        fileref.filename,
+                        "relative to",
+                        script_dir,
+                        "->",
+                        filename,
+                    )
                     ref_name = os.path.relpath(filename, root_dir)
                     sha256 = hashcache.sha256(filename)
-                    new_json_obj = {"type": "$fileref",
-                                    "name": ref_name,
-                                    "filename": {"$filename": filename},
-                                    "sha256": sha256}
+                    new_json_obj = {
+                        "type": "$fileref",
+                        "name": ref_name,
+                        "filename": {"$filename": filename},
+                        "sha256": sha256,
+                    }
                     rules.add_if_missing(new_json_obj)
-                    new_query_obj = {"type": "$fileref",
-                                     "name": ref_name}
+                    new_query_obj = {"type": "$fileref", "name": ref_name}
                     # print("rewrite", filename, fileref.copy_to)
-                    input = parser.InputSpec(input.variable, new_query_obj, input.for_all, fileref.copy_to)
+                    input = parser.InputSpec(
+                        input.variable, new_query_obj, input.for_all, fileref.copy_to
+                    )
                 inputs.append(input)
 
             # filerefs was a first attempt at making it easier to use scripts
@@ -198,17 +232,20 @@ def _eval_stmts(rules, statements, filename, hashcache, eval_context=None):
                 # create a $fileref which has the destination field set
                 filename = os.path.abspath(rt(filename))
                 sha256 = hashcache.sha256(filename)
-                new_json_obj = {"type": "$fileref",
-                                "name": filename,
-                                "sha256": sha256,
-                                "filename": {"$filename": filename},
-                                "destination": {"$value": filename}}
+                new_json_obj = {
+                    "type": "$fileref",
+                    "name": filename,
+                    "sha256": sha256,
+                    "filename": {"$filename": filename},
+                    "destination": {"$value": filename},
+                }
                 rules.add_if_missing(new_json_obj)
 
                 # mark this rule as dependant on this fileref
-                new_query_obj = {"type": "$fileref",
-                                 "name": filename}
-                input = parser.InputSpec("$fileref/{}".format(filename), new_query_obj, False, None)
+                new_query_obj = {"type": "$fileref", "name": filename}
+                input = parser.InputSpec(
+                    "$fileref/{}".format(filename), new_query_obj, False, None
+                )
                 inputs.append(input)
 
             dec.inputs = inputs
@@ -235,7 +272,9 @@ def read_deps(filename, hashcache, initial_vars={}) -> Rules:
     return rules
 
 
-def read_rules(state_dir: str, depfile: str, config_file: str, initial_config={}) -> Rules:
+def read_rules(
+    state_dir: str, depfile: str, config_file: Optional[str], initial_config={}
+) -> Rules:
     hashcache = HashCache(os.path.join(state_dir, "hashcache"))
     _initial_config = _load_initial_config(state_dir, depfile, config_file)
     _initial_config.update(initial_config)

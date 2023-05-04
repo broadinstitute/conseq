@@ -17,8 +17,9 @@ from conseq import helper
 from conseq.dep import Jobs, Obj
 from conseq.helper import Remote
 from conseq.xref import Resolver
+from .types import PropsType
 
-CACHE_KEY_FILENAME="conseq-cache-key.json"
+CACHE_KEY_FILENAME = "conseq-cache-key.json"
 
 _basestring = str
 
@@ -138,7 +139,6 @@ class SuccessfulExecutionStub:
         return ExecResult(None, self.outputs)
 
 
-
 def grep_logs(log_grep_state: Dict[str, int], output_files: List[str], pattern):
     # make a copy of the state, where state is a map of filename -> last read offset
     next_log_grep_state = dict(log_grep_state)
@@ -164,11 +164,13 @@ def grep_logs(log_grep_state: Dict[str, int], output_files: List[str], pattern):
 
     return next_log_grep_state, filtered_lines
 
+
 @dataclass
 class ExecResult:
-    failure_msg : str
-    outputs : List[Dict[str, Any]]
-    cache_key : Optional[str] = None
+    failure_msg: str
+    outputs: List[Dict[str, Any]]
+    cache_key: Optional[str] = None
+
 
 class Execution:
     def __init__(
@@ -177,7 +179,7 @@ class Execution:
         id: int,
         job_dir: str,
         proc: Union[PidProcStub, Popen],
-        outputs: List[Dict[str, Union[str, Dict[str, str]]]],
+        outputs: List[PropsType],
         captured_stdouts: Union[List[str], Tuple[str, str]],
         desc_name: str,
         watch_regex=None,
@@ -238,9 +240,7 @@ class Execution:
     def get_completion(
         self,
     ) -> Union[
-        Tuple[None, List[Dict[str, Union[str, Dict[str, str]]]]],
-        Tuple[None, List[Any]],
-        Tuple[None, None],
+        Tuple[None, List[PropsType]], Tuple[None, List[Any]], Tuple[None, None],
     ]:
         result = self._get_completion()
         if result.failure_msg is not None:
@@ -314,7 +314,7 @@ class Execution:
 
         # breakpoint()
         cache_key = None
-        cache_key_file =  os.path.join(self.job_dir,CACHE_KEY_FILENAME)
+        cache_key_file = os.path.join(self.job_dir, CACHE_KEY_FILENAME)
         if os.path.exists(cache_key_file):
             with open(cache_key_file, "rt") as fd:
                 cache_key = fd.read()
@@ -349,7 +349,7 @@ class DelegateExecution(Execution):
         id: int,
         job_dir: str,
         proc: Union[PidProcStub, Popen],
-        outputs: List[Dict[str, Union[str, Dict[str, str]]]],
+        outputs: List[PropsType],
         captured_stdouts: Union[List[str], Tuple[str, str]],
         desc_name: str,
         remote: Remote,
@@ -392,9 +392,7 @@ class DelegateExecution(Execution):
         _log_remote_failure(self.file_fetcher, msg)
         _log_local_failure(self.captured_stdouts)
 
-    def _get_completion(
-        self,
-    ) -> ExecResult:
+    def _get_completion(self,) -> ExecResult:
         retcode = self.proc.poll()
 
         if retcode == None:
@@ -413,11 +411,15 @@ class DelegateExecution(Execution):
             retcode = None
 
         if retcode != 0:
-            return ExecResult("inner shell command failed with {}".format(repr(retcode)), None)
+            return ExecResult(
+                "inner shell command failed with {}".format(repr(retcode)), None
+            )
 
         results_str = self.remote.download_as_str(self._results_path)
         if results_str is None:
-            return ExecResult("script reported success but results.json is missing!", None)
+            return ExecResult(
+                "script reported success but results.json is missing!", None
+            )
 
         results = json.loads(results_str)
 
@@ -526,9 +528,7 @@ def local_exec_script(
     )
 
 
-def fetch_urls(
-    obj: Dict[str, Union[str, Dict[str, str]]], resolver: Resolver
-) -> Dict[str, str]:
+def fetch_urls(obj: PropsType, resolver: Resolver) -> Dict[str, str]:
     assert isinstance(obj, dict)
     new_obj = {}
     for k, v in obj.items():
@@ -541,7 +541,7 @@ def fetch_urls(
     return new_obj
 
 
-def needs_resolution(obj: Dict[str, Union[str, Dict[str, str]]]) -> bool:
+def needs_resolution(obj: PropsType) -> bool:
     if not ("$xref_url" in obj):
         return False
     # Just noticed this.  weird, isn't it?  I think this should _probably_ be removed.
@@ -568,9 +568,10 @@ def flatten_parameters(d: Dict[str, str]) -> Dict[str, str]:
     return dict(pairs)
 
 
-def preprocess_xref_inputs(
-    j: Jobs, resolver: Resolver, inputs: Sequence[Tuple[str, Obj]]
-) -> bool:
+from .types import InputsType
+
+
+def preprocess_xref_inputs(j: Jobs, resolver: Resolver, inputs: InputsType) -> bool:
     xrefs_resolved = [False]
 
     def resolve(obj_):
@@ -602,7 +603,8 @@ def preprocess_xref_inputs(
 
 
 class ResolveState:
-    pass
+    def add_script(self, script):
+        raise Exception("Cannot call on base class")
 
 
 class NullResolveState(ResolveState):
@@ -651,12 +653,11 @@ class ExternProc:
 #         return 0
 
 from collections import namedtuple
-
-BoundInput = namedtuple("BoundInput", "name value copy_to")
 from typing import Optional
+from .types import BoundInput
 
 
-def bind_inputs(rule, inputs: Tuple[Tuple[str, any]]):
+def bind_inputs(rule, inputs: Sequence[Tuple[str, any]]):
     by_name = {input.variable: input for input in rule.inputs}
     return [BoundInput(name, value, by_name[name].copy_to) for name, value in inputs]
 
@@ -704,7 +705,7 @@ class LocalExecClient(ExecClient):
         )
 
     def preprocess_inputs(
-        self, resolver: Resolver, inputs: Tuple[BoundInput]
+        self, resolver: Resolver, inputs: Sequence[BoundInput]
     ) -> Tuple[Dict[str, Dict[str, str]], NullResolveState]:
         files_to_copy = []
 
@@ -731,7 +732,11 @@ class LocalExecClient(ExecClient):
             return obj
 
         result = {}
-        for bound_name, obj_or_list, copy_to in inputs:
+        for input in inputs:
+            obj_or_list = input.value
+            copy_to = input.copy_to
+            bound_name = input.name
+
             if isinstance(obj_or_list, list) or isinstance(obj_or_list, tuple):
                 list_ = obj_or_list
                 result[bound_name] = [resolve(obj_, copy_to) for obj_ in list_]
@@ -747,7 +752,7 @@ class LocalExecClient(ExecClient):
         id: int,
         job_dir: str,
         run_stmts: List[str],
-        outputs: List[Any],
+        outputs: Optional[List[Any]],
         capture_output: bool,
         prologue: str,
         desc_name: str,
@@ -1054,8 +1059,9 @@ class AsyncDelegateExecClient:
             files_to_upload_and_download,
             result,
         ) = process_inputs_for_remote_exec(inputs)
-        return result, RemoteResolveState(
-            files_to_upload_and_download, files_to_download
+        return (
+            result,
+            RemoteResolveState(files_to_upload_and_download, files_to_download),
         )
 
     def exec_script(
@@ -1239,8 +1245,8 @@ class DelegateExecClient:
         helper_path: str,
         command_template: str,
         python_path: str,
-        AWS_ACCESS_KEY_ID: str,
-        AWS_SECRET_ACCESS_KEY: str,
+        AWS_ACCESS_KEY_ID: Optional[str],
+        AWS_SECRET_ACCESS_KEY: Optional[str],
         recycle_past_runs: bool,
     ) -> None:
         self.resources = resources
@@ -1287,8 +1293,9 @@ class DelegateExecClient:
             files_to_upload_and_download,
             result,
         ) = process_inputs_for_remote_exec(inputs)
-        return result, RemoteResolveState(
-            files_to_upload_and_download, files_to_download
+        return (
+            result,
+            RemoteResolveState(files_to_upload_and_download, files_to_download),
         )
 
     def exec_script(
@@ -1297,7 +1304,7 @@ class DelegateExecClient:
         id: int,
         job_dir: str,
         run_stmts: List[str],
-        outputs: List[Dict[str, Union[str, Dict[str, str]]]],
+        outputs: List[PropsType],
         capture_output: bool,
         prologue: str,
         desc_name: str,
@@ -1433,9 +1440,7 @@ class DelegateExecClient:
         return file_fetcher
 
 
-def _resolve_filenames(
-    remote: Remote, artifact: Dict[str, Union[str, Dict[str, str]]]
-) -> Dict[str, Union[str, Dict[str, str]]]:
+def _resolve_filenames(remote: Remote, artifact: PropsType) -> PropsType:
     new_artifact = dict()
     for k, v in artifact.items():
         if type(v) == dict and "$filename" in v:
@@ -1481,9 +1486,7 @@ def _log_remote_failure(file_fetch, msg):
 
 
 def assert_has_only_props(
-    properties: Dict[str, Union[str, Dict[str, str]]],
-    names: List[str],
-    optional: List[str] = [],
+    properties: PropsType, names: List[str], optional: List[str] = [],
 ) -> None:
     keys = set(properties.keys())
     keys.difference_update(optional)

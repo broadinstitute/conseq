@@ -1,70 +1,35 @@
-setup.py: error: "group" is not a known member of "None" (reportOptionalMemberAccess)
-commands.py: error: Import ".scheduler" could not be resolved (reportMissingImports)
-commands.py: error: Argument of type "None" cannot be assigned to parameter "config_file" of type "str" in function "read_rules"
-commands.py: error: Argument of type "None" cannot be assigned to parameter "config_file" of type "str" in function "read_rules"
-commands.py: error: Argument of type "list[tuple[Literal['temp'], Obj | None]]" cannot be assigned to parameter "inputs" of type "Sequence[Tuple[str, Obj]]" in function "preprocess_xref_inputs"
-commands.py: error: Argument of type "list[BoundInput]" cannot be assigned to parameter "inputs" of type "Tuple[BoundInput]" in function "preprocess_inputs"
-config.py: error: Cannot access member "add_type" for type "dict[Unknown, Unknown]"
-config.py: error: Object of type "None" cannot be called (reportOptionalCall)
-config.py: error: Argument of type "Literal[0]" cannot be assigned to parameter "__key" of type "slice" in function "__setitem__"
-config.py: error: Argument of type "(x: Unknown) -> Unknown" cannot be assigned to parameter "__value" of type "Iterable[None]" in function "__setitem__"
-delegate_exec_client_test.py: error: Argument of type "dict[str, int]" cannot be assigned to parameter "resources" of type "Dict[str, float]" in function "__init__"
-delegate_exec_client_test.py: error: Operator "+" not supported for types "Literal['docker run --rm -e AWS_ACCESS_KEY_ID=']" and "str | None"
-delegate_exec_client_test.py: error: Argument of type "None" cannot be assigned to parameter "AWS_ACCESS_KEY_ID" of type "str" in function "__init__"
-delegate_exec_client_test.py: error: Argument of type "None" cannot be assigned to parameter "AWS_SECRET_ACCESS_KEY" of type "str" in function "__init__"
-delegate_exec_client_test.py: error: Operator "+" not supported for types "Literal['docker run -d -e AWS_ACCESS_KEY_ID=']" and "str | None"
 delegate_exec_client_test.py: error: Argument of type "Literal['ID']" cannot be assigned to parameter "id" of type "int" in function "exec_script"
-delegate_exec_client_test.py: error: Argument of type "list[dict[str, str]]" cannot be assigned to parameter "outputs" of type "List[Dict[str, str | Dict[str, str]]]" in function "exec_script"
-delegate_exec_client_test.py: error: Cannot access member "failure_message" for type "Tuple[None, List[Dict[str, str | Dict[str, str]]]]"
+delegate_exec_client_test.py: error: Argument of type "list[dict[str, str]]" cannot be assigned to parameter "outputs" of type "List[PropsType]" in function "exec_script"
+delegate_exec_client_test.py: error: Cannot access member "failure_message" for type "Tuple[None, List[PropsType]]"
 delegate_exec_client_test.py: error: Cannot access member "failure_message" for type "Tuple[None, List[Any]]"
 delegate_exec_client_test.py: error: Cannot access member "failure_message" for type "Tuple[None, None]"
-delegate_exec_client_test.py: error: Cannot access member "outputs" for type "Tuple[None, List[Dict[str, str | Dict[str, str]]]]"
+delegate_exec_client_test.py: error: Cannot access member "outputs" for type "Tuple[None, List[PropsType]]"
 delegate_exec_client_test.py: error: Cannot access member "outputs" for type "Tuple[None, List[Any]]"
 delegate_exec_client_test.py: error: Cannot access member "outputs" for type "Tuple[None, None]"
-delegate_exec_client_test.py: error: Cannot access member "outputs" for type "Tuple[None, List[Dict[str, str | Dict[str, str]]]]"
+delegate_exec_client_test.py: error: Cannot access member "outputs" for type "Tuple[None, List[PropsType]]"
 delegate_exec_client_test.py: error: Cannot access member "outputs" for type "Tuple[None, List[Any]]"
 delegate_exec_client_test.py: error: Cannot access member "outputs" for type "Tuple[None, None]"
 delegate_exec_client_test.py: error: Argument of type "Literal['ID']" cannot be assigned to parameter "id" of type "int" in function "exec_script"
-delegate_exec_client_test.py: error: Argument of type "list[dict[str, str]]" cannot be assigned to parameter "outputs" of type "List[Dict[str, str | Dict[str, str]]]" in function "exec_script"
+delegate_exec_client_test.py: error: Argument of type "list[dict[str, str]]" cannot be assigned to parameter "outputs" of type "List[PropsType]" in function "exec_script"
 delegate_exec_client_test.py: error: Cannot access member "proc" for type "SuccessfulExecutionStub"
 delegate_exec_client_test.py: error: Cannot access member "proc" for type "FailedExecutionStub"
 delegate_exec_client_test.py: error: Cannot access member "terminate" for type "PidProcStub"
 delegate_exec_client_test.py: error: Cannot access member "failure_message" for type "ExecResult"
-delegate_exec_client_test.py: error: Cannot access member "failure_message" for type "Tuple[None, List[Dict[str, str | Dict[str, str]]]]"
+delegate_exec_client_test.py: error: Cannot access member "failure_message" for type "Tuple[None, List[PropsType]]"
 delegate_exec_client_test.py: error: Cannot access member "failure_message" for type "Tuple[None, List[Any]]"
 delegate_exec_client_test.py: error: Cannot access member "failure_message" for type "Tuple[None, None]"
-delegate_exec_client_test.py: error: Cannot access member "outputs" for type "Tuple[None, List[Dict[str, str | Dict[str, str]]]]"
+delegate_exec_client_test.py: error: Cannot access member "outputs" for type "Tuple[None, List[PropsType]]"
 delegate_exec_client_test.py: error: Cannot access member "outputs" for type "Tuple[None, List[Any]]"
 delegate_exec_client_test.py: error: Cannot access member "outputs" for type "Tuple[None, None]"
 delegate_exec_client_test.py: error: "ExecResult" is not iterable
-dep.py: error: Expression of type "None" cannot be assigned to return type "Obj"
-dep.py: error: Argument of type "str | Any | Unknown" cannot be assigned to parameter "space" of type "DefaultSpace" in function "find_by_key"
-dep.py: error: Argument of type "int | None" cannot be assigned to parameter "id" of type "int" in function "__init__"
-dep.py: error: Expression of type "None" cannot be assigned to return type "Obj"
-dep.py: error: Cannot access member "match" for type "str"
-dep.py: error: Argument of type "int | None" cannot be assigned to parameter "id" of type "int" in function "__init__"
-dep.py: error: Expression of type "int | None" cannot be assigned to return type "int"
-dep.py: error: Expression of type "None" cannot be assigned to return type "Execution"
-dep.py: error: Argument of type "str | Dict[str, str]" cannot be assigned to parameter "__value" of type "str" in function "__setitem__"
-dep.py: error: Expression of type "None" cannot be assigned to return type "Dict[str, Obj | Tuple[Obj, Obj]]"
-dep.py: error: Argument of type "tuple[Obj, ...]" cannot be assigned to parameter "__value" of type "Obj" in function "__setitem__"
-dep.py: error: Expression of type "dict[str, Obj]" cannot be assigned to return type "Dict[str, Obj | Tuple[Obj, Obj]]"
-dep.py: error: Argument of type "Unknown | Literal['public']" cannot be assigned to parameter "space" of type "DefaultSpace" in function "find_by_key"
-depexec.py: error: Expression of type "None" cannot be assigned to parameter of type "bool"
-depexec.py: error: Argument of type "(key_values: Unknown) -> bool" cannot be assigned to parameter "output_matches_expectation" of type "(x: Unknown) -> Literal[True]" in function "__init__"
-depexec.py: error: Cannot access member "add_script" for type "ResolveState"
-depexec.py: error: "completed_proc" is possibly unbound (reportUnboundVariable)
-depexec.py: error: "completed_proc" is possibly unbound (reportUnboundVariable)
-depexec.py: error: Argument of type "str | None" cannot be assigned to parameter "s" of type "str | bytes | bytearray" in function "loads"
-depexec.py: error: Argument of type "None" cannot be assigned to parameter "path" of type "AnyStr@abspath" in function "abspath"
-depexec.py: error: Argument of type "None" cannot be assigned to parameter "path" of type "AnyStr@abspath" in function "abspath"
-depexec.py: error: "Never" is not iterable (reportGeneralTypeIssues)
+dep.py: error: Argument of type "Dict[str, Obj]" cannot be assigned to parameter "bindings" of type "BindingsDict" in function "_execute_forall_queries"
+dep_test.py: error: Argument of type "list[ForEach | ForAll]" cannot be assigned to parameter "queries" of type "Sequence[ForEach]" in function "__init__"
 depexec.py: error: Expression of type "FailedExecutionStub" cannot be assigned to return type "Execution"
 depexec.py: error: Expression of type "FailedExecutionStub" cannot be assigned to return type "Execution"
 depexec.py: error: Expression of type "SuccessfulExecutionStub" cannot be assigned to return type "Execution"
-depexec.py: error: Argument of type "list[Dict[str, str | Dict[str, str]]] | None" cannot be assigned to parameter "outputs" of type "List[Dict[str, str | Dict[str, str]]]" in function "exec_script"
+depexec.py: error: Argument of type "list[PropsType] | None" cannot be assigned to parameter "outputs" of type "List[PropsType]" in function "exec_script"
 depexec.py: error: Argument of type "ResolveState" cannot be assigned to parameter "resolver_state" of type "RemoteResolveState" in function "exec_script"
-depexec.py: error: Argument of type "list[Dict[str, str | Dict[str, str]]] | None" cannot be assigned to parameter "outputs" of type "List[Any]" in function "exec_script"
+depexec.py: error: Argument of type "dict[str, float]" cannot be assigned to parameter "resources" of type "Dict[str, int]" in function "exec_script"
 depexec.py: error: Argument of type "ResolveState" cannot be assigned to parameter "resolve_state" of type "NullResolveState" in function "exec_script"
 depexec.py: error: Expression of type "DelegateExecution | Execution | SuccessfulExecutionStub" cannot be assigned to return type "Execution"
 depexec.py: error: Expression of type "FailedExecutionStub" cannot be assigned to return type "Execution"
@@ -82,30 +47,28 @@ depexec.py: error: Expression of type "int | float" cannot be assigned to declar
 depexec.py: error: Argument of type "int | None" cannot be assigned to parameter "job_id" of type "int" in function "get_job_dir"
 depexec.py: error: Argument of type "int | None" cannot be assigned to parameter "id" of type "int" in function "execute"
 depexec.py: error: Argument of type "Execution" cannot be assigned to parameter "__object" of type "DelegateExecution" in function "append"
-depexec.py: error: Cannot access member "failure_msg" for type "Tuple[None, List[Dict[str, str | Dict[str, str]]]]"
+depexec.py: error: Cannot access member "failure_msg" for type "Tuple[None, List[PropsType]]"
 depexec.py: error: Cannot access member "failure_msg" for type "Tuple[None, List[Any]]"
 depexec.py: error: Cannot access member "failure_msg" for type "Tuple[None, None]"
-depexec.py: error: Cannot access member "outputs" for type "Tuple[None, List[Dict[str, str | Dict[str, str]]]]"
+depexec.py: error: Cannot access member "outputs" for type "Tuple[None, List[PropsType]]"
 depexec.py: error: Cannot access member "outputs" for type "Tuple[None, List[Any]]"
 depexec.py: error: Cannot access member "outputs" for type "Tuple[None, None]"
-depexec.py: error: Argument of type "Any | Literal['norow'] | None" cannot be assigned to parameter "job_id" of type "int" in function "log"
+depexec.py: error: Argument of type "Any | Literal['norow'] | None" cannot be assigned to parameter "job_id" of type "int | None" in function "log"
 depexec.py: error: "job" is possibly unbound (reportUnboundVariable)
-depexec.py: error: Cannot access member "cache_key" for type "Tuple[None, List[Dict[str, str | Dict[str, str]]]]"
+depexec.py: error: Cannot access member "cache_key" for type "Tuple[None, List[PropsType]]"
 depexec.py: error: Cannot access member "cache_key" for type "Tuple[None, List[Any]]"
 depexec.py: error: Cannot access member "cache_key" for type "Tuple[None, None]"
-depexec.py: error: Cannot access member "cache_key" for type "Tuple[None, List[Dict[str, str | Dict[str, str]]]]"
+depexec.py: error: Cannot access member "cache_key" for type "Tuple[None, List[PropsType]]"
 depexec.py: error: Cannot access member "cache_key" for type "Tuple[None, List[Any]]"
 depexec.py: error: Cannot access member "cache_key" for type "Tuple[None, None]"
 depexec.py: error: Argument of type "List[Artifact]" cannot be assigned to parameter "amended_outputs" of type "Dict[str, Any]" in function "_store_cached_result"
-depexec.py: error: Argument of type "Any | Literal['norow'] | None" cannot be assigned to parameter "job_id" of type "int" in function "log"
+depexec.py: error: Argument of type "Any | Literal['norow'] | None" cannot be assigned to parameter "job_id" of type "int | None" in function "log"
 depexec.py: error: "job" is possibly unbound (reportUnboundVariable)
 depexec.py: error: Expression of type "Literal[-1]" cannot be assigned to return type "None"
 depexec.py: error: Expression of type "Literal[0]" cannot be assigned to return type "None"
-depexec.py: error: Expression of type "int | None" cannot be assigned to return type "int"
-depexec.py: error: Argument of type "Dict[str, str]" cannot be assigned to parameter "d" of type "Dict[str, str | Dict[str, str]]" in function "expand_dict"
-depexec.py: error: Expression of type "Dict[str, str | Dict[str, str]]" cannot be assigned to declared type "str | Dict[str, str]"
+depexec.py: error: Argument of type "Dict[str, str]" cannot be assigned to parameter "d" of type "PropsType" in function "expand_dict"
+depexec.py: error: Expression of type "PropsType" cannot be assigned to declared type "str | Dict[str, str]"
 depexec.py: error: "resources" is not a known member of "None" (reportOptionalMemberAccess)
-depexec.py: error: Argument of type "Unknown | None" cannot be assigned to parameter "force" of type "bool" in function "reconcile_db"
 depexec.py: error: Argument of type "List[Execution]" cannot be assigned to parameter "pending_jobs" of type "List[Execution]" in function "reattach"
 depexec.py: error: Argument missing for parameter "obj_props" (reportGeneralTypeIssues)
 depexec.py: error: Expression of type "None" cannot be assigned to return type "int"
@@ -132,12 +95,9 @@ depexec_test.py: error: Cannot access member "new_artifacts" for type "Jobs"
 depexec_test.py: error: Cannot access member "del_artifacts" for type "Jobs"
 depexec_test.py: error: Cannot access member "new_artifacts" for type "Jobs"
 depexec_test.py: error: Cannot access member "del_artifacts" for type "Jobs"
-depexec_test.py: error: Argument of type "list[dict[str, str]]" cannot be assigned to parameter "objs" of type "List[Dict[str, str | Dict[str, str]]]" in function "reconcile_db"
-depexec_test.py: error: Argument of type "list[dict[str, str]]" cannot be assigned to parameter "objs" of type "List[Dict[str, str | Dict[str, str]]]" in function "reconcile_db"
-depexec_test.py: error: Argument of type "list[dict[str, str]]" cannot be assigned to parameter "objs" of type "List[Dict[str, str | Dict[str, str]]]" in function "reconcile_db"
-depquery_ui.py: error: Import "flask" could not be resolved (reportMissingImports)
-depquery_ui.py: error: Import "flask_restful" could not be resolved (reportMissingImports)
-depquery_ui.py: error: Argument missing for parameter "query" (reportGeneralTypeIssues)
+depexec_test.py: error: Argument of type "list[dict[str, str]]" cannot be assigned to parameter "objs" of type "List[PropsType]" in function "reconcile_db"
+depexec_test.py: error: Argument of type "list[dict[str, str]]" cannot be assigned to parameter "objs" of type "List[PropsType]" in function "reconcile_db"
+depexec_test.py: error: Argument of type "list[dict[str, str]]" cannot be assigned to parameter "objs" of type "List[PropsType]" in function "reconcile_db"
 exec_client.py: error: Argument of type "ExternProc" cannot be assigned to parameter "proc" of type "PidProcStub | Popen[Unknown]" in function "__init__"
 exec_client.py: error: Argument of type "tuple[str, None]" cannot be assigned to parameter "captured_stdouts" of type "List[str] | Tuple[str, str]" in function "__init__"
 exec_client.py: error: Argument of type "ExternProc" cannot be assigned to parameter "proc" of type "PidProcStub | Popen[Unknown]" in function "__init__"
@@ -147,7 +107,7 @@ exec_client.py: error: Expected type expression but received "(__iterable: Itera
 exec_client.py: error: Argument of type "dict[str, int]" cannot be assigned to parameter "resources" of type "Dict[str, float]" in function "__init__"
 exec_client.py: error: Expression of type "None" cannot be assigned to return type "int"
 exec_client.py: error: Cannot access member "terminate" for type "PidProcStub"
-exec_client.py: error: Expression of type "ExecResult" cannot be assigned to return type "Tuple[None, List[Dict[str, str | Dict[str, str]]]] | Tuple[None, List[Any]] | Tuple[None, None]"
+exec_client.py: error: Expression of type "ExecResult" cannot be assigned to return type "Tuple[None, List[PropsType]] | Tuple[None, List[Any]] | Tuple[None, None]"
 exec_client.py: error: Argument of type "List[str] | Tuple[str, str]" cannot be assigned to parameter "output_files" of type "List[str]" in function "grep_logs"
 exec_client.py: error: Argument of type "None" cannot be assigned to parameter "failure_msg" of type "str" in function "__init__"
 exec_client.py: error: Argument of type "None" cannot be assigned to parameter "outputs" of type "List[Dict[str, Any]]" in function "__init__"
@@ -168,7 +128,10 @@ exec_client.py: error: Argument of type "None" cannot be assigned to parameter "
 exec_client.py: error: Argument of type "tuple[str, str] | None" cannot be assigned to parameter "captured_stdouts" of type "List[str] | Tuple[str, str]" in function "__init__"
 exec_client.py: error: Expression of type "str | Dict[str, str]" cannot be assigned to return type "str"
 exec_client.py: error: Argument of type "str | Dict[str, str]" cannot be assigned to parameter "url" of type "str" in function "resolve"
+exec_client.py: error: Argument of type "Dict[Unknown, Unknown]" cannot be assigned to parameter "obj_" of type "Obj" in function "resolve"
+exec_client.py: error: Argument of type "List[Any] | None" cannot be assigned to parameter "outputs" of type "List[Any]" in function "local_exec_script"
 exec_client.py: error: Argument of type "str | Dict[str, str] | None" cannot be assigned to parameter "v" of type "Dict[str, str] | str" in function "flatten_value"
+exec_client.py: error: "BoundInput" is not iterable
 exec_client.py: error: Expression of type "SuccessfulExecutionStub" cannot be assigned to return type "DelegateExecution"
 exec_client.py: error: Argument of type "tuple[str, str] | None" cannot be assigned to parameter "captured_stdouts" of type "List[str] | Tuple[str, str]" in function "__init__"
 exec_client.py: error: Argument of type "float" cannot be assigned to parameter "__value" of type "int" in function "__setitem__"
@@ -189,72 +152,16 @@ main.py: error: Argument of type "Unknown | None" cannot be assigned to paramete
 main_test.py: error: Argument of type "None" cannot be assigned to parameter "id" of type "int" in function "__init__"
 patched_resumable_download_handler.py: error: "cur_pos" is possibly unbound (reportUnboundVariable)
 patched_resumable_download_handler.py: error: Argument of type "Unknown | None" cannot be assigned to parameter "file" of type "FileDescriptorOrPath" in function "open"
-report.py: error: Argument of type "None" cannot be assigned to parameter "config_file" of type "str" in function "read_rules"
 report.py: error: Argument of type "str | Unknown | None" cannot be assigned to parameter "__s" of type "str" in function "write"
 report.py: error: Argument of type "str | Unknown | None" cannot be assigned to parameter "__s" of type "str" in function "write"
 report.py: error: Argument of type "str | Unknown | None" cannot be assigned to parameter "__s" of type "str" in function "write"
+report_tests.py: error: "run_graph_to_dot" is unknown import symbol (reportGeneralTypeIssues)
 template.py: error: Argument of type "(template_name: Unknown) -> bool" cannot be assigned to parameter "autoescape" of type "bool" in function "__init__"
-timeit.py: error: Argument of type "Literal[0]" cannot be assigned to parameter "__key" of type "slice" in function "__setitem__"
-timeit.py: error: Argument of type "tuple[int, dict[Unknown, Unknown], Unknown, Any | Frame] | Any | Unknown" cannot be assigned to parameter "__value" of type "Iterable[Frame]" in function "__setitem__"
-timeit.py: error: "label_" is possibly unbound (reportUnboundVariable)
-timeline.py: error: "close" is not a known member of "None" (reportOptionalMemberAccess)
-timeline.py: error: Argument of type "Literal['']" cannot be assigned to parameter "job_id" of type "int" in function "log"
-timeline.py: error: "writerow" is not a known member of "None" (reportOptionalMemberAccess)
-timeline.py: error: Argument of type "Literal['']" cannot be assigned to parameter "job_id" of type "int" in function "log"
-ui.py: error: Operator "+" not supported for types "Literal['[']" and "Unknown | None"
 xref.py: error: "Never" is not iterable (reportGeneralTypeIssues)
-xref.py: error: Cannot access member "evict" for type "DownloadCacheDb"
 xref.py: error: Argument of type "str | Dict[str, str]" cannot be assigned to parameter "dir" of type "GenericPath[AnyStr@NamedTemporaryFile] | None" in function "NamedTemporaryFile"
-xref.py: error: "etag" is possibly unbound (reportUnboundVariable)
-dataflow.py: error: Expression of type "set[Unknown]" cannot be assigned to return type "Sequence[str]"
-dataflow.py: error: Expression of type "set[Unknown]" cannot be assigned to return type "Sequence[str]"
-dataflow.py: error: Function with declared type of "AnyValueSingleton | str" must return value on all code paths
-loop.py: error: "unknown" is not defined (reportUndefinedVariable)
-loop.py: error: "Executions" is not defined (reportUndefinedVariable)
-loop.py: error: "Completion" is not iterable
-loop.py: error: "j" is not defined (reportUndefinedVariable)
-loop.py: error: "j" is not defined (reportUndefinedVariable)
-loop.py: error: "_amend_outputs" is not defined (reportUndefinedVariable)
-loop.py: error: "j" is not defined (reportUndefinedVariable)
-loop.py: error: Cannot access member "active_job_ids" for type "Status"
-loop.py: error: Cannot access member "get_rule" for type "RuleSet"
-loop.py: error: Cannot access member "get_client" for type "RuleSet"
-loop.py: error: Argument missing for parameter "status" (reportGeneralTypeIssues)
-loop.py: error: Cannot access member "preprocess_xref_inputs" for type "ExecClient"
-loop.py: error: Argument missing for parameter "status" (reportGeneralTypeIssues)
-loop.py: error: Argument missing for parameter "status" (reportGeneralTypeIssues)
-loop.py: error: Argument of type "list[BoundInput]" cannot be assigned to parameter "inputs" of type "Tuple[BoundInput]" in function "preprocess_inputs"
-loop.py: error: Cannot access member "get_vars" for type "RuleSet"
-loop.py: error: Argument missing for parameter "status" (reportGeneralTypeIssues)
-loop.py: error: Argument of type "int | None" cannot be assigned to parameter "job_id" of type "int" in function "get_job_dir"
-loop.py: error: Argument of type "int | None" cannot be assigned to parameter "id" of type "int" in function "execute"
-loop.py: error: Cannot access member "get_vars" for type "RuleSet"
-loop.py: error: Argument of type "ExecClient | Unknown" cannot be assigned to parameter "client" of type "DelegateExecClient | LocalExecClient" in function "execute"
-loop.py: error: "Environment" is not defined (reportUndefinedVariable)
-loop.py: error: Cannot access member "get_vars" for type "RuleSet"
-loop.py: error: Cannot access member "vars" for type "RuleSet"
-loop.py: error: Cannot access member "exec_clients" for type "RuleSet"
-loop.py: error: Arguments missing for parameters "success_count", "start_count", "pending_jobs", "executing" (reportGeneralTypeIssues)
-loop.py: error: "_get_next_jobs" is not defined (reportUndefinedVariable)
-loop.py: error: Expected 1 more positional argument (reportGeneralTypeIssues)
-loop.py: error: Expected 1 positional argument (reportGeneralTypeIssues)
-loop.py: error: "context" is not defined (reportUndefinedVariable)
-loop.py: error: Argument of type "failures" cannot be assigned to parameter "__obj" of type "Sized" in function "len"
-loop.py: error: Argument of type "failures" cannot be assigned to parameter "__obj" of type "Sized" in function "len"
-loop.py: error: "failures" is not iterable
-partial_key_index.py: error: Argument of type "set[Unknown]" cannot be assigned to parameter "fixed_attributes" of type "Sequence[Tuple[str, str]]" in function "_is_compatible_with"
 __init__.py: error: Cannot access member "pattern" for type "RegEx"
 __init__.py: error: Cannot assign member "filename" for type "Rule"
 __init__.py: error: Cannot assign member "options" for type "Rule"
 __init__.py: error: Cannot assign member "watch_regex" for type "Rule"
 depfile.py: error: Argument of type "Unknown | None" cannot be assigned to parameter "ignorecase" of type "bool" in function "__init__"
 depfile.py: error: Argument of type "Unknown | None" cannot be assigned to parameter "ignorecase" of type "bool" in function "__init__"
-helper.py: error: "metadata" is not a known member of "None" (reportOptionalMemberAccess)
-helper.py: error: "generation" is not a known member of "None" (reportOptionalMemberAccess)
-helper.py: error: "temp_name" is possibly unbound (reportUnboundVariable)
-helper.py: error: "temp_name" is possibly unbound (reportUnboundVariable)
-helper.py: error: Argument of type "str | None" cannot be assigned to parameter "stage_dir" of type "str" in function "_download_object"
-helper.py: error: Argument of type "str | None" cannot be assigned to parameter "stage_dir" of type "str" in function "_download_object"
-helper.py: error: Argument of type "str | None" cannot be assigned to parameter "s" of type "str | bytes | bytearray" in function "loads"
-helper.py: error: Argument of type "int | None" cannot be assigned to parameter "fd" of type "int" in function "close"
-helper.py: error: Argument of type "int | None" cannot be assigned to parameter "fd" of type "int" in function "close"

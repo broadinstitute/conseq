@@ -22,11 +22,16 @@ LetStatement = namedtuple("LetStatement", ["name", "value"])
 AddIfMissingStatement = namedtuple("AddIfMissingStatement", "json_obj")
 IfStatement = namedtuple("IfStatement", "condition when_true when_false")
 EvalStatement = namedtuple("EvalStatement", "body")
+
+
 class FileRef:
     def __init__(self, filename, copy_to=None):
         self.filename = filename
         self.copy_to = copy_to
+
+
 RegEx = namedtuple("RegEx", "expression")
+
 
 class CustomRuleEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -36,30 +41,39 @@ class CustomRuleEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 
+from typing import Dict, Optional, Any
+
+
 class Rule:
+    resource: Dict[str, float]
+
     def __init__(self, name):
         self.name = name
         self.filename = None
         self.lineno = None
         self.inputs = []
-        self.outputs = None
+        self.outputs: Optional[Any] = None
         self.run_stmts = []
         self.executor = "default"
         self.watch_regex = None
         assert self.name != "" and self.name != " "
-        self.resources = {"slots": 1}
+        self.resources = {"slots": 1.0}
         self.output_expectations = []
         self.publish_location = None
         self.uses_files = []
         self.cache_key_constructor = []
 
     def to_json(self):
-        return json.dumps({
-            "name": self.name,
-            "inputs": self.inputs,
-            "outputs": self.outputs,
-            "run_stmts": self.run_stmts
-        }, sort_keys=True, cls=CustomRuleEncoder)
+        return json.dumps(
+            {
+                "name": self.name,
+                "inputs": self.inputs,
+                "outputs": self.outputs,
+                "run_stmts": self.run_stmts,
+            },
+            sort_keys=True,
+            cls=CustomRuleEncoder,
+        )
 
     def has_for_all_input(self):
         return any([x.for_all for x in self.inputs])
@@ -84,8 +98,8 @@ class Rule:
                 else:
                     assert isinstance(predicate, ExpectKeyIs)
                     if (
-                            predicate.key not in key_values
-                            or key_values[predicate.key] != predicate.value
+                        predicate.key not in key_values
+                        or key_values[predicate.key] != predicate.value
                     ):
                         matched_all = False
                         break
@@ -221,7 +235,7 @@ class Semantics(object):
         return expectations
 
     def rule(self, ast):
-        #raise Exception()
+        # raise Exception()
         # print("rule", repr(ast))
         rule_name = ast.name
         rule_parameters = ast.params

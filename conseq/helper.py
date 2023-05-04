@@ -93,7 +93,9 @@ class GSStorageConnection(StorageConnection):
         return self._get_client().bucket(bucket_name).blob(path).download_as_bytes()
 
     def get_contents_to_filename(self, bucket_name: str, path: str, dest_path: str):
-        self._get_client().bucket(bucket_name).blob(path).download_to_filename(dest_path)
+        self._get_client().bucket(bucket_name).blob(path).download_to_filename(
+            dest_path
+        )
 
     def get_sha256(self, bucket_name: str, path: str) -> Optional[str]:
         metadata = self._get_client().bucket(bucket_name).get_blob(path).metadata

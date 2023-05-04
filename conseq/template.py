@@ -3,9 +3,11 @@ import json
 import jinja2
 import six
 
+
 class LazyValue:
     def __init__(self, callback):
         self.callback = callback
+
 
 class LazyConfig:
     def __init__(self, render_template, config_dict):
@@ -55,13 +57,15 @@ class MissingTemplateVar(Exception):
                 var_defs.append("  {}: {}".format(repr(k), repr(v)))
 
         var_block = "".join(x + "\n" for x in var_defs)
-        return (
-            "Template error: {}, applying vars:\n{}\n to template:\n{}".format(self.message, var_block, self.template))
+        return "Template error: {}, applying vars:\n{}\n to template:\n{}".format(
+            self.message, var_block, self.template
+        )
 
 
 def render_template(jinja2_env, template_text, config, **kwargs):
-    assert isinstance(template_text, six.string_types), "Expected string for template but got {}".format(
-        repr(template_text))
+    assert isinstance(
+        template_text, six.string_types
+    ), "Expected string for template but got {}".format(repr(template_text))
     kwargs = dict(kwargs)
 
     def render_template_callback(text):
@@ -71,8 +75,8 @@ def render_template(jinja2_env, template_text, config, **kwargs):
         except jinja2.exceptions.UndefinedError as ex:
             raise MissingTemplateVar(ex.message, kwargs, text)
 
-    config = dict(config) # make a copy because we're going to add a variable
-    
+    config = dict(config)  # make a copy because we're going to add a variable
+
     SCRIPT_DIR = None
     if "task" in kwargs:
         SCRIPT_DIR = kwargs["task"]["SCRIPT_DIR"]
@@ -80,9 +84,8 @@ def render_template(jinja2_env, template_text, config, **kwargs):
     def _get_script_dir():
         if SCRIPT_DIR is None:
             breakpoint()
-        
-        return SCRIPT_DIR
 
+        return SCRIPT_DIR
 
     config["SCRIPT_DIR"] = LazyValue(_get_script_dir)
     kwargs["config"] = LazyConfig(render_template_callback, config)
@@ -100,11 +103,12 @@ def _quote_str(x):
 def create_jinja2_env():
     jinja2_env = jinja2.Environment(undefined=jinja2.StrictUndefined)
 
-    jinja2_env.filters['quoted'] = _quote_str
+    jinja2_env.filters["quoted"] = _quote_str
     return jinja2_env
+
 
 def create_template_jinja2_env():
     return jinja2.Environment(
-    loader=jinja2.PackageLoader('conseq', 'templates'),
-    autoescape=jinja2.select_autoescape(['html', 'xml'])
-)
+        loader=jinja2.PackageLoader("conseq", "templates"),
+        autoescape=jinja2.select_autoescape(["html", "xml"]),
+    )

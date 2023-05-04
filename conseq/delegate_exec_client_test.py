@@ -8,6 +8,7 @@ import pytest
 from conseq import exec_client
 import os
 import subprocess
+from .types import PropsType
 
 pytestmark = pytest.mark.skipif(
     (os.getenv("AWS_ACCESS_KEY_ID") is None)
@@ -18,7 +19,7 @@ pytestmark = pytest.mark.skipif(
 S3_TEST_REMOTE_URL_ROOT = "s3://broad-datasci/conseq-test"
 GS_TEST_REMOTE_URL_ROOT = "gs://broad-achilles-kubeque/conseq-test"
 TEST_HELPER_PATH = "python /helper.py"
-TEST_RESOURCES = {"mem": 10}
+TEST_RESOURCES = {"mem": 10.0}
 
 
 @pytest.fixture(scope="session")
@@ -60,17 +61,12 @@ def create_client_for(
         remote_url_root,
         remote_url_root + "/CAS",
         TEST_HELPER_PATH,
-        "docker run --rm -e AWS_ACCESS_KEY_ID="
-        + os.getenv("AWS_ACCESS_KEY_ID")
-        + " -e AWS_SECRET_ACCESS_KEY="
-        + os.getenv("AWS_SECRET_ACCESS_KEY")
-        + " -e GOOGLE_APPLICATION_CREDENTIALS=/etc/googlecreds.json "
-        + " -v "
-        + os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        + ":/etc/googlecreds.json "
-        + " "
-        + conseq_delegate_test_docker_image_name
-        + " {COMMAND}",
+        f"""docker run --rm -e AWS_ACCESS_KEY_ID={os.getenv('AWS_ACCESS_KEY_ID')} 
+           -e AWS_SECRET_ACCESS_KEY={os.getenv('AWS_SECRET_ACCESS_KEY')} 
+           -e GOOGLE_APPLICATION_CREDENTIALS=/etc/googlecreds.json
+           -v {os.getenv('GOOGLE_APPLICATION_CREDENTIALS')}:/etc/googlecreds.json 
+           {conseq_delegate_test_docker_image_name}
+           {{COMMAND}}""",
         "python",
         AWS_ACCESS_KEY_ID=None,
         AWS_SECRET_ACCESS_KEY=None,
@@ -111,19 +107,13 @@ def create_async_client_for(
     is_running_pattern = "true"
     terminate_cmd_template = "docker kill {job_id}"
     x_job_id_pattern = "(.*)"
-    run_command_template = (
-        "docker run -d -e AWS_ACCESS_KEY_ID="
-        + os.getenv("AWS_ACCESS_KEY_ID")
-        + " -e AWS_SECRET_ACCESS_KEY="
-        + os.getenv("AWS_SECRET_ACCESS_KEY")
-        + " "
-        + " -e GOOGLE_APPLICATION_CREDENTIALS=/etc/googlecreds.json "
-        + " -v "
-        + os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        + ":/etc/googlecreds.json "
-        + conseq_delegate_test_docker_image_name
-        + " {COMMAND}"
-    )
+    run_command_template = f"""docker run -d 
+        -e AWS_ACCESS_KEY_ID={os.getenv('AWS_ACCESS_KEY_ID')}
+        -e AWS_SECRET_ACCESS_KEY={os.getenv('AWS_SECRET_ACCESS_KEY')}
+        -e GOOGLE_APPLICATION_CREDENTIALS=/etc/googlecreds.json 
+        -v {os.getenv('GOOGLE_APPLICATION_CREDENTIALS')}:/etc/googlecreds.json
+        {conseq_delegate_test_docker_image_name}
+        {{COMMAND}}"""
     AWS_ACCESS_KEY_ID = None
     AWS_SECRET_ACCESS_KEY = None
     c = exec_client.AsyncDelegateExecClient(

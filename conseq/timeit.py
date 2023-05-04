@@ -3,6 +3,7 @@ import threading
 from contextlib import contextmanager
 from functools import wraps
 from time import time
+from typing import Optional, Any
 
 thread_locals = threading.local()
 
@@ -16,41 +17,41 @@ history = []
 Frame = collections.namedtuple("Frame", "id children label parent")
 
 
-def _get_block_stack():
-    if hasattr(thread_locals, "block_stack"):
-        block_stack = thread_locals.block_stack
-    else:
-        block_stack = [Frame(0, {}, "start", None)]
-        thread_locals.block_stack = block_stack
-    return block_stack
+# def _get_block_stack():
+#     if hasattr(thread_locals, "block_stack"):
+#         block_stack = thread_locals.block_stack
+#     else:
+#         block_stack = [Frame(0, {}, "start", None)]
+#         thread_locals.block_stack = block_stack
+#     return block_stack
 
 
-def _enter_frame(label):
-    global next_id
+# def _enter_frame(label):
+#     global next_id
 
-    stack = _get_block_stack()
-    parent_frame = stack[0]
-    _, children_frames, parent_label, _ = parent_frame
+#     stack = _get_block_stack()
+#     parent_frame = stack[0]
+#     _, children_frames, parent_label, _ = parent_frame
 
-    frame = children_frames.get(label)
-    if frame is None:
-        id = next_id
-        next_id += 1
-        frame = (id, {}, label, parent_frame)
-        children_frames[label] = frame
-    else:
-        id = frame[0]
-    stack[0] = frame
-    return id
+#     frame = children_frames.get(label)
+#     if frame is None:
+#         id = next_id
+#         next_id += 1
+#         frame = (id, {}, label, parent_frame)
+#         children_frames[label] = frame
+#     else:
+#         id = frame[0]
+#     stack[0] = frame
+#     return id
 
 
-def _exit_frame(frame_id, elapsed):
-    stack = _get_block_stack()
-    frame = stack[0]
-    id, children_frames, label, parent_frame = frame
-    assert frame_id == id
-    history.append((frame_id, elapsed))
-    stack[0] = parent_frame
+# def _exit_frame(frame_id, elapsed):
+#     stack = _get_block_stack()
+#     frame = stack[0]
+#     id, children_frames, label, parent_frame = frame
+#     assert frame_id == id
+#     history.append((frame_id, elapsed))
+#     stack[0] = parent_frame
 
 
 def summarize_history():
@@ -63,7 +64,7 @@ def summarize_history():
     return by_label
 
 
-def timefn(log, label, parameter=None, min_time=0):
+def timefn(log, label, parameter: Optional[Any] = None, min_time=0):
     def decorator(func):
         @wraps(func)
         def func_wrapper(*args, **kwargs):
@@ -74,8 +75,10 @@ def timefn(log, label, parameter=None, min_time=0):
                 elapsed = time() - start
                 if elapsed > min_time:
                     if parameter is not None:
-                        label_ = "{}({})".format(label, args[parameter])
-                    log.info("timed {}: {} seconds".format(label_, elapsed))
+                        label_ = f"{label}({args[parameter]})"
+                    else:
+                        label_ = label
+                    log.info(f"timed {label_}: {elapsed} seconds")
             return x
 
         return func_wrapper
