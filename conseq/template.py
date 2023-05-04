@@ -79,7 +79,7 @@ def render_template(jinja2_env, template_text, config, **kwargs):
 
     def _get_script_dir():
         if SCRIPT_DIR is None:
-            breakpoint()
+            raise Exception("SCRIPT_DIR not set")
         
         return SCRIPT_DIR
 

@@ -1,0 +1,10 @@
+# Virtualenvs
+.idea/
+__pycache__/
+
+# Packages
+*.egg
+*.egg-info
+
+# Mac filesystem
+.DS_Store
