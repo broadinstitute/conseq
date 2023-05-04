@@ -97,7 +97,7 @@ class Rules:
 def load_config(config_file):
     config = {}
 
-    p = parser.parse(os.path.expanduser(config_file))
+    p = parser.parse(config_file)
     for dec in p:
         if isinstance(dec, parser.LetStatement):
             config[dec.name] = dec.value

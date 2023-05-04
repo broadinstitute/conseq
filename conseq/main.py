@@ -375,10 +375,14 @@ def add_rules(sub):
 
     parser.set_defaults(func=rules)
 
+import os
 
 def add_debugrun(sub):
     def debugrun(args):
-        commands.debugrun(args.dir, args.file, args.target, {}, args.config)
+        config_path = os.path.expanduser(args.config)
+        if not os.path.exists(config_path):
+            config_path = None
+        commands.debugrun(args.dir, args.file, args.target, {}, config_path )
 
     parser = sub.add_parser(
         "debugrun",
