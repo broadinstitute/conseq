@@ -1,4 +1,4 @@
-from .report import run_graph_to_dot
+from ...conseq.report import run_graph_to_dot
 
 
 def test_rules_to_graph(tmpdir):

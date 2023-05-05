@@ -84,12 +84,14 @@ def generate_report_cmd(state_dir, dest_dir):
         with open(fn, "wt") as fd:
             execution = execution_by_output.get(obj.id)
             downstream_executions = execution_by_input[obj.id]
-            fd.write(
-                obj_template.render(
+            content = obj_template.render(
                     obj=obj,
                     execution=execution,
                     downstream_executions=downstream_executions,
                 )
+            assert isinstance(content, str)
+            fd.write(
+                content
             )
 
     def get_disk_usage(job_dir):
@@ -118,10 +120,12 @@ def generate_report_cmd(state_dir, dest_dir):
                 )
 
         with open(fn, "wt") as fd:
-            fd.write(
-                execution_template.render(
+            content =                 execution_template.render(
                     execution=execution, files=files, disk_usage=disk_usage
                 )
+            assert isinstance(content, str)
+            fd.write(
+                content
             )
 
     ExecSummary = namedtuple("ExecSummary", "execs disk_usage")
@@ -149,10 +153,12 @@ def generate_report_cmd(state_dir, dest_dir):
     with open(f"{dest_dir}/index.html", "wt") as fd:
         sorted_objs_by_type = sorted(objs_by_type.items())
         sorted_execs_by_name = sorted(execs_by_name.items())
-        fd.write(
-            index_template.render(
+        content =             index_template.render(
                 objs_by_type=sorted_objs_by_type,
                 execs_by_name=sorted_execs_by_name,
                 rules_with_size=rules_with_size,
             )
+        assert isinstance(content, str)
+        fd.write(
+            content
         )

@@ -1,8 +1,8 @@
 import json
 import re
 from collections import namedtuple
-
 import six
+from typing import Dict, Optional, Any
 
 from conseq.parser import depfile
 
@@ -36,12 +36,11 @@ RegEx = namedtuple("RegEx", "expression")
 class CustomRuleEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, RegEx):
-            return {"re_pattern": obj.pattern}
+            return {"re_pattern": obj.expression}
         # Let the base class default method raise the TypeError
         return json.JSONEncoder.default(self, obj)
 
 
-from typing import Dict, Optional, Any
 
 
 class Rule:

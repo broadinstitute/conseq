@@ -67,11 +67,11 @@ class Rules:
     def add_client(self, name, client):
         self.exec_clients[name] = client
 
-    def get_client(self, name, must=True):
-        if must:
-            return self.exec_clients[name]
-        else:
-            return self.exec_clients.get(name)
+    def has_client_defined(self, name):
+        return name in self.exec_clients
+
+    def get_client(self, name):
+        return self.exec_clients[name]
 
     def add_type(self, typedef):
         name = typedef.name

@@ -24,7 +24,7 @@ from conseq.dep import ForEach, Jobs, RuleExecution, Template
 from conseq.exec_client import (
     DelegateExecClient,
     DelegateExecution,
-    Execution,
+    ClientExecution,
     LocalExecClient,
     ResolveState,
     bind_inputs,
@@ -228,7 +228,7 @@ def execute(
     capture_output: bool,
     resolver_state: ResolveState,
     client: Union[DelegateExecClient, LocalExecClient],
-) -> Union[Execution, exec_client.ExecutionStub]:
+) -> Union[ClientExecution, exec_client.ExecutionStub]:
     try:
         prologue = render_template(jinja2_env, config["PROLOGUE"], config)
 
@@ -341,6 +341,7 @@ def execute(
             id, ex.get_error(), transform=name, job_dir=job_dir
         )
 
+from .dep import Execution
 
 def reattach(
     j: Jobs, rules: Rules, pending_jobs: List[Execution]
@@ -375,7 +376,7 @@ def get_long_execution_summary(
 ) -> str:
     from tabulate import tabulate
 
-    counts :Dict[str: Any] = collections.defaultdict(lambda: SummaryRec(count=0, dirs=[]))
+    counts = collections.defaultdict(lambda: SummaryRec(count=0, dirs=[]))
     for e in executing:
         k = (e.get_state_label(), e.transform)
         rec = counts[k]
@@ -400,7 +401,7 @@ def get_long_execution_summary(
 
 
 def get_execution_summary(
-    executing: Union[List[Execution], List[DelegateExecution]]
+    executing: Union[List[ClientExecution], List[DelegateExecution]]
 ) -> str:
     counts = collections.defaultdict(lambda: 0)
     for e in executing:
@@ -491,13 +492,13 @@ def main_loop(
     new_object_listener: Callable,
     rules: Rules,
     state_dir: str,
-    executing: List[DelegateExecution],
+    executing: List[ClientExecution],
     capture_output: bool,
     req_confirm: bool,
     maxfail: int,
     maxstart: None,
     properties_to_add=[],
-) -> None:
+):
     from conseq.exec_client import create_publish_exec_client
 
     _client_for_publishing = Lazy(lambda: create_publish_exec_client(rules.get_vars()))
@@ -602,6 +603,7 @@ def main_loop(
             ready_jobs = get_satisfiable_jobs(
                 rules, resources_per_client, pending_jobs, executing
             )
+            job = None
             for job in ready_jobs:
                 assert isinstance(job, dep.RuleExecution)
 
@@ -657,6 +659,7 @@ def main_loop(
                 # maybe record_started and update_exec_xref should be merged so anything started
                 # always has an xref
                 exec_id = j.record_started(job.id)
+                assert exec_id is not None
                 timings.log(job.id, job.transform, "start")
 
                 job_dir = get_job_dir(state_dir, exec_id)
@@ -718,6 +721,7 @@ def main_loop(
                     job_id = j.record_completed(timestamp, e.id, dep.STATUS_FAILED, {})
                     failures.append((e.transform, e.job_dir))
                     debug_log.log_completed(job_id, dep.STATUS_FAILED, completion)
+                    assert job is not None
                     timings.log(job_id, job.transform, "fail")
                 elif completion is not None:
                     amended_outputs = _amend_outputs(completion, properties_to_add)
@@ -732,8 +736,10 @@ def main_loop(
                     job_id = j.record_completed(
                         timestamp, e.id, dep.STATUS_COMPLETED, amended_outputs
                     )
+                    assert isinstance(job_id, int)
                     debug_log.log_completed(job_id, dep.STATUS_COMPLETED, completion)
                     success_count += 1
+                    assert job is not None
                     timings.log(job_id, job.transform, "complete")
 
                 did_useful_work = True
@@ -1097,7 +1103,7 @@ def main(
     rule_specifications = rules.get_rule_specifications()
     jinja2_env = rules.jinja2_env
 
-    if rules.get_client("default", must=False) is None:
+    if not rules.has_client_defined("default"):
         rules.add_client("default", exec_client.LocalExecClient({}))
     # override with max_concurrent_executions
     rules.get_client("default").resources["slots"] = max_concurrent_executions

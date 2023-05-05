@@ -11,6 +11,7 @@ from sqlite3 import Connection, Cursor
 from typing import (
     Any,
     Callable,
+    Literal,
     Dict,
     Iterator,
     List,
@@ -610,7 +611,7 @@ class RuleSet:
             return None
         return rule.space
 
-    def completed_execution(self, execution_id, new_status):
+    def completed_execution(self, execution_id, new_status) -> Union[int, Literal["norow"]]:
         # returns rule_execution_id
         assert execution_id != None
         if new_status == STATUS_COMPLETED:

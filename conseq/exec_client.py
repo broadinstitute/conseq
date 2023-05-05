@@ -44,7 +44,7 @@ class PidProcStub:
     def __repr__(self):
         return "<PidProcStub pid:{}>".format(self.pid)
 
-    def poll(self) -> int:
+    def poll(self) -> Optional[int]:
         # this is really just to cope with testing, normally the process was created by a different process
         try:
             os.waitpid(self.pid, os.WNOHANG)
@@ -180,12 +180,12 @@ def grep_logs(log_grep_state: Dict[str, int], output_files: List[str], pattern):
 
 @dataclass
 class ExecResult:
-    failure_msg: str
-    outputs: List[Dict[str, Any]]
+    failure_msg: Optional[str]
+    outputs: Optional[List[Dict[str, Any]]]
     cache_key: Optional[str] = None
 
 
-class Execution:
+class ClientExecution:
     exec_xref : str
     
     def __init__(
@@ -354,7 +354,7 @@ class Execution:
 
         return ExecResult(None, outputs, cache_key=cache_key)
 
-class DelegateExecution(Execution):
+class DelegateExecution(ClientExecution):
     def __init__(
         self,
         transform: str,
@@ -494,7 +494,7 @@ def local_exec_script(
     prologue: str,
     desc_name: str,
     watch_regex,
-) -> Execution:
+) -> ClientExecution:
     stdout_path = os.path.join(job_dir, "stdout.txt")
     stderr_path = os.path.join(job_dir, "stderr.txt")
     # results_path = os.path.join(job_dir, "results.json")
@@ -528,7 +528,7 @@ def local_exec_script(
     with open(os.path.join(job_dir, "description.txt"), "w") as fd:
         fd.write(desc_name)
 
-    return Execution(
+    return ClientExecution(
         name,
         id,
         job_dir,
@@ -696,7 +696,7 @@ class ExecClient:
         resolve_state: NullResolveState,
         resources: Dict[str, float],
         watch_regex,
-    ) -> Execution:
+    ) -> ClientExecution:
         raise NotImplementedError()
 
 
@@ -706,7 +706,7 @@ class LocalExecClient(ExecClient):
 
     def reattach(self, external_ref):
         d = json.loads(external_ref)
-        return Execution(
+        return ClientExecution(
             d["transform"],
             d["id"],
             d["job_dir"],
@@ -771,7 +771,7 @@ class LocalExecClient(ExecClient):
         resolve_state: ResolveState,
         resources: Dict[str, float],
         watch_regex,
-    ) -> Execution:
+    ) -> ClientExecution:
         assert isinstance(resolve_state, NullResolveState)
 
         for src, dst in resolve_state.files_to_copy:

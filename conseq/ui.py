@@ -63,6 +63,11 @@ def ask_y_n(msg):
             return answer == "y"
         print("Invalid input")
 
+from dataclasses import dataclass
+@dataclass
+class ShouldWeStop:
+    stop : bool
+    max_failures : int
 
 def user_says_we_should_stop(failure_count, executing):
     answer = ask_user(
@@ -72,11 +77,11 @@ def user_says_we_should_stop(failure_count, executing):
         ["y", "n", "never"],
     )
     if answer == "y":
-        return True, failure_count
+        return (True, failure_count)
     elif answer == "n":
-        return False, failure_count + 1
+        return (False, failure_count + 1)
     else:
-        return False, 1e10
+        return (False, 1000000000)
 
 
 def confirm_execution(transform, inputs):
