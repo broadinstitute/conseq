@@ -89,7 +89,6 @@ def gs_fetch(bucket_name: str, path: str, destination_filename: str) -> None:
 
 class Pull:
     def __init__(self, config: PropsType) -> None:
-        self.ssh_client_cache = {}
         self.config = config
 
     def pull(self, url: str, dest_path: str) -> str:
@@ -107,11 +106,6 @@ class Pull:
         else:
             raise Exception("unrecognized url: {}, {}".format(url, parts))
         return "invalid"
-
-    def dispose(self):
-        for client in self.ssh_client_cache.values():
-            client.close()
-        self.ssh_client_cache = {}
 
 
 class DownloadCacheDb:

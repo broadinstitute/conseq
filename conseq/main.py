@@ -36,13 +36,6 @@ def _parse_query(predicates):
     return query
 
 
-def space(args):
-    if args.name:
-        depexec.select_space(args.dir, args.name, create_if_missing=args.new)
-    else:
-        depexec.print_spaces(args.dir)
-
-
 def add_list(sub):
     parser = sub.add_parser("list", help="List all objects, executions, etc")
 
@@ -51,16 +44,6 @@ def add_list(sub):
 
     parser.set_defaults(func=_list)
 
-
-def add_space(sub):
-    parser = sub.add_parser("space", help="Switch default space")
-    parser.add_argument(
-        "name",
-        nargs="?",
-        help="Name of space to use as the default.  If omitted, lists the names of all spaces",
-    )
-    parser.add_argument("--new", "-n", action="store_true")
-    parser.set_defaults(func=space)
 
 
 def add_ls(sub):

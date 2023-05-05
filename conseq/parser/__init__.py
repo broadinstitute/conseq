@@ -8,8 +8,6 @@ from conseq.parser import depfile
 
 QueryVariable = namedtuple("QueryVariable", ["name"])
 RunStmt = namedtuple("RunStmt", ["exec_profile", "command", "script"])
-FlockInclude = namedtuple("FlockInclude", ["path"])
-FlockStmt = namedtuple("FlockStmt", ["language", "fn_prefix", "scripts"])
 TypeDefStmt = namedtuple("TypeDefStmt", "name properties")
 ExecProfileStmt = namedtuple("ExecProfileStmt", "name properties")
 RememberExecutedStmt = namedtuple("RememberExecutedStmt", "transform inputs outputs")

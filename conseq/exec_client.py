@@ -18,24 +18,12 @@ from conseq.dep import Jobs, Obj
 from conseq.helper import Remote
 from conseq.xref import Resolver
 from .types import PropsType
+import tempfile
+import signal
 
 CACHE_KEY_FILENAME = "conseq-cache-key.json"
 
-_basestring = str
-
 log = logging.getLogger(__name__)
-SgeState = collections.namedtuple(
-    "SgeState", ["update_timestamp", "status", "refresh_id"]
-)
-
-SGE_STATUS_SUBMITTED = "submitted"
-SGE_STATUS_PENDING = "pending"
-SGE_STATUS_RUNNING = "running"
-SGE_STATUS_COMPLETE = "complete"
-SGE_STATUS_UNKNOWN = "unknown"
-
-import tempfile
-import signal
 
 class PidProcStub:
     def __init__(self, pid: int) -> None:
@@ -1094,7 +1082,6 @@ class AsyncDelegateExecClient:
         assert (
             watch_regex is None
         ), "delegated executors cannot watch logs, watch-regex not allowed"
-        mem_in_mb = resources.get("mem", 1000)
         assert job_dir[: len(self.local_workdir)] == self.local_workdir
         rel_job_dir = job_dir[len(self.local_workdir) + 1 :]
 
@@ -1331,7 +1318,6 @@ class DelegateExecClient:
             watch_regex is None
         ), "delegated executors cannot watch logs, watch-regex not allowed"
 
-        mem_in_mb = resources.get("mem", 1000)
         assert job_dir[: len(self.local_workdir)] == self.local_workdir
         rel_job_dir = job_dir[len(self.local_workdir) + 1 :]
 

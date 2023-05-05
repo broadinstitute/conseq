@@ -1,27 +1,6 @@
-import contextlib
 import logging
-import signal
 
 log = logging.getLogger(__name__)
-
-
-@contextlib.contextmanager
-def capture_sigint():
-    interrupted = [False]
-
-    original_sigint = signal.getsignal(signal.SIGINT)
-
-    def set_interrupted(signum, frame):
-        signal.signal(signal.SIGINT, original_sigint)
-        interrupted[0] = True
-        log.warning("Interrupted!")
-
-    signal.signal(signal.SIGINT, set_interrupted)
-
-    yield lambda: interrupted[0]
-
-    signal.signal(signal.SIGINT, original_sigint)
-
 
 def ask_user(message, options, default=None):
     formatted_options = []
@@ -62,12 +41,6 @@ def ask_y_n(msg):
         if answer in ["y", "n"]:
             return answer == "y"
         print("Invalid input")
-
-from dataclasses import dataclass
-@dataclass
-class ShouldWeStop:
-    stop : bool
-    max_failures : int
 
 def user_says_we_should_stop(failure_count, executing):
     answer = ask_user(

@@ -7,10 +7,9 @@ import re
 import subprocess
 from typing import Dict, List, Optional, Tuple
 
-from boto.s3.bucket import Bucket
 from boto.s3.connection import S3Connection
 from boto.s3.key import Key
-import traceback
+from google.cloud import storage
 
 
 log = logging.getLogger(__name__)
@@ -23,18 +22,6 @@ def _parse_remote(path: str) -> Tuple[str, str, str]:
     bucket_name = m.group(2)
     path = m.group(3)
     return storage_api, bucket_name, path
-
-
-# def download_s3_as_string(remote):
-#     assert remote.startswith("s3:")
-#     bucket, remote_path = _parse_remote(remote)
-
-#     key = bucket.get_key(remote_path)
-#     if key == None:
-#         return None
-
-#     value = key.get_contents_as_string()
-#     return value.decode("utf-8")
 
 
 class StorageConnection:
@@ -68,9 +55,6 @@ class StorageConnection:
         raise NotImplementedError()
 
 
-# .get_metadata("sha256")
-
-from google.cloud import storage
 
 
 class GSStorageConnection(StorageConnection):
@@ -470,19 +454,6 @@ def push(remote, filenames):
             remote.upload(filename, filename)
 
 
-# def push_cmd(args, config):
-#     remote = Remote(
-#         args.remote_url,
-#         args.local_dir,
-#         config["AWS_ACCESS_KEY_ID"],
-#         config["AWS_SECRET_ACCESS_KEY"],
-#     )
-#     if args.cas:
-#         push_to_cas(remote, args.filenames)
-#     else:
-#         push(remote, args.filenames)
-
-
 def pull(
     remote, file_mappings, ignoreMissing=False, skip_existing=True, stage_dir=None
 ):
@@ -496,17 +467,6 @@ def pull(
             skip_existing=skip_existing,
             stage_dir=stage_dir,
         )
-
-
-# def pull_cmd(args, config):
-#     remote = Remote(
-#         args.remote_url,
-#         args.local_dir,
-#         config["AWS_ACCESS_KEY_ID"],
-#         config["AWS_SECRET_ACCESS_KEY"],
-#     )
-#     pull(remote, args.file_mappings)
-
 
 def read_config(filename):
     config = {}
@@ -564,43 +524,6 @@ def _parse_mapping_str(file_mapping):
         remote_path = local_path = file_mapping
     return (remote_path, local_path)
 
-
-# def exec_config(args, config):
-#     config_content = download_s3_as_string(args.url)
-#     if config_content is None:
-#         raise Exception("Could not open {}".format(args.url))
-#     config = json.loads(config_content)
-
-#     remote = Remote(config["remote_url"], args.local_dir)
-#     for r in config["pull"]:
-#         remote.download(r["src"], r["dest"])
-
-#     for dirname in config["mkdir"]:
-#         if not os.path.exists(dirname):
-#             os.makedirs(dirname)
-
-#     # execute command
-#     command = config["command"]
-#     stdout_path = config["stdout"]
-#     stderr_path = config["stderr"]
-#     exec_summary_path = config["exec_summary"]
-#     try:
-#         exec_command_with_capture(
-#             command, stderr_path, stdout_path, exec_summary_path, args.local_dir
-#         )
-#     except Exception:
-#         tb = traceback.format_exc()
-#         message = "Got exception in exec_command_with_capture():\n" + tb
-#         print(
-#             "Got an exception and now desperately attempting to gracefully to communicate it back by writing it to the stderr log"
-#         )
-#         print(message)
-#         with open(stderr_path, "at", encoding="utf8") as fd:
-#             fd.write(message)
-
-#     # push results
-#     for r in config["push"]:
-#         remote.upload(r["src"], r["dest"], force=True)
 
 
 def exec_cmd(args, config):
@@ -688,15 +611,6 @@ def main(varg=None):
 
     subparsers = parser.add_subparsers()
 
-    # push_parser = subparsers.add_parser("push")
-    # push_parser.add_argument(
-    #     "--cas", help="Use content addressable storage", action="store_true"
-    # )
-    # push_parser.add_argument("remote_url", help="base remote url to use")
-    # push_parser.add_argument("local_dir")
-    # push_parser.add_argument("filenames", nargs="+")
-    # push_parser.set_defaults(func=push_cmd)
-
     exec_parser = subparsers.add_parser("exec")
     exec_parser.add_argument("remote_url")
     exec_parser.add_argument("cas_remote_url")
@@ -720,21 +634,6 @@ def main(varg=None):
     )
     exec_parser.add_argument("command", nargs=argparse.REMAINDER)
     exec_parser.set_defaults(func=exec_cmd)
-
-    # exec_config_parser = subparsers.add_parser("exec-config")
-    # exec_config_parser.add_argument("url")
-    # exec_config_parser.add_argument("--local_dir", default=".")
-    # exec_config_parser.set_defaults(func=exec_config)
-
-    # pull_parser = subparsers.add_parser("pull")
-    # pull_parser.add_argument("remote_url", help="base remote url to pull from")
-    # pull_parser.add_argument("local_dir")
-    # pull_parser.add_argument(
-    #     "file_mappings",
-    #     help="mappings of remote paths to local paths of the form 'remote:local'",
-    #     nargs="+",
-    # )
-    # pull_parser.set_defaults(func=pull_cmd)
 
     log.info("helper.main parameters: %s", varg)
 

@@ -32,12 +32,7 @@ log = logging.getLogger(__name__)
 DISABLE_AUTO_CREATE_RULES = False
 
 
-class InstanceTemplate:
-    def __init__(self, props):
-        pass
 
-
-STATUS_UNKNOWN = "unknown"
 STATUS_STARTED = "started"
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
@@ -49,7 +44,6 @@ RE_STATUS_FAILED = "failed"
 RE_STATUS_DEFERRED = "deferred"
 
 PUBLIC_SPACE = "public"
-SpaceType = str
 
 current_db_cursor_state = threading.local()
 
@@ -192,31 +186,6 @@ class ObjSet:
             _delete_execution_by_id(c, execution_id)
         for remove_listener in self.remove_listeners:
             remove_listener(obj)
-
-    def get_spaces(self, parent: Optional[str] = None) -> List[str]:
-        c = get_cursor()
-        c.execute("SELECT name, parent FROM space")
-        return [
-            x[0]
-            for x in c.fetchall()
-            if parent is None or parent == x[1] or x[0] == parent
-        ]
-
-    def select_space(self, name, create_if_missing):
-        c = get_cursor()
-        self.assert_space_exists(name, create_if_missing, None)
-        c.execute("UPDATE settings SET default_space = ?", [name])
-
-    def assert_space_exists(self, name, create_if_missing, parent):
-        c = get_cursor()
-        c.execute("SELECT name FROM space WHERE name = ?", [name])
-        if c.fetchone() is None:
-            if create_if_missing:
-                c.execute(
-                    "INSERT INTO space (name, parent) VALUES (?, ?)", [name, parent]
-                )
-            else:
-                raise Exception("No space named: {}".format(name))
 
     def get_last_id(self):
         c = get_cursor()
@@ -679,13 +648,6 @@ class ExecutionLog:
     def __init__(self, obj_history: ObjHistory) -> None:
         self.obj_history = obj_history
 
-    def mark_incomplete(self):
-        c = get_cursor()
-        c.execute(
-            "UPDATE execution SET status = ? WHERE status = ?",
-            [STATUS_UNKNOWN, STATUS_STARTED],
-        )
-
     def _make_copy_get_id(self, x):
         self.obj_history.add(x)
         return x.id
@@ -890,45 +852,6 @@ class ExecutionLog:
 
         return objs_reached
 
-    def to_dot(self, detailed: bool):
-        """
-        :return: a graphviz graph in dot syntax of all objects and rules created
-        """
-        stmts = []
-        objs = {}
-        # state_color = {WAITING:"gray", READY:"red", STARTED:"blue", FAILED:"green", COMPLETED:"turquoise"}
-        for rule in self.get_all():
-            if rule.status == "canceled":
-                continue
-
-            for name, value in rule.inputs:
-                if not isinstance(value, tuple):
-                    value = [value]
-                for v in value:
-                    stmts.append('o{} -> r{} [label="{}"]'.format(v.id, rule.id, name))
-                    objs[v.id] = v
-            for output in rule.outputs:
-                stmts.append("r{} -> o{}".format(rule.id, output.id))
-                objs[output.id] = output
-
-            # color=state_color[self.get_rule_state(rule.id)]
-            color = "gray"
-
-            stmts.append(
-                'r{} [shape=box, label="{}", style="filled" fillcolor="{}"]'.format(
-                    rule.id, rule.transform, color
-                )
-            )
-
-        for obj in objs.values():
-            prop_values = []
-            for k, v in obj.props.items():
-                if not isinstance(v, dict) or detailed:
-                    prop_values.append("{}: {}".format(k, v))
-            label = "\\n".join(prop_values)
-            stmts.append('o{} [label="{}"]'.format(obj.id, label))
-        return "digraph { " + (";\n".join(stmts)) + " } "
-
 
 class ForEach:
     def __init__(self, variable: str, const_constraints: Dict[str, str] = {}) -> None:
@@ -944,29 +867,6 @@ class ForAll:
     def __init__(self, variable: str, const_constraints: Dict[str, str] = {}) -> None:
         self.variable = variable
         self.const_constraints = const_constraints
-
-
-class PropEqualsConstant:
-    def __init__(self, variable, property, constant):
-        self.variable = variable
-        self.property = property
-        self.constant = constant
-
-    def satisfied(self, bindings):
-        return bindings[self.variable][self.property] == self.constant
-
-
-class PropMatchesRegexp:
-    def __init__(self, variable, property, regexp):
-        self.variable = variable
-        self.property = property
-        if isinstance(regexp, six.string_types):
-            self.regexp = re.compile(regexp)
-        else:
-            self.regexp = regexp
-
-    def satisfied(self, bindings):
-        return self.regexp.match(bindings[self.variable][self.property]) != None
 
 
 class PropsMatch:
@@ -1257,10 +1157,6 @@ class Jobs:
     def transaction(self) -> _GeneratorContextManager:
         return transaction(self.db)
 
-    def to_dot(self, detailed):
-        with transaction(self.db):
-            return self.log.to_dot(detailed)
-
     def query_template(self, template):
         with transaction(self.db):
             return template.create_rules(self.objects)
@@ -1279,16 +1175,12 @@ class Jobs:
             return
 
         with transaction(self.db):
-            refresh_count = 0
-            add_executions = 0
             pending_rules_to_evaluate = self.pending_rules_to_evaluate
             self.pending_rules_to_evaluate = set()
             for template in self.rule_templates:
                 if template.transform not in pending_rules_to_evaluate:
                     continue
-                refresh_count += 1
                 new_rules = template.create_rules(self.objects)
-                add_executions += len(new_rules)
                 for rule in new_rules:
                     self._add_rule(*rule)
                     # log.info("Refreshed the following templates: %s, refresh_count=%s, added=%s", pending_rules_to_evaluate, refresh_count, add_executions)
@@ -1565,9 +1457,6 @@ class Jobs:
             for job in self.log.get_all():
                 print("all job:", job)
 
-
-def open_state_dir(state_dir):
-    return open_job_db(os.path.join(state_dir, "db.sqlite3"))
 
 
 def open_job_db(filename: str) -> Jobs:

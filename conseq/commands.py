@@ -371,10 +371,6 @@ def rm_cmd(state_dir, dry_run, space, query):
     remove_obj_and_children(j, root_obj_ids, dry_run)
 
 
-def dot_cmd(state_dir, detailed):
-    j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
-    print(j.to_dot(detailed))
-
 
 def list_cmd(state_dir):
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
@@ -571,62 +567,3 @@ def gc(state_dir):
     j.gc()
 
 
-def _rules_to_dot(rules):
-    """
-    :return: a graphviz graph in dot syntax approximating the execution DAG
-    """
-    stmts = []
-    objs = {}
-    rule_nodes = {}
-
-    def add_obj(type):
-        if type in objs:
-            return objs[type]["id"]
-        id = len(objs)
-        objs[type] = dict(id=id, type=type)
-        return id
-
-    def add_rule(rule_name, filename):
-        if rule_name in rule_nodes:
-            return rule_nodes[rule_name]["id"]
-        id = len(rule_nodes)
-        rule_nodes[rule_name] = dict(id=id, name=rule_name, filename=filename)
-        return id
-
-    for rule in rules:
-        rule_id = add_rule(rule.name, rule.filename)
-        for input in rule.inputs:
-            # print(input)
-            obj_id = add_obj(input.json_obj.get("type", "unknown"))
-
-            #            stmts.append("o{} -> r{} [label=\"{}\"]".format(obj_id, rule_id, input.variable))
-            stmts.append("o{} -> r{}".format(obj_id, rule_id))
-
-        outputs = []
-        if rule.outputs is not None:
-            outputs.extend(rule.outputs)
-
-        for expectation in rule.output_expectations:
-            const_key_vals = {}
-            for predicate in expectation.predicates:
-                if isinstance(predicate, ExpectKeyIs):
-                    const_key_vals[predicate.key] = predicate.value
-            outputs.append(const_key_vals)
-
-        for output in outputs:
-            obj_id = add_obj(output.get("type", "unknown"))
-            stmts.append("r{} -> o{}".format(rule_id, obj_id))
-
-    for node in rule_nodes.values():
-        stmts.append(
-            'r{} [shape=box, style="filled", fillcolor="gray", label="{}\n{}"]'.format(
-                node["id"], node["name"], node["filename"]
-            )
-        )
-
-    for obj in objs.values():
-        prop_values = ["type=" + obj["type"]]
-        label = "\\n".join(prop_values)
-        stmts.append('o{} [label="{}"]'.format(obj["id"], label))
-
-    return "digraph { " + (";\n".join(set(stmts))) + " } "

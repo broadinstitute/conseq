@@ -79,17 +79,6 @@ class Rules:
             raise Exception("Duplicate type for {}".format(name))
         self.types[name] = typedef
 
-    def merge(self, other):
-        for name, rule in other.rule_by_name.items():
-            self.set_rule(name, rule)
-        self.vars.update(other.vars)
-        self.objs.extend(other.objs)
-        self.exec_clients.update(other.exec_clients)
-        self.remember_executed.extend(other.remember_executed)
-
-        for t in other.types.values():
-            self.add_type(t)
-
     def __repr__(self):
         return "<Rules vars:{}, rules:{}>".format(self.vars, list(self))
 

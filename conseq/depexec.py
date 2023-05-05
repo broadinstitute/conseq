@@ -44,12 +44,16 @@ log = logging.getLogger(__name__)
 
 Artifact = PropsType
 
+import json
+def Local(name):
+    return {"$filename": name}
+
+def publish(*items):
+    with open("results.json", "w") as fd:
+        json.dump({"outputs": items}, fd)
+
 
 class FatalUserError(Exception):
-    pass
-
-
-class JobFailedError(FatalUserError):
     pass
 
 
@@ -880,21 +884,6 @@ def convert_input_spec_to_queries(
         predicates.append(dep.PropsMatch(pairs))
 
     return queries, predicates
-
-
-def select_space(state_dir, name, create_if_missing):
-    db_path = os.path.join(state_dir, "db.sqlite3")
-    j = dep.open_job_db(db_path)
-    j.select_space(name, create_if_missing)
-
-
-def print_spaces(state_dir):
-    db_path = os.path.join(state_dir, "db.sqlite3")
-    j = dep.open_job_db(db_path)
-    current_space = j.get_current_space()
-    for space in j.get_spaces():
-        selected = "*" if current_space == space else " "
-        print("{} {}".format(selected, space))
 
 
 def force_execution_of_rules(j, forced_targets):
