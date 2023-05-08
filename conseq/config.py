@@ -1,5 +1,6 @@
 import os
 import textwrap
+from typing import Optional
 
 from conseq import parser
 from conseq.hashcache import HashCache
@@ -113,7 +114,6 @@ def _make_uuid():
     return uuid.uuid4().hex
 
 
-from typing import Optional
 
 
 def _load_initial_config(state_dir: str, depfile: str, config_file: Optional[str]):

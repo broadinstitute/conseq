@@ -1,12 +1,8 @@
 import collections
 import json
 import logging
-import os
-import re
-import sqlite3
-import threading
+from typing import Union
 from contextlib import _GeneratorContextManager
-from contextlib import contextmanager
 from sqlite3 import Connection, Cursor
 from typing import (
     Any,
@@ -22,9 +18,7 @@ from typing import (
     Sequence,
 )
 from .types import PropsType, BindingsDict, Obj
-
-import six
-
+from conseq.db import get_cursor, transaction
 from conseq.timeit import timeblock
 
 log = logging.getLogger(__name__)
@@ -45,35 +39,8 @@ RE_STATUS_DEFERRED = "deferred"
 
 PUBLIC_SPACE = "public"
 
-current_db_cursor_state = threading.local()
-
-
-@contextmanager
-def transaction(db: Connection) -> Iterator:
-    cursor = None
-    depth = 0
-    if hasattr(current_db_cursor_state, "cursor"):
-        cursor = current_db_cursor_state.cursor
-        depth = current_db_cursor_state.depth
-    if cursor == None:
-        cursor = db.cursor()
-        current_db_cursor_state.cursor = cursor
-    depth += 1
-    current_db_cursor_state.depth = depth
-    try:
-        yield
-    finally:
-        current_db_cursor_state.depth -= 1
-        if current_db_cursor_state.depth == 0:
-            current_db_cursor_state.cursor.close()
-            current_db_cursor_state.cursor = None
-            db.commit()
-
-
-def get_cursor() -> Cursor:
-    assert current_db_cursor_state.cursor != None
-    return current_db_cursor_state.cursor
-
+class MissingObj(Exception):
+    pass
 
 def _delete_execution_by_id(c, execution_id):
     c.execute("SELECT id FROM rule_execution WHERE execution_id = ?", (execution_id,))
@@ -216,8 +183,6 @@ class ObjSet:
                 return match.id
 
             self.remove(match.id)
-
-        self.assert_space_exists(space, True, self.default_space)
 
         c = get_cursor()
         c.execute(
@@ -430,34 +395,6 @@ class RuleSet:
         rule_ids = [x.id for x in rules]
         return rule_ids
 
-    # def find_downstream_from_rule(self, rule_id):
-    #     n_obj_ids = set()
-    #     n_rule_ids = set()
-    #
-    #     obj_ids = self.get_outputs(rule_id)
-    #
-    #     n_obj_ids.update(obj_ids)
-    #     for obj_id in obj_ids:
-    #         _rule_ids, _obj_ids = self.find_downstream_from_obj(obj_id)
-    #         n_obj_ids.update(_obj_ids)
-    #         n_rule_ids.update(_rule_ids)
-    #
-    #     return n_rule_ids, n_obj_ids
-    #
-    # def find_downstream_from_obj(self, input_id):
-    #     "given an object, return all the rule_execution ids and object that executed downstream of that object"
-    #     n_obj_ids = set()
-    #     n_rule_ids = set()
-    #
-    #     rule_ids = self.find_by_input(input_id)
-    #     n_rule_ids.update(rule_ids)
-    #     for rule_id in rule_ids:
-    #         _rule_ids, _obj_ids = self.find_downstream_from_rule_exec(rule_id)
-    #         n_obj_ids.update(_obj_ids)
-    #         n_rule_ids.update(_rule_ids)
-    #
-    #     return n_rule_ids, n_obj_ids
-
     def get(self, id):
         rules = self._find_rule_execs("id = ?", (id,))
         if len(rules) == 0:
@@ -573,12 +510,6 @@ class RuleSet:
             "UPDATE rule_execution SET state = ?, execution_id = ? WHERE id = ?",
             (RE_STATUS_STARTED, execution_id, rule_id),
         )
-
-    def get_space_by_execution_id(self, execution_id):
-        rule = self.get_by_execution_id(execution_id)
-        if rule == None:
-            return None
-        return rule.space
 
     def completed_execution(self, execution_id, new_status) -> Union[int, Literal["norow"]]:
         # returns rule_execution_id
@@ -889,8 +820,6 @@ class PropsMatch:
             first = False
         return True
 
-from typing import Union
-
 class Template:
     def __init__(
         self,
@@ -1035,11 +964,9 @@ class Template:
         return bindings
 
     def create_rules(self, obj_set):
-        #        breakpoint()
-        # print ("create_rules, transform:",self.transform,", queries: ", self.foreach_queries)
         with timeblock(log, "create_rules({})".format(self.transform), min_time=1):
             results = []
-            for space in obj_set.get_spaces(parent=obj_set.default_space):
+            for space in [PUBLIC_SPACE]:
                 if len(self.foreach_queries) == 0 and space == obj_set.default_space:
                     bindings = [{}]
                 else:
@@ -1059,8 +986,6 @@ class Template:
             return results
 
 
-class MissingObj(Exception):
-    pass
 
 
 class RuleAndDerivativesFilter:
@@ -1154,7 +1079,7 @@ class Jobs:
     def add_new_obj_listener(self, listener: Callable) -> None:
         self.objects.add_listeners.append(listener)
 
-    def transaction(self) -> _GeneratorContextManager:
+    def transaction(self):
         return transaction(self.db)
 
     def query_template(self, template):
@@ -1281,54 +1206,36 @@ class Jobs:
 
     def record_completed(self, timestamp, execution_id, new_status, outputs):
         with transaction(self.db):
-            default_space = self.rule_set.get_space_by_execution_id(execution_id)
-            if default_space == None:
-                log.warning(
-                    "No associated rule execution for execution_id %s.  Dropping outputs: %s",
-                    repr(execution_id),
-                    outputs,
-                )
-                self.log.record_completed(execution_id, new_status, [])
+            rule_exec = self.rule_set.get_by_execution_id(execution_id)
+            if rule_exec is None:
+                log.warning("Could not find rule for execution id %s", execution_id)
             else:
-
-                def get_space(obj):
-                    if "$space" in obj:
-                        o = dict(obj)
-                        del o["$space"]
-                        return obj["$space"], o
-                    else:
-                        return default_space, obj
-
-                rule_exec = self.rule_set.get_by_execution_id(execution_id)
-                if rule_exec is None:
-                    log.warning("Could not find rule for execution id %s", execution_id)
-                else:
-                    rule_def = self.rule_template_by_name[rule_exec.transform]
-                    for output in outputs:
-                        if not rule_def.output_matches_expectation(output):
-                            log.warning(
-                                'Output %s did not match any of the expected outputs on rule "%s"',
-                                output,
-                                rule_exec.transform,
-                            )
-
-                interned_outputs = []
+                rule_def = self.rule_template_by_name[rule_exec.transform]
                 for output in outputs:
-                    space, output = get_space(output)
+                    if not rule_def.output_matches_expectation(output):
+                        log.warning(
+                            'Output %s did not match any of the expected outputs on rule "%s"',
+                            output,
+                            rule_exec.transform,
+                        )
 
-                    assert len(output.keys()) > 0
-                    obj_id = self.add_obj(space, timestamp, output)
-                    interned_outputs.append(self.objects.get(obj_id))
-                return self._record_completed(
-                    execution_id, new_status, interned_outputs
-                )
+            interned_outputs = []
+            for output in outputs:
+                space = PUBLIC_SPACE
+
+                assert len(output.keys()) > 0
+                obj_id = self.add_obj(space, timestamp, output)
+                interned_outputs.append(self.objects.get(obj_id))
+            return self._record_completed(
+                execution_id, new_status, interned_outputs
+            )
 
     def update_exec_xref(self, exec_id, xref, job_dir):
         with transaction(self.db):
             self.log.update_exec_xref(exec_id, xref, job_dir)
 
     def remember_executed(self, exec_stmt):
-        space = self.get_current_space()
+        space = PUBLIC_SPACE
         transform = exec_stmt.transform
 
         def resolve_obj(props):
@@ -1386,10 +1293,6 @@ class Jobs:
                 for id in self.log.get_downstream_object_ids(transform)
             ]
 
-        #         n_rule_ids, n_obj_ids = self.rule_set.find_downstream_from_rule(r.id)
-        #         all_object_ids.update(n_obj_ids)
-        # return all_object_ids
-
     def invalidate_rule_execution(self, transform):
         with transaction(self.db):
             root_obj_ids = set()
@@ -1437,17 +1340,6 @@ class Jobs:
 
         return to_drop
 
-    def get_spaces(self):
-        with transaction(self.db):
-            return self.objects.get_spaces()
-
-    def select_space(self, name, create_if_missing):
-        with transaction(self.db):
-            return self.objects.select_space(name, create_if_missing)
-
-    def get_current_space(self):
-        return self.objects.default_space
-
     def dump(self):
         with transaction(self.db):
             for obj in self.objects:
@@ -1457,65 +1349,6 @@ class Jobs:
             for job in self.log.get_all():
                 print("all job:", job)
 
-
-
-def open_job_db(filename: str) -> Jobs:
-    needs_create = not os.path.exists(filename)
-
-    db = sqlite3.connect(filename)
-    # enforce FK constraints
-    db.execute("PRAGMA foreign_keys = ON")
-
-    stmts = []
-    if needs_create:
-        stmts.extend(
-            [
-                "create table rule (id INTEGER PRIMARY KEY AUTOINCREMENT, transform STRING, key STRING)",
-                "create table cur_obj (id INTEGER PRIMARY KEY AUTOINCREMENT, space string, timestamp STRING, json STRING)",
-                "create table past_obj (id INTEGER PRIMARY KEY AUTOINCREMENT, space string, timestamp STRING, json STRING)",
-                "create table execution (id INTEGER PRIMARY KEY AUTOINCREMENT, transform STRING, status STRING, execution_xref STRING, job_dir STRING)",
-                "create table execution_input (id INTEGER PRIMARY KEY AUTOINCREMENT, execution_id INTEGER, name STRING, obj_id INTEGER, is_list INTEGER)",
-                "create table execution_output (id INTEGER PRIMARY KEY AUTOINCREMENT, execution_id INTEGER, obj_id INTEGER)",
-                "create table rule_execution (id INTEGER PRIMARY KEY AUTOINCREMENT, space STRING, transform STRING, key STRING, state STRING, execution_id integer,"
-                "FOREIGN KEY(execution_id) REFERENCES execution(id))",
-                "create table rule_execution_input (id INTEGER PRIMARY KEY AUTOINCREMENT, rule_execution_id INTEGER, name STRING, obj_id INTEGER, is_list INTEGER)",
-                "create table settings (schema_version integer, default_space string)",
-                "insert into settings (schema_version, default_space) values (2, 'public')",
-                "create table space (name string, parent string)",
-                "insert into space (name) values ('public')",
-                "create table rule_snapshot (transform STRING PRIMARY KEY, definition string)",
-            ]
-        )
-    else:
-        c = db.cursor()
-        try:
-            c.execute("SELECT schema_version FROM settings")
-            schema_version = c.fetchone()[0]
-        except sqlite3.OperationalError:
-            schema_version = 0
-        c.close()
-
-        if schema_version < 1:
-            stmts.extend(
-                [
-                    "create table settings (schema_version integer, default_space string)",
-                    "insert into settings (schema_version, default_space) values (1, 'public')",
-                    "create table space (name string, parent string)",
-                    "insert into space (name) values ('public')",
-                ]
-            )
-        if schema_version < 2:
-            stmts.extend(
-                [
-                    "update settings set schema_version = 2",
-                    "create table rule_snapshot (transform string, definition string)",
-                ]
-            )
-
-    for stmt in stmts:
-        db.execute(stmt)
-
-    return Jobs(db)
 
 
 # These methods exist solely to monkey patch in hooks to record events in the context of tests

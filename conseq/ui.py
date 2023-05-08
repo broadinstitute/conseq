@@ -1,6 +1,27 @@
 import logging
 
+import signal
+import contextlib
+
 log = logging.getLogger(__name__)
+
+@contextlib.contextmanager
+def capture_sigint():
+    "Context manager for handling ^C being pressed and delaying it until a convenient time to be handled synchronously"
+    interrupted = [False]
+
+    original_sigint = signal.getsignal(signal.SIGINT)
+
+    def set_interrupted(signum, frame):
+        signal.signal(signal.SIGINT, original_sigint)
+        interrupted[0] = True
+        log.warning("Interrupted!")
+
+    signal.signal(signal.SIGINT, set_interrupted)
+
+    yield lambda: interrupted[0]
+
+    signal.signal(signal.SIGINT, original_sigint)
 
 def ask_user(message, options, default=None):
     formatted_options = []

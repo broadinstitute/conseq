@@ -12,10 +12,8 @@ from conseq.config import read_rules
 from conseq.dep import Obj, PUBLIC_SPACE
 from conseq.depexec import (
     convert_input_spec_to_queries,
-    get_job_dir,
     remove_obj_and_children,
 )
-from conseq.parser import ExpectKeyIs
 from conseq.util import indent_str
 import re
 
@@ -68,15 +66,13 @@ def print_history(state_dir):
         print("")
 
 
-def localize_cmd(state_dir, space, predicates, depfile, config_file):
+def localize_cmd(state_dir, space_, predicates, depfile, config_file):
     rules = read_rules(state_dir, depfile, config_file)
 
     resolver = xref.Resolver(state_dir, rules.vars)
 
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
-    if space is None:
-        space = j.get_current_space()
-    subset = j.find_objs(space, dict(predicates))
+    subset = j.find_objs(PUBLIC_SPACE, dict(predicates))
     for obj in subset:
         for k, v in obj.props.items():
             if isinstance(v, dict) and "$file_url" in v:
@@ -244,11 +240,9 @@ def _write_test_script(conseq_file, inputs_to_hardcode, executor_names, output_s
         )
 
 
-def downstream_cmd(state_dir, space, predicates):
+def downstream_cmd(state_dir, _space, predicates):
 
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
-    if space is None:
-        space = j.get_current_space()
 
     from collections import defaultdict
 
@@ -267,7 +261,7 @@ def downstream_cmd(state_dir, space, predicates):
 
     # print(rules_by_obj_id)
 
-    subset = j.find_objs(space, dict(predicates))
+    subset = j.find_objs(PUBLIC_SPACE, dict(predicates))
     for o in subset:
         print(f"artifact {o} has the following downstream:")
         downstreams = j.find_all_reachable_downstream_objs([o.id])
@@ -279,16 +273,14 @@ def downstream_cmd(state_dir, space, predicates):
     # subset is list of key -> value pairs
 
 
-def ls_cmd(state_dir, space, predicates, groupby, columns):
+def ls_cmd(state_dir, _space, predicates, groupby, columns):
     from tabulate import tabulate
     from conseq import depquery
 
     cache_db = xref.open_cache_db(state_dir)
 
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
-    if space is None:
-        space = j.get_current_space()
-    subset = j.find_objs(space, dict(predicates))
+    subset = j.find_objs(PUBLIC_SPACE, dict(predicates))
     subset = [o.props for o in subset]
 
     def print_table(subset, indent):
@@ -360,12 +352,10 @@ def forget_cmd(state_dir, rule_name, is_pattern):
         j.invalidate_rule_execution(transform)
 
 
-def rm_cmd(state_dir, dry_run, space, query):
+def rm_cmd(state_dir, dry_run, _space, query):
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
-    if space is None:
-        space = j.get_current_space()
 
-    root_objs = j.find_objs(space, query)
+    root_objs = j.find_objs(PUBLIC_SPACE, query)
     root_obj_ids = [o.id for o in root_objs]
 
     remove_obj_and_children(j, root_obj_ids, dry_run)

@@ -73,11 +73,12 @@ def get_cur_file_size(fp, position_to_eof=False):
     if isinstance(fp, KeyFile) and not position_to_eof:
         # Avoid EOF seek for KeyFile case as it's very inefficient.
         return fp.getkey().size
+    cur_pos = None
     if not position_to_eof:
         cur_pos = fp.tell()
     fp.seek(0, os.SEEK_END)
     cur_file_size = fp.tell()
-    if not position_to_eof:
+    if cur_pos is not None:
         fp.seek(cur_pos, os.SEEK_SET)
     return cur_file_size
 
@@ -127,6 +128,7 @@ class ResumableDownloadHandler(object):
     def _load_tracker_file_etag(self):
         f = None
         try:
+            assert self.tracker_file_name is not None
             f = open(self.tracker_file_name, "r")
             self.etag_value_for_current_download = f.readline().rstrip("\n")
             # We used to match an MD5-based regex to ensure that the etag was

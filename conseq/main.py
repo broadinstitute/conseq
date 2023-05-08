@@ -6,7 +6,7 @@ import colorlog
 
 from conseq import commands
 from conseq import depexec
-
+from conseq.types import Obj
 
 class RegExpMatch:
     def __init__(self, pattern):
@@ -507,10 +507,6 @@ def conseq_command_entry():
 
 
 def main(args=None):
-    from conseq import trace_on_demand
-
-    trace_on_demand.install()
-
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--dir",

@@ -689,6 +689,7 @@ def main_loop(
 
             # now poll the jobs which are running and look for which have completed
             for i, e in reversed(list(enumerate(executing))):
+                job = e
                 completeion_result = e.get_completion()
                 failure = completeion_result.failure_msg
                 completion = completeion_result.outputs
