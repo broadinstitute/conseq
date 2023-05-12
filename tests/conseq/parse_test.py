@@ -4,6 +4,9 @@ import jinja2
 
 from conseq import depexec
 from conseq import parser
+from conseq.parser import Semantics
+from conseq.parser import depfile
+from conseq.parser import TypeDefStmt
 
 pair_of_rules = """
 # ignore this comment
@@ -93,26 +96,6 @@ def test_forall_query():
     assert not rule.is_publish_rule
 
 
-rule_with_expected_outputs = """
-rule dynamic_outputs:
-    outputs-expected: {"type": "literal", "hasprop"}, {"type": "other"}
-    run "command"
-"""
-
-
-def test_expected_outputs():
-    decs = parser.parse_str(rule_with_expected_outputs)
-    assert len(decs) == 1
-    rule = decs[0]
-    assert rule.output_matches_expectation({"type": "literal", "hasprop": "a"})
-    assert rule.output_matches_expectation({"type": "other"})
-    assert not rule.output_matches_expectation({"type": "bad", "hasprop": "a"})
-    assert not rule.output_matches_expectation({"type": "literal"})
-    assert not rule.output_matches_expectation(
-        {"type": "literal", "hasprop": "a", "extra": "bad"}
-    )
-
-
 publish_rule = """
 rule pub:
     inputs: a = {"type": "foo"}
@@ -127,9 +110,6 @@ def test_publish_rule(monkeypatch):
     assert rule.is_publish_rule
     assert rule.publish_location == "sample{{inputs.a.other}}"
 
-
-from conseq.parser import Semantics
-from conseq.parser import depfile
 
 
 def _parse_exp(text, nonterminal):
@@ -357,3 +337,31 @@ def test_construct_cache_key(tmpdir):
     )
     assert len(statements) == 1
     statements[0].cache_key_constructor == [("python", "print(0)")]
+
+def test_type_def_no_required():
+    statements = parser.parse_str(
+    '''
+        type sample = { description: "desc" }
+    '''
+    )
+    assert len(statements) == 1
+    assert statements[0] == TypeDefStmt("sample", "desc", [])
+
+def test_type_def_no_desc():
+    statements = parser.parse_str(
+    '''
+        type sample = { required: ["x", "y"] }
+    '''
+    )
+    assert len(statements) == 1
+    assert statements[0] == TypeDefStmt("sample", None, ["x", "y"])
+
+def test_type_def_full():
+    statements = parser.parse_str(
+    '''
+        type sample = { description: "both", required: ["x", "y"] }
+    '''
+    )
+    assert len(statements) == 1
+    assert statements[0] == TypeDefStmt("sample", "both", ["x", "y"])
+

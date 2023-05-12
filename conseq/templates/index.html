@@ -5,6 +5,7 @@
 <h1>Artifacts by type</h1>
 {% for type, objs in objs_by_type %}
     <h2>Type: {{type}}</h2>
+    <h3>{{ typedefs[type].description }} </h3>
     {{ obj_table(objs) }}
 {% endfor %}
 

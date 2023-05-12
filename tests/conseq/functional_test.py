@@ -1,7 +1,7 @@
 # from conseq import parser
 import os
 
-from conseq import dep
+from conseq import dep, db
 from conseq import depexec
 
 
@@ -140,8 +140,8 @@ def test_non_key_values(tmpdir):
 
 
 def assert_transaction_closed():
-    if hasattr(dep.current_db_cursor_state, "cursor"):
-        assert dep.current_db_cursor_state.cursor == None
+    if hasattr(db.current_db_cursor_state, "cursor"):
+        assert db.current_db_cursor_state.cursor == None
 
 
 def test_gc(tmpdir):
@@ -244,6 +244,25 @@ def test_regexp_query_expands_var(tmpdir):
     )
     assert len(j.get_all_executions()) == 2
 
+def test_type_defs(tmpdir):
+    j = run_conseq(
+        tmpdir,
+        """
+    type apple = { description: "fruit" }
+    """,
+    )
+    types = j.get_type_defs()
+    assert len(types) == 1
+    j = run_conseq(
+        tmpdir,
+        """
+    type banana = { description: "fruit too" }
+    """,
+        assert_clean=False,
+    )
+    # current policy is to remember all types that have ever been defined. Maybe not a good solution. Re-evalute this later
+    types = j.get_type_defs()
+    assert len(types) == 2
 
 def test_fileref_copy_to(tmpdir):
     file_a = tmpdir.join("a")

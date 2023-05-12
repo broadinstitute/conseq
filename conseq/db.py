@@ -1,12 +1,13 @@
 import sqlite3
 import os
-from dep import Jobs
+#from dep import Jobs
 from contextlib import contextmanager
 import sqlite3
 import threading
 from sqlite3 import Connection, Cursor
+from typing import Iterable, Iterator
 
-def open_job_db(filename: str) -> Jobs:
+def prepare_db_connection(filename: str):
     needs_create = not os.path.exists(filename)
 
     db = sqlite3.connect(filename)
@@ -27,10 +28,11 @@ def open_job_db(filename: str) -> Jobs:
                 "FOREIGN KEY(execution_id) REFERENCES execution(id))",
                 "create table rule_execution_input (id INTEGER PRIMARY KEY AUTOINCREMENT, rule_execution_id INTEGER, name STRING, obj_id INTEGER, is_list INTEGER)",
                 "create table settings (schema_version integer, default_space string)",
-                "insert into settings (schema_version, default_space) values (2, 'public')",
+                "insert into settings (schema_version, default_space) values (3, 'public')",
                 "create table space (name string, parent string)",
                 "insert into space (name) values ('public')",
                 "create table rule_snapshot (transform STRING PRIMARY KEY, definition string)",
+                "create table type_def (name string primary key, definition_json string)"
             ]
         )
     else:
@@ -58,11 +60,18 @@ def open_job_db(filename: str) -> Jobs:
                     "create table rule_snapshot (transform string, definition string)",
                 ]
             )
+        if schema_version < 3:
+            stmts.extend(
+                [
+                    "update settings set schema_version = 3",
+                    "create table type_def (name string primary key, definition_json string)",
+                ]
+            )
 
     for stmt in stmts:
         db.execute(stmt)
 
-    return Jobs(db)
+    return db
 
 
 current_db_cursor_state = threading.local()

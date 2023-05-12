@@ -27,27 +27,6 @@ def http_fetch(url, dest):
 def s3_fetch(
     bucket_name: str, path: str, destination_filename: str, config: PropsType
 ) -> None:
-    # retry_count = 0
-    # max_retries = 10
-    #
-    # while True:
-    #     c = S3Connection(config["AWS_ACCESS_KEY_ID"], config["AWS_SECRET_ACCESS_KEY"])
-    #     bucket = c.get_bucket(bucket_name)
-    #     k = Key(bucket)
-    #     k.key = path
-    #     res_download_handler = ResumableDownloadHandler(num_retries=5)
-    #
-    #     try:
-    #         k.get_contents_to_filename(destination_filename, res_download_handler=res_download_handler)
-    #         break
-    #     except socket.timeout:
-    #         if retry_count >= max_retries:
-    #             log.error("Too many retries.  Aborting")
-    #             raise
-    #         retry_count += 1
-    #         log.warn("Timeout while fetching s3://{}/{}, retrying...".format(bucket_name, path))
-    #
-
     c = S3Connection(config["AWS_ACCESS_KEY_ID"], config["AWS_SECRET_ACCESS_KEY"])
     bucket = c.get_bucket(bucket_name)
     k = bucket.get_key(path)

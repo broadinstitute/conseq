@@ -124,6 +124,7 @@ def stage_cmd(export_file, conseq_file, dest_dir):
             export_contents.get_rule_specifications(),
             export_contents.objs,
             export_contents.vars,
+            export_contents.types.values()
         )
 
         # handle the remember-executed statements

@@ -13,6 +13,8 @@ from .helper import Remote
 from jinja2.environment import Environment
 import os
 
+from .dep import Execution
+
 from conseq import debug_log
 from conseq import dep
 from conseq import exec_client
@@ -31,7 +33,7 @@ from conseq.exec_client import (
     CACHE_KEY_FILENAME,
 )
 from conseq.parser import QueryVariable
-from conseq.parser import Rule, RunStmt
+from conseq.parser import Rule, RunStmt, TypeDefStmt
 from conseq.template import MissingTemplateVar, render_template
 from conseq.util import indent_str
 from conseq.xref import Resolver
@@ -56,6 +58,14 @@ def publish(*items):
 class FatalUserError(Exception):
     pass
 
+def make_output_check(output_expectations):
+    def is_outputs_good(outputs):
+        if len(output_expectations) == 0:
+            return True
+        breakpoint()
+        print(output_expectations)
+        return False
+    return is_outputs_good
 
 def to_template(jinja2_env: Environment, rule: Rule, config: PropsType) -> Template:
     queries, predicates = convert_input_spec_to_queries(jinja2_env, rule, config)
@@ -63,7 +73,7 @@ def to_template(jinja2_env: Environment, rule: Rule, config: PropsType) -> Templ
         queries,
         predicates,
         rule.name,
-        output_matches_expectation=rule.output_matches_expectation,
+        output_matches_expectation=make_output_check(rule.output_expectations),
     )
 
 
@@ -80,7 +90,7 @@ def generate_run_stmts(
 ) -> List[str]:
     run_stmts = []
     for i, x in enumerate(command_and_bodies):
-        exec_profile, command, script_body = x
+        exec_profile, command, script_body = x.exec_profile, x.command, x.script
         assert exec_profile == "default"
         command, script_body = expand_run(
             jinja2_env, command, script_body, config, **kwargs
@@ -345,7 +355,6 @@ def execute(
             id, ex.get_error(), transform=name, job_dir=job_dir
         )
 
-from .dep import Execution
 
 def reattach(
     j: Jobs, rules: Rules, pending_jobs: List[Execution]
@@ -864,7 +873,8 @@ def convert_input_spec_to_queries(
     queries = []
     predicates = []
     pairs_by_var = collections.defaultdict(lambda: [])
-    for bound_name, spec, for_all, _ in rule.inputs:
+    for input in rule.inputs:
+        bound_name, spec, for_all = input.variable, input.json_obj, input.for_all
         assert bound_name != ""
         spec = expand_input_spec(jinja2_env, spec, config)
 
@@ -1015,6 +1025,7 @@ def reconcile_db(
     rule_specifications: Dict[str, str],
     objs: List[PropsType],
     vars: PropsType,
+    type_defs: List[TypeDefStmt],
     force: Optional[bool] = None,
 ) -> None:
     # rewrite the objects, expanding templates and marking this as one which was manually added from the config file
@@ -1050,6 +1061,8 @@ def reconcile_db(
     if update_rule_specs_in_db:
         j.write_rule_specifications(rule_specifications)
 
+    for type_def in type_defs:
+        j.add_type_def(type_def)
 
 def main(
     depfile: str,
@@ -1105,6 +1118,7 @@ def main(
         rule_specifications,
         rules.objs,
         rules.vars,
+        rules.types.values(),
         force=remove_unknown_artifacts,
     )
 

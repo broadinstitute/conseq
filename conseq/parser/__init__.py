@@ -3,24 +3,67 @@ import re
 from collections import namedtuple
 import six
 from typing import Dict, Optional, Any
-
+from dataclasses import dataclass
 from conseq.parser import depfile
+from typing import List, Union
+import dataclasses
 
-QueryVariable = namedtuple("QueryVariable", ["name"])
-RunStmt = namedtuple("RunStmt", ["exec_profile", "command", "script"])
-TypeDefStmt = namedtuple("TypeDefStmt", "name properties")
-ExecProfileStmt = namedtuple("ExecProfileStmt", "name properties")
-RememberExecutedStmt = namedtuple("RememberExecutedStmt", "transform inputs outputs")
-ExpectKeyIs = namedtuple("ExpectKeyIs", "key value")
-ExpectKey = namedtuple("ExpectKey", "key")
-ExpectedTemplate = namedtuple("ExpectedTemplate", "predicates")
-InputSpec = namedtuple("InputSpec", ["variable", "json_obj", "for_all", "copy_to"])
-IncludeStatement = namedtuple("IncludeStatement", ["filename"])
-LetStatement = namedtuple("LetStatement", ["name", "value"])
-AddIfMissingStatement = namedtuple("AddIfMissingStatement", "json_obj")
-IfStatement = namedtuple("IfStatement", "condition when_true when_false")
-EvalStatement = namedtuple("EvalStatement", "body")
+@dataclass
+class QueryVariable:
+    name: str
 
+@dataclass
+class RunStmt:
+    exec_profile: str
+    command: str
+    script: str
+
+@dataclass 
+class TypeDefStmt:
+    name: str
+    description: str
+    required: List[str]
+
+@dataclass
+class ExecProfileStmt:
+    name: str
+    properties: Dict[str, Any]
+
+@dataclass
+class RememberExecutedStmt:
+    transform: str
+    inputs: Dict[str, Any]
+    outputs: List[Any]
+
+@dataclass
+class InputSpec:
+    variable: str
+    json_obj: Dict[str, Any]
+    for_all: object
+    copy_to: str
+
+@dataclass
+class IncludeStatement:
+    filename : str
+
+@dataclass
+class LetStatement:
+    name: str
+    value: str
+
+@dataclass
+class AddIfMissingStatement:
+    json_obj: Dict[str, Any]
+
+@dataclass
+class IfStatement:
+    condition: str
+    when_true: List["Statement"]
+    when_false: List["Statement"] 
+
+@dataclass
+class EvalStatement:
+    body: str
 
 class FileRef:
     def __init__(self, filename, copy_to=None):
@@ -35,30 +78,31 @@ class CustomRuleEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, RegEx):
             return {"re_pattern": obj.expression}
+        if dataclasses.is_dataclass(obj):
+            return dataclasses.asdict(obj)
         # Let the base class default method raise the TypeError
         return json.JSONEncoder.default(self, obj)
 
 
-
-
 class Rule:
     resource: Dict[str, float]
+    inputs: List[InputSpec]
 
     def __init__(self, name):
         self.name = name
         self.filename = None
-        self.lineno = None
-        self.inputs = []
+        self.lineno : Optional[int] = None
+        self.inputs  = []
         self.outputs: Optional[Any] = None
-        self.run_stmts = []
+        self.run_stmts : List[RunStmt] = []
         self.executor = "default"
         self.watch_regex = None
         assert self.name != "" and self.name != " "
         self.resources = {"slots": 1.0}
         self.output_expectations = []
         self.publish_location = None
-        self.uses_files = []
         self.cache_key_constructor = []
+        self.uses_files = []
 
     def to_json(self):
         return json.dumps(
@@ -78,34 +122,6 @@ class Rule:
     @property
     def is_publish_rule(self):
         return self.publish_location != None
-
-    def output_matches_expectation(self, key_values):
-        # if outputs were defined, then not checks needed
-        if self.outputs is not None:
-            return True
-
-        for e in self.output_expectations:
-            matched_all = True
-            unchecked_keys = set(key_values.keys())
-            for predicate in e.predicates:
-                if isinstance(predicate, ExpectKey):
-                    if predicate.key not in key_values:
-                        matched_all = False
-                        break
-                else:
-                    assert isinstance(predicate, ExpectKeyIs)
-                    if (
-                        predicate.key not in key_values
-                        or key_values[predicate.key] != predicate.value
-                    ):
-                        matched_all = False
-                        break
-                unchecked_keys.remove(predicate.key)
-
-            if matched_all and len(unchecked_keys) == 0:
-                return True
-
-        return False
 
     def __repr__(self):
         return "<Rule {} inputs={}>".format(self.name, self.inputs)
@@ -210,27 +226,9 @@ class Semantics(object):
         assert isinstance(ast, six.string_types)
         return QueryVariable(ast)
 
-    def output_expected_key_value(self, ast):
-        if isinstance(ast, str):
-            return ExpectKey(ast)
-        else:
-            assert isinstance(ast, list) and len(ast) == 3
-            return ExpectKeyIs(ast[0], ast[2])
-
     def output_expected_def(self, ast):
-        # print("outputs_expected_def", ast)
-        predicates = [ast[1]]
-        for x in ast[2]:
-            predicates.append(x[1])
-        # print("predicates", predicates)
-        return ExpectedTemplate(predicates)
-
-    def outputs_expected_defs(self, ast):
-        expectations = [ast[0]]
-        for x in ast[1]:
-            expectations.append(x[1])
-        return expectations
-
+        raise Exception("unimp")
+    
     def rule(self, ast):
         # raise Exception()
         # print("rule", repr(ast))
@@ -297,6 +295,19 @@ class Semantics(object):
             specs.append(x[1])
         return specs
 
+    def type_def_stmt(self, ast):
+        props = [ast[3][1]] + [x[1] for x in ast[3][2]]
+        description = None
+        required = []
+        for prop, _, value in props:
+            if prop == "description":
+                description = value
+            else:
+                assert prop == "required"
+                required = value
+        
+        return TypeDefStmt(ast[1], description, required)
+
     def var_stmt(self, ast):
         return LetStatement(ast[1], ast[3])
 
@@ -344,6 +355,7 @@ class Semantics(object):
             files.append(x[1])
         return files
 
+Statement = Union[LetStatement, IfStatement, IncludeStatement, TypeDefStmt, Rule]
 
 def parse_str(text, filename=None):
     parser = depfile.depfileParser(parseinfo=False)

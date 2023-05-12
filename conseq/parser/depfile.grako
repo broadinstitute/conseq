@@ -77,30 +77,17 @@ run_statement =
     "run" quoted_string [ "with" quoted_string ]
     ;
 
-output_expected_key_value =
-    quoted_string ":" quoted_string
-    | quoted_string
-    ;
-
-output_expected_def =
-    "{" output_expected_key_value { "," output_expected_key_value }* "}"
-    ;
-
-outputs_expected_defs =
-    output_expected_def { "," output_expected_def }*
-    ;
-
 file_list = quoted_string { "," quoted_string }*
     ;
 
 rule_parameters = ("inputs" ":" input_specs |
     "outputs" ":" output_specs |
-    "outputs-expected" ":" outputs_expected_defs |
+    "outputs-expected" ":" ( identifier {"," identifier} * ) |
     "executor" ":" identifier |
     "watch-regex" ":" quoted_string |
     "publish" ":" quoted_string |
-    "resources" ":" json_obj |
-    "uses" ":" file_list )
+    "resources" ":" json_obj | 
+    "uses" ":" file_list )    
     ;
 
 rule = "rule" name:identifier ":" 
@@ -109,7 +96,8 @@ rule = "rule" name:identifier ":"
     stmts:{ run_statement } *
     ;
 
-add_if_missing = "add-if-missing" json_obj ;
+# allow either keyword
+add_if_missing = { "add-if-missing" | "add-artifact" } json_obj ;
 
 remember_executed_input = "input" quoted_string ":" {json_obj | json_array};
 remember_executed_output = "output" ":" json_obj;
@@ -128,6 +116,10 @@ eval_statement = "eval" quoted_string ;
 
 conditional = "if" condition:conditional_expr ":" true_body:declarations elif_clauses:{ "elif" conditional_expr ":" declarations }* else_clause:[ "else" ":" declarations ] "endif" ;
 
-declarations = { rule | include_stmt | var_stmt | add_if_missing | exec_profile | remember_executed | conditional | eval_statement }+ ;
+type_definition_field = ( "description" ":" quoted_string | "required" ":" json_array ) ;
+type_definition = "{"  type_definition_field {"," type_definition_field}* "}";
+type_def_stmt = "type" identifier "=" type_definition ;
+
+declarations = { rule | include_stmt | var_stmt | add_if_missing | exec_profile | remember_executed | conditional | eval_statement | type_def_stmt }+ ;
 
 all_declarations = [ declarations ] $ ;

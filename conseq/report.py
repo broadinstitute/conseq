@@ -2,7 +2,7 @@ from conseq.config import Rules, read_rules
 import os
 from conseq.dep import open_job_db, Obj, PUBLIC_SPACE
 from collections import namedtuple, defaultdict
-
+import jinja2
 
 def generate_report_cmd(state_dir, dest_dir):
     from .template import create_template_jinja2_env
@@ -30,8 +30,6 @@ def generate_report_cmd(state_dir, dest_dir):
             result.append((name, value))
         return sorted(result)
 
-    import jinja2
-
     def value_cell(value):
         if isinstance(value, dict):
             if "$value" in value:
@@ -57,6 +55,7 @@ def generate_report_cmd(state_dir, dest_dir):
         }
     )
     j = open_job_db(os.path.join(state_dir, "db.sqlite3"))
+    typedefs  = {x.name: x for x in j.get_type_defs()}
 
     objs = j.find_objs(PUBLIC_SPACE, {})
     executions = j.get_all_executions()
@@ -157,6 +156,7 @@ def generate_report_cmd(state_dir, dest_dir):
                 objs_by_type=sorted_objs_by_type,
                 execs_by_name=sorted_execs_by_name,
                 rules_with_size=rules_with_size,
+                typedefs=typedefs
             )
         assert isinstance(content, str)
         fd.write(
