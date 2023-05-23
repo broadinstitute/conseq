@@ -78,8 +78,8 @@ def render_template(jinja2_env, template_text, config, **kwargs):
         SCRIPT_DIR = kwargs["task"]["SCRIPT_DIR"]
 
     def _get_script_dir():
-        if SCRIPT_DIR is None:
-            raise Exception("SCRIPT_DIR not set")
+        # if SCRIPT_DIR is None:
+        #     raise Exception("SCRIPT_DIR not set")
         
         return SCRIPT_DIR
 
