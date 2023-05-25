@@ -15,7 +15,8 @@ or this poster https://drive.google.com/file/d/1FF8ESVbo_LXs4BBfEGAgkbq77ABXyzKu
 
 ### Clone and install the repo
 - clone the repo
-- run `python setup.py develop`
+- install poetry ( https://python-poetry.org/ ) 
+- run `poetry install`
 - verify successful install by running `conseq --help`
 
 ### Obtain AWS keys
