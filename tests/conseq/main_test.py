@@ -1,7 +1,7 @@
-from .main import _parse_rule_filters
+from conseq.main import _parse_rule_filters
 
 # (filename: str) -> Callable[[Sequence[Tuple[str, "Obj"]], str], bool]:
-from .dep import Obj
+from conseq.dep import Obj
 
 
 def mk_obj(**props):

@@ -8,7 +8,7 @@ import pytest
 from conseq import exec_client
 import os
 import subprocess
-from .types import PropsType
+from conseq.types import PropsType
 
 pytestmark = pytest.mark.skipif(
     (os.getenv("AWS_ACCESS_KEY_ID") is None)

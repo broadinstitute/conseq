@@ -1,5 +1,5 @@
 import re
-from ...conseq.exec_client import grep_logs
+from conseq.exec_client import grep_logs
 
 
 def test_grep_logs(tmpdir):
