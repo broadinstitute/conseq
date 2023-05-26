@@ -24,3 +24,6 @@ pyright-ratchet = {git = "https://github.com/pgm/pyright-ratchet.git"}
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+conseq="conseq.main:main"
