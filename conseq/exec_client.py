@@ -928,7 +928,7 @@ def process_inputs_for_remote_exec(
 
     result = {}
     for input in inputs:
-        bound_name, obj_or_list, copy_to = input
+        bound_name, obj_or_list, copy_to = input.name, input.value, input.copy_to
         if isinstance(obj_or_list, list) or isinstance(obj_or_list, tuple):
             list_ = obj_or_list
             result[bound_name] = [resolve(obj_, copy_to) for obj_ in list_]
