@@ -61,11 +61,11 @@ def create_client_for(
         remote_url_root,
         remote_url_root + "/CAS",
         TEST_HELPER_PATH,
-        f"""docker run --rm -e AWS_ACCESS_KEY_ID={os.getenv('AWS_ACCESS_KEY_ID')} 
-           -e AWS_SECRET_ACCESS_KEY={os.getenv('AWS_SECRET_ACCESS_KEY')} 
-           -e GOOGLE_APPLICATION_CREDENTIALS=/etc/googlecreds.json
-           -v {os.getenv('GOOGLE_APPLICATION_CREDENTIALS')}:/etc/googlecreds.json 
-           {conseq_delegate_test_docker_image_name}
+        f"""docker run --rm -e AWS_ACCESS_KEY_ID={os.getenv('AWS_ACCESS_KEY_ID')} \
+           -e AWS_SECRET_ACCESS_KEY={os.getenv('AWS_SECRET_ACCESS_KEY')} \
+           -e GOOGLE_APPLICATION_CREDENTIALS=/etc/googlecreds.json \
+           -v {os.getenv('GOOGLE_APPLICATION_CREDENTIALS')}:/etc/googlecreds.json \
+           {conseq_delegate_test_docker_image_name} \
            {{COMMAND}}""",
         "python",
         AWS_ACCESS_KEY_ID=None,
@@ -107,12 +107,12 @@ def create_async_client_for(
     is_running_pattern = "true"
     terminate_cmd_template = "docker kill {job_id}"
     x_job_id_pattern = "(.*)"
-    run_command_template = f"""docker run -d 
-        -e AWS_ACCESS_KEY_ID={os.getenv('AWS_ACCESS_KEY_ID')}
-        -e AWS_SECRET_ACCESS_KEY={os.getenv('AWS_SECRET_ACCESS_KEY')}
-        -e GOOGLE_APPLICATION_CREDENTIALS=/etc/googlecreds.json 
-        -v {os.getenv('GOOGLE_APPLICATION_CREDENTIALS')}:/etc/googlecreds.json
-        {conseq_delegate_test_docker_image_name}
+    run_command_template = f"""docker run -d \
+        -e AWS_ACCESS_KEY_ID={os.getenv('AWS_ACCESS_KEY_ID')} \
+        -e AWS_SECRET_ACCESS_KEY={os.getenv('AWS_SECRET_ACCESS_KEY')} \
+        -e GOOGLE_APPLICATION_CREDENTIALS=/etc/googlecreds.json \
+        -v {os.getenv('GOOGLE_APPLICATION_CREDENTIALS')}:/etc/googlecreds.json \
+        {conseq_delegate_test_docker_image_name} \
         {{COMMAND}}"""
     AWS_ACCESS_KEY_ID = None
     AWS_SECRET_ACCESS_KEY = None
@@ -154,7 +154,8 @@ def _verify_job_runs(job_dir, c, uid, resolver_state):
         watch_regex=None,
     )
     while True:
-        failure, output = e.get_completion()
+        completion = e.get_completion()
+        failure, output = completion.failure_msg, completion.outputs
         assert failure is None
         if output is not None:
             break

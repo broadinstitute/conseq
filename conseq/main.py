@@ -365,14 +365,14 @@ def add_debugrun(sub):
         config_path = os.path.expanduser(args.config)
         if not os.path.exists(config_path):
             config_path = None
-        commands.debugrun(args.dir, args.file, args.target, {}, config_path )
+        commands.debugrun(args.dir, args.file, args.rule, {}, config_path )
 
     parser = sub.add_parser(
         "debugrun",
-        help="perform query associated with a given target and report what matched (for debugging why rule doesn't run)",
+        help="perform query associated with a given rule and report what matched (for debugging why rule doesn't run)",
     )
     parser.add_argument("file", metavar="FILE", help="the input file to parse")
-    parser.add_argument("target")
+    parser.add_argument("rule", help="the name of the rule to attempt to run")
     parser.set_defaults(func=debugrun)
 
 

@@ -1,5 +1,6 @@
 import pytest
 import os
+from conseq.helper import _parse_remote
 
 pytestmark = pytest.mark.skipif(
     os.getenv("AWS_ACCESS_KEY_ID") is None,
@@ -22,7 +23,6 @@ def test_publish(tmpdir):
         let S3_STAGING_URL="{{ TEST_REMOTE_URL_ROOT }}/staging"
     """
 
-    from .helper import _parse_remote
 
     storage_api, bucket_name, key_prefix = _parse_remote(TEST_REMOTE_URL_ROOT)
     assert storage_api == "s3"

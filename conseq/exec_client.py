@@ -1158,12 +1158,16 @@ class AsyncDelegateExecClient:
         full_command = self.run_command_template.format(
             COMMAND=command, JOB=rel_job_dir
         ).strip()
-        bash_cmd = "exec {full_command} > {stdout_path} 2>&1".format(
-            full_command=full_command, stdout_path=stdout_path
+ 
+        stdout_file_obj = open(stdout_path, "wt")
+        bash_cmd = "exec {full_command}".format(
+            full_command=full_command
         )
         close_fds = True
 
         log.warning("executing: %s", bash_cmd)
+
+        assert_is_single_command(bash_cmd)
 
         # create child in new process group so ctrl-c doesn't kill child process
         returncode = subprocess.call(
@@ -1171,7 +1175,10 @@ class AsyncDelegateExecClient:
             close_fds=close_fds,
             preexec_fn=os.setsid,
             cwd=job_dir,
+            stdout=stdout_file_obj,
+            stderr=subprocess.STDOUT
         )
+        stdout_file_obj.close()
 
         with open(stdout_path, "rt") as fd:
             output = fd.read()
@@ -1284,6 +1291,7 @@ class DelegateExecClient:
             d["label"],
             d["results_path"],
         )
+    
 
     def preprocess_inputs(
         self, resolver: Resolver, inputs: Tuple[BoundInput]
@@ -1395,6 +1403,9 @@ class DelegateExecClient:
         full_command = self.command_template.format(
             COMMAND=command, JOB=rel_job_dir
         ).strip()
+
+        assert_is_single_command(full_command)
+
         if capture_output:
             bash_cmd = "exec {full_command} > {stdout_path} 2> {stderr_path}".format(
                 **locals()
@@ -1415,6 +1426,8 @@ class DelegateExecClient:
             preexec_fn=os.setsid,
             cwd=job_dir,
         )
+
+        # breakpoint()
 
         with open(os.path.join(job_dir, "description.txt"), "w") as fd:
             fd.write(desc_name)
@@ -1484,6 +1497,13 @@ def _log_remote_failure(file_fetch, msg):
                 stdout_path_to_print=stdout_path,
                 stderr_path_to_print=stderr_path,
             )
+
+def assert_is_single_command(command):
+    # A source of confusion is commands which span multiple lines but are missing backslashes
+    # make sure that all newlines have a preceeding "\"
+    for line in command.split("\n")[:-1]:
+        if "\\" != line[:-1]:
+            raise Exception(f"The command {command} would likely not work as expected because it spans multiple lines and is missing \"\\\" at the end of the lines")
 
 
 def assert_has_only_props(

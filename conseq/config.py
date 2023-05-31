@@ -199,14 +199,14 @@ def _eval_rule(dec, rt, hashcache, root_dir, rules):
             filename = os.path.abspath(
                 os.path.join(script_dir, rt(fileref.filename))
             )
-            print(
-                "re-anchoring",
-                fileref.filename,
-                "relative to",
-                script_dir,
-                "->",
-                filename,
-            )
+            # print(
+            #     "re-anchoring",
+            #     fileref.filename,
+            #     "relative to",
+            #     script_dir,
+            #     "->",
+            #     filename,
+            # )
             ref_name = os.path.relpath(filename, root_dir)
             sha256 = hashcache.sha256(filename)
             new_json_obj = {
