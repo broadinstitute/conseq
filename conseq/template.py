@@ -82,8 +82,8 @@ def render_template(jinja2_env, template_text, config, **kwargs):
         SCRIPT_DIR = kwargs["task"]["SCRIPT_DIR"]
 
     def _get_script_dir():
-        if SCRIPT_DIR is None:
-            breakpoint()
+#        if SCRIPT_DIR is None:
+#            breakpoint()
 
         return SCRIPT_DIR
 

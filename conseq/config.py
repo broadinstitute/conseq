@@ -180,67 +180,72 @@ def _eval_stmts(rules, statements, filename, hashcache, eval_context=None):
         else:
             assert isinstance(dec, parser.Rule)
 
-            # rewrite any filerefs
-            inputs = []
-            for input in dec.inputs:
-                if isinstance(input.json_obj, parser.FileRef):
-                    fileref = input.json_obj
-                    assert dec.filename
-                    script_dir = os.path.dirname(dec.filename)
-
-                    filename = os.path.abspath(
-                        os.path.join(script_dir, rt(fileref.filename))
-                    )
-                    print(
-                        "re-anchoring",
-                        fileref.filename,
-                        "relative to",
-                        script_dir,
-                        "->",
-                        filename,
-                    )
-                    ref_name = os.path.relpath(filename, root_dir)
-                    sha256 = hashcache.sha256(filename)
-                    new_json_obj = {
-                        "type": "$fileref",
-                        "name": ref_name,
-                        "filename": {"$filename": filename},
-                        "sha256": sha256,
-                    }
-                    rules.add_if_missing(new_json_obj)
-                    new_query_obj = {"type": "$fileref", "name": ref_name}
-                    # print("rewrite", filename, fileref.copy_to)
-                    input = parser.InputSpec(
-                        input.variable, new_query_obj, input.for_all, fileref.copy_to
-                    )
-                inputs.append(input)
-
-            # filerefs was a first attempt at making it easier to use scripts
-            # attempt #2: uses_files. Process these in a similar way.
-            for filename in dec.uses_files:
-                # create a $fileref which has the destination field set
-                filename = os.path.abspath(rt(filename))
-                sha256 = hashcache.sha256(filename)
-                new_json_obj = {
-                    "type": "$fileref",
-                    "name": filename,
-                    "sha256": sha256,
-                    "filename": {"$filename": filename},
-                    "destination": {"$value": filename},
-                }
-                rules.add_if_missing(new_json_obj)
-
-                # mark this rule as dependant on this fileref
-                new_query_obj = {"type": "$fileref", "name": filename}
-                input = parser.InputSpec(
-                    "$fileref/{}".format(filename), new_query_obj, False, None
-                )
-                inputs.append(input)
+            inputs = _eval_rule(dec, rt, hashcache, root_dir, rules)
 
             dec.inputs = inputs
 
             dec.filename = filename
             rules.set_rule(dec.name, dec)
+
+def _eval_rule(dec, rt, hashcache, root_dir, rules):
+    # rewrite any filerefs
+    inputs = []
+    for input in dec.inputs:
+        if isinstance(input.json_obj, parser.FileRef):
+            fileref = input.json_obj
+            assert dec.filename
+            script_dir = os.path.dirname(dec.filename)
+
+            filename = os.path.abspath(
+                os.path.join(script_dir, rt(fileref.filename))
+            )
+            print(
+                "re-anchoring",
+                fileref.filename,
+                "relative to",
+                script_dir,
+                "->",
+                filename,
+            )
+            ref_name = os.path.relpath(filename, root_dir)
+            sha256 = hashcache.sha256(filename)
+            new_json_obj = {
+                "type": "$fileref",
+                "name": ref_name,
+                "filename": {"$filename": filename},
+                "sha256": sha256,
+            }
+            rules.add_if_missing(new_json_obj)
+            new_query_obj = {"type": "$fileref", "name": ref_name}
+            # print("rewrite", filename, fileref.copy_to)
+            input = parser.InputSpec(
+                input.variable, new_query_obj, input.for_all, fileref.copy_to
+            )
+        inputs.append(input)
+
+    # filerefs was a first attempt at making it easier to use scripts
+    # attempt #2: uses_files. Process these in a similar way.
+    for filename in dec.uses_files:
+        # create a $fileref which has the destination field set
+        filename = os.path.abspath(rt(filename))
+        sha256 = hashcache.sha256(filename)
+        new_json_obj = {
+            "type": "$fileref",
+            "name": filename,
+            "sha256": sha256,
+            "filename": {"$filename": filename},
+            "destination": {"$value": filename},
+        }
+        rules.add_if_missing(new_json_obj)
+
+        # mark this rule as dependant on this fileref
+        new_query_obj = {"type": "$fileref", "name": filename}
+        input = parser.InputSpec(
+            "$fileref/{}".format(filename), new_query_obj, False, None
+        )
+        inputs.append(input)
+    
+    return inputs
 
 
 def _eval_if(rules, if_statement, filename, eval_context, hashcache):
