@@ -1,4 +1,5 @@
+import importlib.metadata
 
-__version__ = "1.28.2"
+__version__ = importlib.metadata.version("conseq")
 
 
