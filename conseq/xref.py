@@ -117,6 +117,9 @@ class DownloadCacheDb:
 
 def open_cache_db(state_dir: str) -> DownloadCacheDb:
     filename = os.path.join(state_dir, "cache.sqlite3")
+    parent_dir = os.path.dirname(filename)
+    if not os.path.exists(parent_dir):
+        os.makedirs(parent_dir)
     needs_create = not os.path.exists(filename)
 
     db = sqlite3.connect(filename)

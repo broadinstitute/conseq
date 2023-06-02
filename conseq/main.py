@@ -7,6 +7,7 @@ import colorlog
 from conseq import commands
 from conseq import depexec
 from conseq.types import Obj
+import os
 
 class RegExpMatch:
     def __init__(self, pattern):
@@ -358,13 +359,9 @@ def add_rules(sub):
 
     parser.set_defaults(func=rules)
 
-import os
-
 def add_debugrun(sub):
     def debugrun(args):
-        config_path = os.path.expanduser(args.config)
-        if not os.path.exists(config_path):
-            config_path = None
+        config_path = _get_config_file_path(args)
         commands.debugrun(args.dir, args.file, args.rule, {}, config_path )
 
     parser = sub.add_parser(
@@ -398,7 +395,7 @@ def add_export(sub):
             exclude_patterns = []
 
         commands.export_cmd(
-            args.dir, args.file, args.config, args.dest, exclude_patterns
+            args.dir, args.file, _get_config_file_path(args), args.dest, exclude_patterns
         )
 
     parser = sub.add_parser(
@@ -515,7 +512,7 @@ def main(args=None):
         default="state",
     )
     parser.add_argument("--verbose", dest="verbose", action="store_true")
-    parser.add_argument("--config", help="Path to initial config", default="~/.conseq")
+    parser.add_argument("--config", help="Path to initial config", default=os.path.expanduser("~/.conseq"))
     parser.set_defaults(func=None)
 
     sub = parser.add_subparsers()
