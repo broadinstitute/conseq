@@ -647,9 +647,7 @@ def main(varg=None):
 
     logging.basicConfig(level=logging.INFO)
 
-    print(args)
-
-    if args.func is None:
+    if getattr(args, "func", None) is None:
         parser.print_help()
     else:
         args.func(args, config)

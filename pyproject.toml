@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "conseq"
-version = "1.28.2"
+version = "1.29.0"
 description = ""
 authors = ["Philip Montgomery <pmontgom@broadinstitute.org>"]
 readme = "README.md"
@@ -27,3 +27,4 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
 conseq="conseq.main:main"
+conseq-helper="conseq.helper:main"
