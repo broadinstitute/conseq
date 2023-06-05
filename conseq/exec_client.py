@@ -1502,8 +1502,8 @@ def assert_is_single_command(command):
     # A source of confusion is commands which span multiple lines but are missing backslashes
     # make sure that all newlines have a preceeding "\"
     for line in command.split("\n")[:-1]:
-        if "\\" != line[:-1]:
-            raise Exception(f"The command {command} would likely not work as expected because it spans multiple lines and is missing \"\\\" at the end of the lines")
+        if len(line) == 0 or line[-1] != "\\":
+            raise Exception(f"The command {command} would likely not work as expected because it spans multiple lines and is missing \"\\\" at the end of the lines. Specifically the line {repr(line)} ends with {repr(line[-1])}")
 
 
 def assert_has_only_props(
