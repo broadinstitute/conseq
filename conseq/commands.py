@@ -65,6 +65,20 @@ def print_history(state_dir):
 
         print("")
 
+def localize_if_necessary(resolver, value):
+    if isinstance(value, dict):
+        assert len(value) == 1
+        if "$file_url" in value:
+            url = value["$file_url"]
+            return resolver.resolve(url), True
+        elif "$value" in value:
+            return value["$value"], False
+        elif "$filename" in value:
+            return value["$filename"], False
+        else:
+            raise Exception(f"unhandled value: {value}")
+    else:
+        return value, False
 
 def localize_cmd(state_dir, space_, predicates, depfile, config_file):
     rules = read_rules(state_dir, depfile, config_file)
@@ -75,10 +89,9 @@ def localize_cmd(state_dir, space_, predicates, depfile, config_file):
     subset = j.find_objs(PUBLIC_SPACE, dict(predicates))
     for obj in subset:
         for k, v in obj.props.items():
-            if isinstance(v, dict) and "$file_url" in v:
-                url = v["$file_url"]
-                r = resolver.resolve(url)
-                log.info("resolved %s to %s", url, r)
+            value, needed_localization = localize_if_necessary(resolver, v)
+            if needed_localization:
+                log.info("resolved %s to %s", v, value)
 
 
 def _print_execution(execution):
@@ -103,7 +116,6 @@ def lsexec(state_dir):
     executions = j.get_all_executions()
     for execution in executions:
         _print_execution(execution)
-
 
 def stage_cmd(export_file, conseq_file, dest_dir):
     from conseq import depexec, exec_client
@@ -495,13 +507,34 @@ def export_cmd(state_dir, depfile, config_file, dest_gs_path, exclude_patterns):
         with open(dest_gs_path, "wt") as fd:
             fd.write(out.getvalue())
 
+from typing import Optional
 
-def debugrun(state_dir, depfile, target, override_vars, config_file):
+def _application_to_dict(resolver, bindings):
+    result = {}
+
+    def _obj_to_dict(obj):
+        result = {}
+        for name, value in obj.props.items():
+            result[name], _ = localize_if_necessary(resolver, value)
+        return result
+
+    for name, objs in bindings:
+        if isinstance(objs, Obj):
+            result[name] = _obj_to_dict(objs)
+        else:
+            result[name] = [_obj_to_dict(obj) for obj in objs]
+
+    return result                
+
+
+def debugrun(state_dir, depfile, target, override_vars, config_file : Optional[str], save_inputs_filename: Optional[str]):
     db_path = os.path.join(state_dir, "db.sqlite3")
     print("opening", db_path)
     j = dep.open_job_db(db_path)
 
     rules = read_rules(state_dir, depfile, config_file)
+
+    resolver = xref.Resolver(state_dir, rules.vars)
 
     for var, value in override_vars.items():
         rules.set_var(var, value)
@@ -518,6 +551,20 @@ def debugrun(state_dir, depfile, target, override_vars, config_file):
     applications = j.query_template(dep.Template(queries, predicates, rule.name))
     log.info("{} matches for entire rule".format(len(applications)))
 
+    if save_inputs_filename:
+        index = 0
+        for space, bindings, rule_name in applications:
+            index += 1
+            assert space == PUBLIC_SPACE # space doesn't actually get used anymore
+            inputs = _application_to_dict(resolver, bindings)
+            if len(applications) == 1:
+                output_filename = save_inputs_filename
+            else:
+                output_filename = f"{save_inputs_filename}.{index}"
+            log.info(f"Writing inputs for {rule_name} to {output_filename}")
+            with open(output_filename, "wt") as fd:
+                fd.write(json.dumps(inputs, indent=2))
+    
 
 def gc(state_dir):
     db_path = os.path.join(state_dir, "db.sqlite3")

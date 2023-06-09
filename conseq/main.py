@@ -362,7 +362,7 @@ def add_rules(sub):
 def add_debugrun(sub):
     def debugrun(args):
         config_path = _get_config_file_path(args)
-        commands.debugrun(args.dir, args.file, args.rule, {}, config_path )
+        commands.debugrun(args.dir, args.file, args.rule, {}, config_path, args.save_inputs_filename )
 
     parser = sub.add_parser(
         "debugrun",
@@ -370,6 +370,7 @@ def add_debugrun(sub):
     )
     parser.add_argument("file", metavar="FILE", help="the input file to parse")
     parser.add_argument("rule", help="the name of the rule to attempt to run")
+    parser.add_argument("--save-inputs", dest="save_inputs_filename", help="If specified write out the inputs dictionary to the given filename")
     parser.set_defaults(func=debugrun)
 
 

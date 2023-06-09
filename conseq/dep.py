@@ -1059,7 +1059,6 @@ class Jobs:
                 if template.is_interested_in(obj):
                     log.info("Need to refresh %s on next pass", template.transform)
                     self.pending_rules_to_evaluate.add(template.transform)
-                    # new_rules.extend(template.create_rules(self.objects))
 
         for space, inputs, transform in new_rules:
             self._add_rule(space, inputs, transform)
@@ -1070,7 +1069,6 @@ class Jobs:
             for template in self.rule_templates:
                 if template.is_interested_in(obj):
                     self.pending_rules_to_evaluate.add(template.transform)
-                    # new_rules.extend(template.create_rules(self.objects))
 
         for space, inputs, transform in new_rules:
             self._add_rule(space, inputs, transform)

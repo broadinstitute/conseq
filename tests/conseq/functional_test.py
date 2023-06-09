@@ -572,6 +572,32 @@ def test_forget(tmpdir):
     assert was_run("a2")
 
 
+def test_debugrun(tmpdir):
+    config = """
+        add-if-missing {"type": "x", "value": "y"}
+        add-if-missing {"type": "element", "value": "1"}
+        rule sample_rule:
+            inputs: single={"type": "x"}, list=all {"type": "element"}
+            outputs: {"type":"out"}
+    """
+    config_file = str(tmpdir.join("t.conseq"))
+    inputs_dest = tmpdir.join("inputs.json")
+    with open(config_file, "wt") as fd:
+        fd.write(config)
+    state_dir = str(tmpdir.join("state"))
+    commands = [
+        ["--dir", state_dir, "run", config_file],
+        ["--dir", state_dir, "debugrun", config_file, "sample_rule", "--save-inputs", str(inputs_dest)]]
+    from conseq.main import main
+
+    for command in commands:
+        print("running: {}".format(command))
+        main(command)
+    
+    import json
+    written_inputs = json.loads(inputs_dest.read())
+    assert written_inputs == {"single": {"type": "x", "value": "y", '$manually-added': 'true'}, "list":[{"type": "element", "value": "1", '$manually-added': 'true'}]}
+
 def test_commands(tmpdir):
     # don't actually test any of the functionality of these commands, only that they execute error free
     # to catch trivial mistakes in setting up parameter passing to these commands
