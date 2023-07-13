@@ -117,7 +117,7 @@ def lsexec(state_dir):
     for execution in executions:
         _print_execution(execution)
 
-def stage_cmd(export_file, conseq_file, dest_dir):
+def stage_cmd(export_file, conseq_file, output_script):
     from conseq import depexec, exec_client
     import tempfile
 
@@ -127,7 +127,7 @@ def stage_cmd(export_file, conseq_file, dest_dir):
         db_path = os.path.join(tmpdir, "db.sqlite3")
         j = dep.open_job_db(db_path)
 
-        export_contents = read_rules(dest_dir, export_file, config_file=None)
+        export_contents = read_rules(tmpdir, export_file, config_file=None)
 
         # process add-if-missing statements
         depexec.reconcile_db(
@@ -146,8 +146,20 @@ def stage_cmd(export_file, conseq_file, dest_dir):
 
         # now try to apply the rules in the conseq file provided to find input artifacts
 
-        rules = read_rules(dest_dir, conseq_file, config_file=None)
-        resolver = xref.Resolver(dest_dir, rules.vars)
+        rules = read_rules(tmpdir, conseq_file, config_file=None)
+        # resolver = xref.Resolver(tmpdir, rules.vars)
+
+        # process add-if-missing statements in the rule file
+        depexec.reconcile_db(
+            j,
+            rules.jinja2_env,
+            rules.get_rule_specifications(),
+            rules.objs,
+            rules.vars,
+            rules.types.values(),
+            force=False,
+            print_missing_objs=False
+        )
 
         applications = []
         from collections import Counter
@@ -190,10 +202,10 @@ def stage_cmd(export_file, conseq_file, dest_dir):
             obj_ids = j.find_rule_output_ids(transform)
             downstream_object_ids.update(obj_ids)
 
-        executor_names = set()
         for transform in rules.rule_by_name.keys():
             rule = rules.get_rule(transform)
-            executor_names.add(rule.executor)
+            if rule.executor not in rules.exec_clients:
+                print(f"Warning: {rule.name} uses execution profile {rule.executor} which does not appear in this file. You may need to manually add this.")
             assert not rule.is_publish_rule, "Publish rules are not allowed"
 
         # these are the artifacts that we want to add to the conseq file
@@ -206,19 +218,20 @@ def stage_cmd(export_file, conseq_file, dest_dir):
         from .types import InputsType
 
         for artifact in j.get_objs_by_ids(starting_artifact_ids):
-            tmp_bindings: InputsType = [("temp", artifact)]
+            # tmp_bindings: InputsType = [("temp", artifact)]
             # localize paths that will be used in scripts
-            exec_client.preprocess_xref_inputs(j, resolver, tmp_bindings)
+            # exec_client.preprocess_xref_inputs(j, resolver, tmp_bindings)
+
             # this could be a problem. Is client always going to be a local client? (Is that what we even want?)
             # client = rules.get_client(rule.executor)
-            client = exec_client.LocalExecClient({})
-            from .exec_client import BoundInput
+            # client = exec_client.LocalExecClient({})
+            # from .exec_client import BoundInput
 
-            inputs, resolver_state = client.preprocess_inputs(
-                resolver, [BoundInput("tmp", artifact, None)]
-            )
-
-            artifact_dict = dict(inputs["tmp"])
+            # inputs, resolver_state = client.preprocess_inputs(
+            #     resolver, [BoundInput("tmp", artifact, None)]
+            # )
+            
+            artifact_dict = dict(artifact.props)
             if artifact_dict.get("type") == "$fileref":
                 # skip these because they should be specified on the rule itself
                 pass
@@ -229,25 +242,16 @@ def stage_cmd(export_file, conseq_file, dest_dir):
             # print("artifact", artifact_dict)
             inputs_to_hardcode.append(artifact_dict)
 
-        output_script = os.path.join(dest_dir, "test.conseq")
         _write_test_script(
-            conseq_file, inputs_to_hardcode, executor_names, output_script
+            conseq_file, inputs_to_hardcode, output_script
         )
 
 
-def _write_test_script(conseq_file, inputs_to_hardcode, executor_names, output_script):
+def _write_test_script(conseq_file, inputs_to_hardcode, output_script):
     with open(output_script, "wt") as fd:
         for artifact in inputs_to_hardcode:
             fd.write(f"add-if-missing {json.dumps(artifact, indent=2)}\n\n")
 
-        for executor_name in executor_names:
-            if executor_name == "default":
-                continue
-            fd.write(f"exec-profile {executor_name} {{\n")
-            fd.write('  "type": "local", "resources": {"slots": "10"} }\n\n')
-            print(
-                f"Warning: defining an executor profile {executor_name} as local execution"
-            )
         fd.write(
             f'include "{os.path.relpath(conseq_file, os.path.dirname(output_script))}"\n'
         )

@@ -484,10 +484,10 @@ def add_stage(sub):
     parser.add_argument(
         "rule_file", help="File containing conseq rules to create test harness for"
     )
-    parser.add_argument("dest_dir", help="directory to write test harness to")
+    parser.add_argument("output_script", help="path to write test harness to")
 
     def stage(args):
-        commands.stage_cmd(args.export_file, args.rule_file, args.dest_dir)
+        commands.stage_cmd(args.export_file, args.rule_file, args.output_script)
 
     parser.set_defaults(func=stage)
 

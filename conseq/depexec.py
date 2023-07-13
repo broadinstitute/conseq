@@ -1027,6 +1027,7 @@ def reconcile_db(
     vars: PropsType,
     type_defs: List[TypeDefStmt],
     force: Optional[bool] = None,
+    print_missing_objs: bool = True
 ) -> None:
     # rewrite the objects, expanding templates and marking this as one which was manually added from the config file
     update_rule_specs_in_db = True
@@ -1043,17 +1044,21 @@ def reconcile_db(
     missing_objs = set(invalidated_objs).union(missing_objs)
 
     if len(missing_objs) > 0:
-        print(
-            "The following objects were not specified in the conseq file or were the result of a rule which has changed:"
-        )
-        for obj in missing_objs:
-            print("   {}".format(obj))
-        if force is None:
-            force = ui.ask_y_n("do you wish to remove them?")
+        if print_missing_objs:
+            print(
+                "The following objects were not specified in the conseq file or were the result of a rule which has changed:"
+            )
+            for obj in missing_objs:
+                print("   {}".format(obj))
+            if force is None:
+                force = ui.ask_y_n("do you wish to remove them?")
+
+        assert force is not None
         if force:
             remove_obj_and_children(j, [o.id for o in missing_objs], False)
         else:
             update_rule_specs_in_db = False
+
 
     for obj in new_objs:
         add_artifact_if_missing(j, obj)
