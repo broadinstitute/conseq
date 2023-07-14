@@ -17,6 +17,7 @@ from conseq.depexec import (
 from conseq.util import indent_str
 import re
 from conseq.template import create_jinja2_env
+from conseq.config import get_staging_url
 
 log = logging.getLogger(__name__)
 
@@ -402,14 +403,12 @@ def export_cmd(state_dir, depfile, config_file, dest_gs_path, exclude_patterns):
         nonlocal cas_remote
 
         if cas_remote is None:
-            required = ["S3_STAGING_URL"]
-            for name in required:
-                if name not in vars:
-                    raise Exception(
-                        "When pushing to S3, need the following configuration"
-                    )
+            if "S3_STAGING_URL" not in vars and "STAGING_URL" not in vars:
+                raise Exception(
+                    "When pushing to cloud, need the following configuration STAGING_URL"
+                )
 
-            cas_remote = helper.new_remote(vars["S3_STAGING_URL"], ".")
+            cas_remote = helper.new_remote(get_staging_url(vars), ".")
         return cas_remote
 
     def process_value(value):

@@ -21,6 +21,7 @@ from .types import PropsType
 import tempfile
 import signal
 from conseq.template import MissingTemplateVar, render_template
+from conseq.config import get_staging_url
 
 
 class TemplatePartial:
@@ -958,12 +959,6 @@ def process_inputs_for_remote_exec(
     return files_to_download, files_to_upload_and_download, result
 
 
-def get_staging_url(config):
-    if "STAGING_URL" in config:
-        return config["STAGING_URL"]
-    return config["S3_STAGING_URL"]
-
-
 def create_publish_exec_client(config):
     return PublishExecClient(get_staging_url(config))
 
@@ -1527,8 +1522,8 @@ def create_client(name, config, properties, jinja2_env):
             resources,
             properties["label"],
             config["WORKING_DIR"],
-            config["S3_STAGING_URL"] + "/exec-results/" + config["EXECUTION_ID"],
-            config["S3_STAGING_URL"],
+            get_staging_url(config) + "/exec-results/" + config["EXECUTION_ID"],
+            get_staging_url(config),
             properties["HELPER_PATH"],
             _make_template(properties["COMMAND_TEMPLATE"]),
             config.get("PYTHON_PATH", "python"),
@@ -1559,8 +1554,8 @@ def create_client(name, config, properties, jinja2_env):
             resources,
             properties["label"],
             config["WORKING_DIR"],
-            config["S3_STAGING_URL"] + "/exec-results/" + config["EXECUTION_ID"],
-            config["S3_STAGING_URL"],
+            get_staging_url(config) + "/exec-results/" + config["EXECUTION_ID"],
+            get_staging_url(config),
             properties["HELPER_PATH"],
             _make_template(properties["COMMAND_TEMPLATE"]),
             config.get("PYTHON_PATH", "python"),

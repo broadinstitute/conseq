@@ -27,7 +27,7 @@ def http_fetch(url, dest):
 def s3_fetch(
     bucket_name: str, path: str, destination_filename: str, config: PropsType
 ) -> None:
-    c = S3Connection(config["AWS_ACCESS_KEY_ID"], config["AWS_SECRET_ACCESS_KEY"])
+    c = S3Connection()
     bucket = c.get_bucket(bucket_name)
     k = bucket.get_key(path)
     res_download_handler = ResumableDownloadHandler(num_retries=5)

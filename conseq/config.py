@@ -300,3 +300,9 @@ def read_rules(
     _initial_config.update(initial_config)
     rules = read_deps(depfile, hashcache, jinja2_env, initial_vars=_initial_config)
     return rules
+
+
+def get_staging_url(config):
+    if "STAGING_URL" in config:
+        return config["STAGING_URL"]
+    return config["S3_STAGING_URL"]  # check this for backwards compatability
