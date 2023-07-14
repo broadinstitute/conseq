@@ -3,7 +3,6 @@ __init__.py: error: Argument of type "None" cannot be assigned to parameter "cop
 __init__.py: error: Argument of type "Unknown | IfStatement | list[Unknown]" cannot be assigned to parameter "when_false" of type "List[Statement]" in function "__init__"
 __init__.py: error: Argument of type "Unknown | None" cannot be assigned to parameter "description" of type "str" in function "__init__"
 __init__.py: error: Argument of type "Unknown | None" cannot be assigned to parameter "script" of type "str" in function "__init__"
-__init__.py: error: Cannot assign member "filename" for type "Rule"
 __init__.py: error: Cannot assign member "options" for type "Rule"
 __init__.py: error: Cannot assign member "watch_regex" for type "Rule"
 commands.py: error: Argument of type "dict_values[Unknown, Unknown]" cannot be assigned to parameter "type_defs" of type "List[TypeDefStmt]" in function "reconcile_db"
@@ -32,7 +31,6 @@ depexec_test.py: error: Argument of type "list[MockJob]" cannot be assigned to p
 depexec_test.py: error: Cannot access member "del_artifacts" for type "Jobs"
 depexec_test.py: error: Cannot access member "new_artifacts" for type "Jobs"
 depfile.py: error: Argument of type "Unknown | None" cannot be assigned to parameter "ignorecase" of type "bool" in function "__init__"
-exec_client.py: error: "BoundInput" is not iterable
 exec_client.py: error: Argument of type "Dict[Unknown, Unknown]" cannot be assigned to parameter "obj_" of type "Obj" in function "resolve"
 exec_client.py: error: Argument of type "ExternProc" cannot be assigned to parameter "proc" of type "PidProcStub | Popen[Unknown]" in function "__init__"
 exec_client.py: error: Argument of type "List[Any] | None" cannot be assigned to parameter "outputs" of type "List[Any]" in function "local_exec_script"
@@ -61,7 +59,5 @@ helper.py: error: Cannot assign member "_MAX_MULTIPART_SIZE" for type "Blob"
 main.py: error: Argument of type "Unknown | None" cannot be assigned to parameter "config_file" of type "str" in function "main"
 main_test.py: error: Argument of type "None" cannot be assigned to parameter "id" of type "int" in function "__init__"
 parse_test.py: error: Argument of type "None" cannot be assigned to parameter "description" of type "str" in function "__init__"
-publish_test.py: error: Import ".helper" could not be resolved (reportMissingImports)
-report_tests.py: error: "run_graph_to_dot" is unknown import symbol (reportGeneralTypeIssues)
 template.py: error: Argument of type "(template_name: Unknown) -> bool" cannot be assigned to parameter "autoescape" of type "bool" in function "__init__"
 xref.py: error: "Never" is not iterable (reportGeneralTypeIssues)

@@ -306,8 +306,7 @@ def test_file_refs_with_vars(tmpdir):
     eval_stmts(rules, statements, tmpdir)
     a = rules.get_rule("a")
     assert a is not None
-    print(a.inputs)
-    a.inputs[0].json_obj["name"] == str(localfile)
+    assert os.path.abspath(a.inputs[0].json_obj["name"]) == str(localfile)
 
 
 def test_relative_file_paths(tmpdir):
@@ -327,7 +326,9 @@ def test_relative_file_paths(tmpdir):
     a = rules.get_rule("a")
     assert a is not None
     print(a.inputs)
-    a.inputs[0].json_obj["name"] == os.path.abspath(sample_rel_path)
+    assert os.path.abspath(a.inputs[0].json_obj["name"]) == os.path.abspath(
+        sample_rel_path
+    )
 
 
 def test_construct_cache_key(tmpdir):
@@ -338,7 +339,9 @@ def test_construct_cache_key(tmpdir):
     '''
     )
     assert len(statements) == 1
-    statements[0].cache_key_constructor == [("python", "print(0)")]
+    assert statements[0].cache_key_constructor == [
+        parser.RunStmt(exec_profile="default", command="python", script="print(0)")
+    ]
 
 
 def test_type_def_no_required():

@@ -3,6 +3,7 @@ import os
 
 from conseq import dep, db
 from conseq import depexec
+from unittest.mock import create_autospec
 
 
 def run_conseq(tmpdir, config, targets=[], assert_clean=True):
@@ -30,6 +31,7 @@ def run_conseq(tmpdir, config, targets=[], assert_clean=True):
         False,
         None,
         remove_unknown_artifacts=True,
+        use_cached_results=True,
     )
     j = dep.open_job_db(db_path)
     return j
@@ -304,10 +306,10 @@ def test_construct_cache_key(tmpdir, monkeypatch):
     blobs = {}
 
     class MockRemote:
-        def __init__(self, remote_url, local_dir, accesskey=None, secretaccesskey=None):
+        def __init__(self):
             print("Invoked!!!!")
-            self.local_dir = local_dir
-            self.remote_url = remote_url
+            # self.local_dir = local_dir
+            # self.remote_url = remote_url
 
         def exists(self, filename):
             print(f"checking {filename}: {filename in blobs}")
@@ -324,7 +326,9 @@ def test_construct_cache_key(tmpdir, monkeypatch):
 
     import conseq.helper
 
-    monkeypatch.setattr(conseq.helper, "Remote", MockRemote)
+    _mock_new_remote = create_autospec(conseq.helper.new_remote)
+    _mock_new_remote.return_value = MockRemote()
+    monkeypatch.setattr(conseq.helper, "new_remote", _mock_new_remote)
 
     prolog = """
     let AWS_ACCESS_KEY_ID="x"
@@ -381,24 +385,16 @@ def test_publish(tmpdir, monkeypatch):
         assert location == "manifest-bongo.json"
         publish_called[0] = True
 
-    class MockRemote:
-        def __init__(self, remote_url, local_dir, accesskey=None, secretaccesskey=None):
-            print("Invoked!!!!")
-            self.local_dir = local_dir
-            self.remote_url = remote_url
-
-        def exists(self, filename):
-            return True
-            # print("XXXXXXXX")
-            # assert filenames == ["testfile"]
-            # return {"testfile": "s3://foo/testfile"}
-
     import conseq.depexec
 
     monkeypatch.setattr(conseq.depexec, "publish_manifest", mock_publish_manifest)
     import conseq.helper
 
-    monkeypatch.setattr(conseq.helper, "Remote", MockRemote)
+    _mock_new_remote = create_autospec(conseq.helper.new_remote)
+    _mock_remote = _mock_new_remote("", "")
+    _mock_remote.exists.return_value = True
+    _mock_remote.remote_url = "s3://remote"
+    monkeypatch.setattr(conseq.helper, "new_remote", _mock_new_remote)
 
     j = run_conseq(
         tmpdir,

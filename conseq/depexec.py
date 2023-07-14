@@ -234,6 +234,7 @@ def execute(
     capture_output: bool,
     resolver_state: ResolveState,
     client: Union[DelegateExecClient, LocalExecClient],
+    use_cached_results: bool,
 ) -> Union[ClientExecution, exec_client.ExecutionStub]:
     try:
         prologue = render_template(jinja2_env, config["PROLOGUE"], config)
@@ -282,6 +283,7 @@ def execute(
                     transform=name,
                     job_dir=job_dir,
                 )
+
             cache_key_path = os.path.join(job_dir, CACHE_KEY_FILENAME)
             if not os.path.exists(cache_key_path):
                 return exec_client.FailedExecutionStub(
@@ -292,18 +294,19 @@ def execute(
                     transform=name,
                     job_dir=job_dir,
                 )
-            key_hash, key_value = _read_cache_key(cache_key_path)
 
-            key_path, prior_cached_results = _get_cached_result(key_hash, config)
-            if prior_cached_results is not None:
-                log.warning(
-                    "Found existing cached results (key=%s at %s), skipping run and using previous results",
-                    key_path,
-                    key_value,
-                )
-                return exec_client.SuccessfulExecutionStub(
-                    id, prior_cached_results, transform=name
-                )
+            key_hash, key_value = _read_cache_key(cache_key_path)
+            if use_cached_results:
+                key_path, prior_cached_results = _get_cached_result(key_hash, config)
+                if prior_cached_results is not None:
+                    log.warning(
+                        "Found existing cached results (key=%s at %s), skipping run and using previous results",
+                        key_path,
+                        key_value,
+                    )
+                    return exec_client.SuccessfulExecutionStub(
+                        id, prior_cached_results, transform=name
+                    )
 
         if len(rule.run_stmts) > 0:
             run_stmts = generate_run_stmts(
@@ -506,7 +509,8 @@ def main_loop(
     req_confirm: bool,
     maxfail: int,
     maxstart: None,
-    properties_to_add=[],
+    use_cached_results: bool,
+    properties_to_add,
 ):
     from conseq.exec_client import create_publish_exec_client
 
@@ -687,6 +691,7 @@ def main_loop(
                     capture_output,
                     resolver_state,
                     client,
+                    use_cached_results,
                 )
                 executing.append(e)
                 j.update_exec_xref(e.id, e.get_external_id(), job_dir)
@@ -736,7 +741,7 @@ def main_loop(
                 elif completion is not None:
                     amended_outputs = _amend_outputs(completion, properties_to_add)
 
-                    if completeion_result.cache_key:
+                    if completeion_result.cache_key and use_cached_results:
                         _store_cached_result(
                             json.loads(completeion_result.cache_key),
                             amended_outputs,
@@ -1067,6 +1072,7 @@ def main(
     remove_unknown_artifacts=None,
     properties_to_add=[],
     rule_filter=None,
+    use_cached_results: bool = True,
 ) -> int:
     assert max_concurrent_executions > 0
 
@@ -1177,6 +1183,7 @@ def main(
             req_confirm,
             maxfail,
             maxstart,
+            use_cached_results,
             properties_to_add=properties_to_add,
         )
     except FatalUserError as e:
