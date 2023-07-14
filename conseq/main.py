@@ -8,6 +8,7 @@ from conseq import commands
 from conseq import depexec
 from conseq.types import Obj
 import os
+import pdb
 
 class RegExpMatch:
     def __init__(self, pattern):
@@ -512,6 +513,7 @@ def main(args=None):
         help="The directory to write working versions of files to",
         default="state",
     )
+    parser.add_argument("--pdb", action="store_true", help="Run inside of pdb so that the debugger is started on exception")
     parser.add_argument("--verbose", dest="verbose", action="store_true")
     parser.add_argument("--config", help="Path to initial config", default=os.path.expanduser("~/.conseq"))
     parser.set_defaults(func=None)
@@ -549,6 +551,12 @@ def main(args=None):
     root.setLevel(level)
 
     if args.func != None:
-        return args.func(args)
+        if args.pdb:
+            try:
+                return args.func(args)
+            except:
+                pdb.post_mortem()
+        else:
+            return args.func(args)
     else:
         parser.print_help()
