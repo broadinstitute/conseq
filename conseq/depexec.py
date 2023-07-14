@@ -129,10 +129,8 @@ def format_inputs(inputs: Dict[str, Dict[str, str]]) -> str:
 def publish_manifest(location, dictionary, config):
     from conseq import helper
 
-    accesskey = config["AWS_ACCESS_KEY_ID"]
-    secretaccesskey = config["AWS_SECRET_ACCESS_KEY"]
     remote = helper.new_remote(
-        os.path.dirname(location), ".", accesskey, secretaccesskey
+        os.path.dirname(location), "."
     )
     remote.upload_str(os.path.basename(location), json.dumps(dictionary, indent=2))
 
@@ -172,9 +170,7 @@ def _get_cached_result(key_hash: str, config: Dict[str, Any]):
 
     remote = helper.new_remote(
         config["CLOUD_STORAGE_CACHE_ROOT"],
-        None,
-        config.get("AWS_ACCESS_KEY_ID"),
-        config.get("AWS_SECRET_ACCESS_KEY"),
+        None
     )
     results_path = os.path.join(
         config["CLOUD_STORAGE_CACHE_ROOT"], key_hash, "results.json"
@@ -216,9 +212,7 @@ def _store_cached_result(
 
     remote = helper.new_remote(
         config["CLOUD_STORAGE_CACHE_ROOT"],
-        None,
-        config.get("AWS_ACCESS_KEY_ID"),
-        config.get("AWS_SECRET_ACCESS_KEY"),
+        None
     )
 
     cache_dir, canonical_key = _compute_cache_key_path(cache_key, config)

@@ -452,7 +452,7 @@ class depfileParser(Parser):
 
     @tatsumasu()
     def _exec_profile_(self):  # noqa
-        self._token('exec-profile')
+        self._token('executor-template')
         self._identifier_()
         self._json_obj_()
 

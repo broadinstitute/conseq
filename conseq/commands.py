@@ -396,7 +396,7 @@ def export_cmd(state_dir, depfile, config_file, dest_gs_path, exclude_patterns):
         nonlocal cas_remote
 
         if cas_remote is None:
-            required = ["S3_STAGING_URL", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
+            required = ["S3_STAGING_URL"]
             for name in required:
                 if name not in vars:
                     raise Exception(
@@ -405,9 +405,7 @@ def export_cmd(state_dir, depfile, config_file, dest_gs_path, exclude_patterns):
 
             cas_remote = helper.new_remote(
                 vars["S3_STAGING_URL"],
-                ".",
-                vars["AWS_ACCESS_KEY_ID"],
-                vars["AWS_SECRET_ACCESS_KEY"],
+                "."
             )
         return cas_remote
 

@@ -108,8 +108,8 @@ class GSStorageConnection(StorageConnection):
 
 
 class S3StorageConnection(StorageConnection):
-    def __init__(self, accesskey, secretaccesskey):
-        self.c = S3Connection(accesskey, secretaccesskey)
+    def __init__(self):
+        self.c = S3Connection()
 
     def exists(self, bucket_name: str, key: str) -> bool:
         return self.c.get_bucket(bucket_name, validate=False).get_key(key) is not None
@@ -153,8 +153,8 @@ class S3StorageConnection(StorageConnection):
             k.set_metadata("sha256", sha256)
 
 
-def new_remote(remote_url, local_dir, accesskey, secretaccesskey):
-    sc = S3StorageConnection(accesskey, secretaccesskey)
+def new_remote(remote_url, local_dir):
+    sc = S3StorageConnection()
     gs = GSStorageConnection()
     return Remote(remote_url, local_dir, {"s3": sc, "gs": gs})
 
@@ -468,15 +468,6 @@ def pull(
             stage_dir=stage_dir,
         )
 
-def read_config(filename):
-    config = {}
-    with open(filename, "rt") as fd:
-        for line in fd.readlines():
-            m = re.match('\\s*(\\S+)\\s*=\\s*"([^"]+)"', line)
-            assert m != None
-            config[m.group(1)] = m.group(2)
-    return config
-
 
 def publish_results(results_json_file, remote, published_files_root, results_json_dest):
     if not os.path.exists(results_json_file):
@@ -526,18 +517,14 @@ def _parse_mapping_str(file_mapping):
 
 
 
-def exec_cmd(args, config):
+def exec_cmd(args):
     remote = new_remote(
         args.remote_url,
-        args.local_dir,
-        config["AWS_ACCESS_KEY_ID"],
-        config["AWS_SECRET_ACCESS_KEY"],
+        args.local_dir
     )
     cas_remote = new_remote(
         args.cas_remote_url,
-        args.local_dir,
-        config["AWS_ACCESS_KEY_ID"],
-        config["AWS_SECRET_ACCESS_KEY"],
+        args.local_dir
     )
 
     pull_map = []
@@ -607,7 +594,6 @@ def exec_command_with_capture(
 
 def main(varg=None):
     parser = argparse.ArgumentParser("push or pull files from cloud storage")
-    parser.add_argument("--config", "-c", help="path to config file")
 
     subparsers = parser.add_subparsers()
 
@@ -638,19 +624,12 @@ def main(varg=None):
     log.info("helper.main parameters: %s", varg)
 
     args = parser.parse_args(varg)
-    config = {}
-    if args.config is not None:
-        config = read_config(args.config)
-    else:
-        config["AWS_ACCESS_KEY_ID"] = os.getenv("AWS_ACCESS_KEY_ID")
-        config["AWS_SECRET_ACCESS_KEY"] = os.getenv("AWS_SECRET_ACCESS_KEY")
-
     logging.basicConfig(level=logging.INFO)
 
     if getattr(args, "func", None) is None:
         parser.print_help()
     else:
-        args.func(args, config)
+        args.func(args)
 
 
 if __name__ == "__main__":

@@ -953,12 +953,14 @@ def process_inputs_for_remote_exec(
     log.debug("files_to_download: %s", files_to_download)
     return files_to_download, files_to_upload_and_download, result
 
+def get_staging_url(config):
+    if "STAGING_URL" in config:
+        return config["STAGING_URL"]
+    return config["S3_STAGING_URL"]
 
 def create_publish_exec_client(config):
     return PublishExecClient(
-        config["S3_STAGING_URL"],
-        config["AWS_ACCESS_KEY_ID"],
-        config["AWS_SECRET_ACCESS_KEY"],
+        get_staging_url(config)
     )
 
 
@@ -979,9 +981,9 @@ def load_existing_results(id, remote, results_path, transform):
 
 
 class PublishExecClient:
-    def __init__(self, cas_remote_url, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY):
+    def __init__(self, cas_remote_url):
         self.cas_remote = helper.new_remote(
-            cas_remote_url, ".", AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+            cas_remote_url, "."
         )
 
     def preprocess_inputs(self, resolver, inputs):
@@ -1000,8 +1002,6 @@ class AsyncDelegateExecClient:
         helper_path,
         run_command_template,
         python_path,
-        AWS_ACCESS_KEY_ID,
-        AWS_SECRET_ACCESS_KEY,
         check_cmd_template,
         is_running_pattern,
         terminate_cmd_template,
@@ -1017,8 +1017,6 @@ class AsyncDelegateExecClient:
         self.remote_url = remote_url
         self.run_command_template = run_command_template
         self.cas_remote_url = cas_remote_url
-        self.AWS_ACCESS_KEY_ID = AWS_ACCESS_KEY_ID
-        self.AWS_SECRET_ACCESS_KEY = AWS_SECRET_ACCESS_KEY
         self.python_path = python_path
         self.label = label
         self.check_cmd_template = check_cmd_template
@@ -1046,8 +1044,6 @@ class AsyncDelegateExecClient:
         remote = helper.new_remote(
             d["remote_url"],
             d["local_job_dir"],
-            self.AWS_ACCESS_KEY_ID,
-            self.AWS_SECRET_ACCESS_KEY,
         )
         file_fetcher = self._mk_file_fetcher(remote)
         proc = ExternProc(
@@ -1127,14 +1123,10 @@ class AsyncDelegateExecClient:
         remote = helper.new_remote(
             remote_url,
             local_job_dir,
-            self.AWS_ACCESS_KEY_ID,
-            self.AWS_SECRET_ACCESS_KEY,
         )
         cas_remote = helper.new_remote(
             self.cas_remote_url,
             local_job_dir,
-            self.AWS_ACCESS_KEY_ID,
-            self.AWS_SECRET_ACCESS_KEY,
         )
         for _, dest in source_and_dest:
             assert dest[0] != "/"
@@ -1269,8 +1261,6 @@ class DelegateExecClient:
         helper_path: str,
         command_template: TemplatePartial,
         python_path: str,
-        AWS_ACCESS_KEY_ID: Optional[str],
-        AWS_SECRET_ACCESS_KEY: Optional[str],
         recycle_past_runs: bool,
     ) -> None:
         self.resources = resources
@@ -1279,8 +1269,6 @@ class DelegateExecClient:
         self.remote_url = remote_url
         self.command_template = command_template
         self.cas_remote_url = cas_remote_url
-        self.AWS_ACCESS_KEY_ID = AWS_ACCESS_KEY_ID
-        self.AWS_SECRET_ACCESS_KEY = AWS_SECRET_ACCESS_KEY
         self.python_path = python_path
         self.label = label
         self.recycle_past_runs = recycle_past_runs
@@ -1291,8 +1279,6 @@ class DelegateExecClient:
         remote = helper.new_remote(
             d["remote_url"],
             d["local_job_dir"],
-            self.AWS_ACCESS_KEY_ID,
-            self.AWS_SECRET_ACCESS_KEY,
         )
         file_fetcher = self._mk_file_fetcher(remote)
         return DelegateExecution(
@@ -1372,14 +1358,10 @@ class DelegateExecClient:
         remote = helper.new_remote(
             remote_url,
             local_job_dir,
-            self.AWS_ACCESS_KEY_ID,
-            self.AWS_SECRET_ACCESS_KEY,
         )
         cas_remote = helper.new_remote(
             self.cas_remote_url,
             local_job_dir,
-            self.AWS_ACCESS_KEY_ID,
-            self.AWS_SECRET_ACCESS_KEY,
         )
         for _, dest in source_and_dest:
             assert dest[0] != "/"
@@ -1566,8 +1548,6 @@ def create_client(name, config, properties, jinja2_env):
             properties["HELPER_PATH"],
             _make_template(properties["COMMAND_TEMPLATE"]),
             config.get("PYTHON_PATH", "python"),
-            config["AWS_ACCESS_KEY_ID"],
-            config["AWS_SECRET_ACCESS_KEY"],
             reuse_past_runs,
         )
     elif type == "async-delegate":
@@ -1600,8 +1580,6 @@ def create_client(name, config, properties, jinja2_env):
             properties["HELPER_PATH"],
             _make_template(properties["COMMAND_TEMPLATE"]),
             config.get("PYTHON_PATH", "python"),
-            config["AWS_ACCESS_KEY_ID"],
-            config["AWS_SECRET_ACCESS_KEY"],
             _make_template(properties["CHECK_COMMAND_TEMPLATE"]),
             properties["IS_RUNNING_PATTERN"],
             _make_template(properties["TERMINATE_CMD_TEMPLATE"]),
@@ -1609,4 +1587,4 @@ def create_client(name, config, properties, jinja2_env):
             reuse_past_runs,
         )
     else:
-        raise Exception("Unrecognized exec-profile 'type': {}".format(type))
+        raise Exception(f"Unrecognized executor type: {type} (expected: 'local', 'delegate' or 'async-delegate')")

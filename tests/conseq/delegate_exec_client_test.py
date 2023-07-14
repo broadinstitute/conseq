@@ -131,8 +131,6 @@ def create_async_client_for(
         -v {os.getenv('GOOGLE_APPLICATION_CREDENTIALS')}:/etc/googlecreds.json \
         {conseq_delegate_test_docker_image_name} \
         {{COMMAND}}"""
-    AWS_ACCESS_KEY_ID = None
-    AWS_SECRET_ACCESS_KEY = None
     c = exec_client.AsyncDelegateExecClient(
         resources,
         "delegate",
@@ -142,8 +140,6 @@ def create_async_client_for(
         helper_path,
         run_command_template,
         "python",
-        AWS_ACCESS_KEY_ID,
-        AWS_SECRET_ACCESS_KEY,
         check_cmd_template,
         is_running_pattern,
         terminate_cmd_template,

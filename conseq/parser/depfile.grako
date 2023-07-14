@@ -104,7 +104,7 @@ remember_executed_input = "input" quoted_string ":" {json_obj | json_array};
 remember_executed_output = "output" ":" json_obj;
 remember_executed = "remember-executed" "transform" ":" quoted_string { remember_executed_input } * { remember_executed_output } * ;
 
-exec_profile = "exec-profile-template" identifier json_obj;
+exec_profile = "executor-template" identifier json_obj;
 
 var_stmt = "let" identifier "=" quoted_string ;
 

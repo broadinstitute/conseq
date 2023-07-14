@@ -69,8 +69,6 @@ def test_delegate_exec_client_commands(
             TEST_HELPER_PATH,
             exec_client.TemplatePartial( jinja2_env, {}, """docker run --rm {{ image_name }} {{COMMAND}}"""),
             "python",
-            AWS_ACCESS_KEY_ID=None,
-            AWS_SECRET_ACCESS_KEY=None,
             recycle_past_runs=False,
         )
 
