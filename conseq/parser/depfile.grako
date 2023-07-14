@@ -83,6 +83,7 @@ file_list = quoted_string { "," quoted_string }*
 rule_parameters = ("inputs" ":" input_specs |
     "outputs" ":" output_specs |
     "outputs-expected" ":" ( identifier {"," identifier} * ) |
+    "executor" ":" identifier json_obj |
     "executor" ":" identifier |
     "watch-regex" ":" quoted_string |
     "publish" ":" quoted_string |
@@ -103,7 +104,7 @@ remember_executed_input = "input" quoted_string ":" {json_obj | json_array};
 remember_executed_output = "output" ":" json_obj;
 remember_executed = "remember-executed" "transform" ":" quoted_string { remember_executed_input } * { remember_executed_output } * ;
 
-exec_profile = "exec-profile" identifier json_obj;
+exec_profile = "exec-profile-template" identifier json_obj;
 
 var_stmt = "let" identifier "=" quoted_string ;
 

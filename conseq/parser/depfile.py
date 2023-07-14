@@ -352,6 +352,11 @@ class depfileParser(Parser):
                     self._token('executor')
                     self._token(':')
                     self._identifier_()
+                    self._json_obj_()
+                with self._option():
+                    self._token('executor')
+                    self._token(':')
+                    self._identifier_()
                 with self._option():
                     self._token('watch-regex')
                     self._token(':')

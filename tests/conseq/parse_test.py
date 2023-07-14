@@ -160,9 +160,17 @@ def test_parse_json():
     )
     assert value == {"a": ["1", "2"]}
 
+from typing import List, Any
+from conseq.template import create_jinja2_env
+from conseq.config import Rules, _eval_stmts
+from conseq.hashcache import HashCache
 
-def test_parse_if():
-    from conseq.config import Rules, _eval_stmts
+def eval_stmts(rules : Rules, statements: List[Any], tmpdir, filename="none"):
+    from conseq.config import _eval_stmts, EvalContext
+    context = EvalContext(rules, filename, HashCache(str(tmpdir.join("hashcache"))), create_jinja2_env())
+    _eval_stmts(statements, context)
+
+def test_parse_if(tmpdir):
 
     rules = Rules()
     # from conseq.parser import IfStatement, LetStatement
@@ -177,15 +185,14 @@ def test_parse_if():
     """,
         "declarations",
     )
-    _eval_stmts(rules, statements, "none", None)
+    eval_stmts(rules, statements, tmpdir)
     assert rules.vars["a"] == "2"
 
     # else:
     #   let x='2'
 
 
-def test_eval_if():
-    from conseq.config import Rules, _eval_stmts
+def test_eval_if(tmpdir):
 
     rules = Rules()
     # rules.set_var(name, value)
@@ -199,12 +206,11 @@ def test_eval_if():
     endif
     """
     )
-    _eval_stmts(rules, statements, "none", None)
+    eval_stmts(rules, statements, tmpdir)
     assert rules.vars["a"] == "2"
 
 
-def test_generic_eval():
-    from conseq.config import Rules, _eval_stmts
+def test_generic_eval(tmpdir):
 
     rules = Rules()
     # rules.set_var(name, value)
@@ -226,12 +232,10 @@ def test_generic_eval():
     endif
     """
     )
-    _eval_stmts(rules, statements, "none", None)
+    eval_stmts(rules, statements, tmpdir)
     assert rules.vars["a"] == "1"
 
 
-from conseq.config import Rules, _eval_stmts
-from conseq.hashcache import HashCache
 
 
 def test_file_ref(tmpdir):
@@ -249,12 +253,11 @@ def test_file_ref(tmpdir):
         filename=str(tmpdir.join("sample.conseq")),
     )
 
-    _eval_stmts(
+    eval_stmts(
         rules,
         statements,
-        str(tmpdir) + "/none",
-        HashCache(str(tmpdir.join("hashcache"))),
-    )
+        tmpdir,
+        filename=str(tmpdir) + "/none")
     a = rules.get_rule("a")
     assert a is not None
     print(a.inputs)
@@ -278,7 +281,7 @@ def test_file_ref_with_copy_to(tmpdir):
     """,
         filename=str(tmpdir.join("sample.conseq")),
     )
-    _eval_stmts(rules, statements, "none", HashCache(str(tmpdir.join("hashcache"))))
+    eval_stmts(rules, statements,tmpdir)
 
     a = rules.get_rule("a")
     assert a is not None
@@ -301,7 +304,7 @@ def test_file_refs_with_vars(tmpdir):
     """,
         filename=str(tmpdir.join("sample.conseq")),
     )
-    _eval_stmts(rules, statements, "none", HashCache(str(tmpdir.join("hashcache"))))
+    eval_stmts(rules, statements, tmpdir)
     a = rules.get_rule("a")
     assert a is not None
     print(a.inputs)
@@ -321,7 +324,7 @@ def test_relative_file_paths(tmpdir):
     )
 
     rules = Rules()
-    _eval_stmts(rules, statements, "none", HashCache(str(tmpdir.join("hashcache"))))
+    eval_stmts(rules, statements, tmpdir)
     a = rules.get_rule("a")
     assert a is not None
     print(a.inputs)
@@ -365,3 +368,32 @@ def test_type_def_full():
     assert len(statements) == 1
     assert statements[0] == TypeDefStmt("sample", "both", ["x", "y"])
 
+
+def test_parse_rule_with_executor():
+    example = """
+    rule A:
+        executor: executor_name
+        run "echo hello"
+    """
+    decs = parser.parse_str(example)
+    assert len(decs) == 1
+
+    r = decs[0]
+    assert isinstance(r, parser.Rule)
+    assert r.executor == "executor_name"
+    assert r.executor_parameters == {}
+
+
+def test_parse_rule_with_executor_params():
+    example = """
+    rule A:
+        executor: executor_name {"param1": "1", "param2": "2"}
+        run "echo hello"
+    """
+    decs = parser.parse_str(example)
+    assert len(decs) == 1
+
+    r = decs[0]
+    assert isinstance(r, parser.Rule)
+    assert r.executor == "executor_name"
+    assert r.executor_parameters == {"param1": "1", "param2": "2"}

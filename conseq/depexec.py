@@ -337,6 +337,7 @@ def execute(
                 resolver_state,
                 rule.resources,
                 rule.watch_regex,
+                rule.executor_parameters
             )
         elif outputs is not None:
             log.warning("No commands to run for rule %s", name)
@@ -804,40 +805,7 @@ def expand_run(
         script_body = render_template(jinja2_env, script_body, config, **kwargs)
     return (command, script_body)
 
-
-def expand_dict_item(
-    jinja2_env: Environment,
-    k: str,
-    v: Union[str, Dict[str, str]],
-    config: PropsType,
-    **kwargs,
-) -> Tuple[str, Union[str, Dict[str, str]]]:
-    assert isinstance(config, dict)
-
-    k = render_template(jinja2_env, k, config, **kwargs)
-    # QueryVariables get introduced via expand input spec
-    if not isinstance(v, QueryVariable):
-        if isinstance(v, dict):
-            v = expand_dict(jinja2_env, v, config, **kwargs)
-        else:
-            v = render_template(jinja2_env, v, config, **kwargs)
-    return k, v
-
-
-def expand_dict(
-    jinja2_env: Environment, d: PropsType, config: PropsType, **kwargs,
-) -> PropsType:
-    assert isinstance(d, dict)
-    assert isinstance(config, dict)
-
-    new_output = {}
-    for k, v in d.items():
-        #        print("expanding k", k)
-        k, v = expand_dict_item(jinja2_env, k, v, config, **kwargs)
-        new_output[k] = v
-
-    return new_output
-
+from conseq.template import expand_dict_item, expand_dict
 
 def expand_outputs(
     jinja2_env: Environment, output: PropsType, config: PropsType, **kwargs,
@@ -1021,10 +989,8 @@ def reconcile_rule_specifications(j: Jobs, latest_rules: Dict[str, str]):
 
 def reconcile_db(
     j: Jobs,
-    jinja2_env: Environment,
     rule_specifications: Dict[str, str],
     objs: List[PropsType],
-    vars: PropsType,
     type_defs: List[TypeDefStmt],
     force: Optional[bool] = None,
     print_missing_objs: bool = True
@@ -1036,7 +1002,7 @@ def reconcile_db(
         obj = dict(obj)
         if "$manually-added" not in obj:
             obj["$manually-added"] = {"$value": "true"}
-        processed.append(expand_dict(jinja2_env, obj, vars))
+        processed.append(obj)
 
     new_objs, missing_objs = reconcile_add_if_missing(j, processed)
     invalidated_objs = reconcile_rule_specifications(j, rule_specifications)
@@ -1069,6 +1035,22 @@ def reconcile_db(
     for type_def in type_defs:
         j.add_type_def(type_def)
 
+class LazyConfigDict:
+    def __init__(self, rules, jinja2_env):
+        self.rules = rules
+        self.jinja2_env = jinja2_env
+
+    def __getitem__(self, key):
+        value = self.rules.get_vars()[key]
+        return render_template(self.jinja2_env, value, self.rules.get_vars())
+
+    def get(self, key, default=None):
+        value = self.rules.get_vars().get(key, default)
+        if value is None:
+            return None
+        return render_template(self.jinja2_env, value, self.rules.get_vars())
+
+from conseq.template import create_jinja2_env
 def main(
     depfile: str,
     state_dir: str,
@@ -1106,10 +1088,10 @@ def main(
         # and one will clobber the state of the other
         j.limitStartToTemplates([rule_filter])
 
+    jinja2_env = create_jinja2_env()
     # pass in override_vars as the initial config so we can write conditions which reference those variables
-    rules = read_rules(state_dir, depfile, config_file, initial_config=override_vars)
+    rules = read_rules(state_dir, depfile, config_file, jinja2_env, initial_config=override_vars)
     rule_specifications = rules.get_rule_specifications()
-    jinja2_env = rules.jinja2_env
 
     if not rules.has_client_defined("default"):
         rules.add_client("default", exec_client.LocalExecClient({}))
@@ -1119,10 +1101,8 @@ def main(
     # handle the "add-if-missing" objects and changes to rules
     reconcile_db(
         j,
-        jinja2_env,
         rule_specifications,
         rules.objs,
-        rules.vars,
         rules.types.values(),
         force=remove_unknown_artifacts,
     )
@@ -1135,21 +1115,7 @@ def main(
     # finish initializing exec clients
     for name, props in list(rules.exec_clients.items()):
         if isinstance(props, dict):
-            config = rules.get_vars()
-            props = expand_dict(jinja2_env, props, config)
-
-            class VirtualDict:
-                def __getitem__(self, key):
-                    value = rules.get_vars()[key]
-                    return render_template(jinja2_env, value, config)
-
-                def get(self, key, default=None):
-                    value = rules.get_vars().get(key, default)
-                    if value is None:
-                        return None
-                    return render_template(jinja2_env, value, config)
-
-            client = exec_client.create_client(name, VirtualDict(), props)
+            client = exec_client.create_client(name, LazyConfigDict(rules, jinja2_env), props, jinja2_env)
             rules.add_client(name, client)
 
     # Reattach or cancel jobs from previous invocation

@@ -20,6 +20,17 @@ from conseq.xref import Resolver
 from .types import PropsType
 import tempfile
 import signal
+from conseq.template import MissingTemplateVar, render_template
+
+class TemplatePartial:
+    def __init__(self, jinja2_env, config, text: str) -> None:
+        self.text = text
+        assert isinstance(config, dict)
+        self.config = config
+        self.jinja2_env = jinja2_env
+
+    def apply(self, **kwargs):
+        return render_template(self.jinja2_env, self.text, self.config, **kwargs)
 
 CACHE_KEY_FILENAME = "conseq-cache-key.json"
 
@@ -759,7 +770,9 @@ class LocalExecClient(ExecClient):
         resolve_state: ResolveState,
         resources: Dict[str, float],
         watch_regex,
+        executor_parameters: Dict[str, str]
     ) -> ClientExecution:
+        assert executor_parameters == {}, "Local executors don't accept parameters"
         assert isinstance(resolve_state, NullResolveState)
 
         for src, dst in resolve_state.files_to_copy:
@@ -995,6 +1008,9 @@ class AsyncDelegateExecClient:
         x_job_id_pattern,
         recycle_past_runs,
     ):
+        assert isinstance(run_command_template, TemplatePartial)
+        assert isinstance(check_cmd_template, TemplatePartial)
+        assert isinstance(terminate_cmd_template, TemplatePartial)
         self.resources = resources
         self.helper_path = helper_path
         self.local_workdir = local_workdir
@@ -1078,7 +1094,8 @@ class AsyncDelegateExecClient:
         resolver_state,
         resources,
         watch_regex,
-    ):
+        executor_parameters: Dict[str, str]
+):
         assert (
             watch_regex is None
         ), "delegated executors cannot watch logs, watch-regex not allowed"
@@ -1155,8 +1172,8 @@ class AsyncDelegateExecClient:
         #### start of local execution of delegate
         stdout_path = os.path.abspath(os.path.join(job_dir, "delegate.log"))
 
-        full_command = self.run_command_template.format(
-            COMMAND=command, JOB=rel_job_dir
+        full_command = self.run_command_template.apply(
+            COMMAND=command, JOB=rel_job_dir, **executor_parameters
         ).strip()
  
         stdout_file_obj = open(stdout_path, "wt")
@@ -1250,7 +1267,7 @@ class DelegateExecClient:
         remote_url: str,
         cas_remote_url: str,
         helper_path: str,
-        command_template: str,
+        command_template: TemplatePartial,
         python_path: str,
         AWS_ACCESS_KEY_ID: Optional[str],
         AWS_SECRET_ACCESS_KEY: Optional[str],
@@ -1319,7 +1336,8 @@ class DelegateExecClient:
         resolver_state: ResolveState,
         resources: Dict[str, float],
         watch_regex,
-    ) -> DelegateExecution:
+        executor_parameters: Dict[str, str]
+) -> DelegateExecution:
         assert isinstance(resolver_state, ResolveState)
 
         assert (
@@ -1400,8 +1418,8 @@ class DelegateExecClient:
         stdout_path = os.path.abspath(os.path.join(job_dir, "delegate-stdout.txt"))
         stderr_path = os.path.abspath(os.path.join(job_dir, "delegate-stderr.txt"))
 
-        full_command = self.command_template.format(
-            COMMAND=command, JOB=rel_job_dir
+        full_command = self.command_template.apply(
+            COMMAND=command, JOB=rel_job_dir, **executor_parameters
         ).strip()
 
         assert_is_single_command(full_command)
@@ -1516,7 +1534,10 @@ def assert_has_only_props(
     )
 
 
-def create_client(name, config, properties):
+def create_client(name, config, properties, jinja2_env):
+    def _make_template( text):
+        return TemplatePartial(jinja2_env, config, text)
+    
     resources = {"slots": 1}
     for k, v in properties.get("resources", {}).items():
         resources[k] = float(v)
@@ -1543,7 +1564,7 @@ def create_client(name, config, properties):
             config["S3_STAGING_URL"] + "/exec-results/" + config["EXECUTION_ID"],
             config["S3_STAGING_URL"],
             properties["HELPER_PATH"],
-            properties["COMMAND_TEMPLATE"],
+            _make_template(properties["COMMAND_TEMPLATE"]),
             config.get("PYTHON_PATH", "python"),
             config["AWS_ACCESS_KEY_ID"],
             config["AWS_SECRET_ACCESS_KEY"],
@@ -1577,13 +1598,13 @@ def create_client(name, config, properties):
             config["S3_STAGING_URL"] + "/exec-results/" + config["EXECUTION_ID"],
             config["S3_STAGING_URL"],
             properties["HELPER_PATH"],
-            properties["COMMAND_TEMPLATE"],
+            _make_template(properties["COMMAND_TEMPLATE"]),
             config.get("PYTHON_PATH", "python"),
             config["AWS_ACCESS_KEY_ID"],
             config["AWS_SECRET_ACCESS_KEY"],
-            properties["CHECK_COMMAND_TEMPLATE"],
+            _make_template(properties["CHECK_COMMAND_TEMPLATE"]),
             properties["IS_RUNNING_PATTERN"],
-            properties["TERMINATE_CMD_TEMPLATE"],
+            _make_template(properties["TERMINATE_CMD_TEMPLATE"]),
             properties["JOB_ID_PATTERN"],
             reuse_past_runs,
         )

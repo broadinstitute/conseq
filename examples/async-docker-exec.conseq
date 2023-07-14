@@ -25,3 +25,8 @@ exec-profile docker-dsub {
   "TERMINATE_CMD_TEMPLATE": "{{config.DSUB_PATH}}/ddel --project broad-achilles --jobs {job_id}",
   "JOB_ID_PATTERN": """Job: (\S+)"""
 }
+
+rule sample:
+    executor: docker-dsub
+    outputs: {"type": "completed", "value": "1"}
+    run "echo hello"

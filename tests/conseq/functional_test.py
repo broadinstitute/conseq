@@ -437,6 +437,23 @@ def test_detect_clobber(tmpdir):
     assert status_by_rule == {"a": "completed", "c": "completed", "b": "failed"}
 
 
+def test_relative_path_in_artifact(tmpdir):
+    # datafile = tmpdir.join("datafile")
+    # datafile.write("sample")
+
+    # datafile_path = os.path.relpath(str(datafile), str(tmpdir))
+    
+    j = run_conseq(
+        tmpdir,
+        """
+        add-if-missing {"type": "test", "path": "{{config.SCRIPT_DIR}}"}
+    """,
+    )
+    objects = j.find_objs("public", {})
+    assert len(objects) == 1
+    object = objects[0]
+    assert os.path.abspath(object.props["path"]) == str(tmpdir)
+
 def test_clobbers_from_rules_with_all_are_okay(tmpdir):
     # if two rules emit the same artifact, the second one should fail. Don't allow a rule to clobber an
     # existing artifact.

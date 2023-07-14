@@ -90,12 +90,13 @@ class Rule:
 
     def __init__(self, name):
         self.name = name
-        self.filename = None
+        self.filename : Optional[str] = None
         self.lineno : Optional[int] = None
         self.inputs  = []
         self.outputs: Optional[Any] = None
         self.run_stmts : List[RunStmt] = []
         self.executor = "default"
+        self.executor_parameters = {}
         self.watch_regex = None
         assert self.name != "" and self.name != " "
         self.resources = {"slots": 1.0}
@@ -254,6 +255,11 @@ class Semantics(object):
                 rule.watch_regex = re.compile(statement[2])
             elif statement[0] == "executor":
                 rule.executor = statement[2]
+                if len(statement) == 4:
+                    rule.executor_parameters = statement[3]
+                else:
+                    assert len(statement) == 3
+                    rule.executor_parameters = {}
             elif statement[0] == "resources":
                 rule.resources = dict([(k, float(v)) for k, v in statement[2].items()])
                 if "slots" not in rule.resources:

@@ -217,14 +217,14 @@ def test_obj_reconcile(tmpdir):
 
     vars = {}
     objs = [{"type": "a"}, {"type": "b"}]
-    reconcile_db(j, jinja2_env, {}, objs, vars, [], force=True)
+    reconcile_db(j, {}, objs, [], force=True)
 
     # verify two objects were created
     objs = j.find_objs(dep.PUBLIC_SPACE, {})
     assert len(objs) == 2
 
     objs = [{"type": "a"}, {"type": "b"}, {"type": "c"}]
-    reconcile_db(j, jinja2_env, {}, objs, vars, [], force=True)
+    reconcile_db(j, {}, objs, [], force=True)
 
     # type=c is the new object, getting us to 3
     objs = j.find_objs(dep.PUBLIC_SPACE, {})
@@ -232,7 +232,7 @@ def test_obj_reconcile(tmpdir):
 
     # now if we drop type=a, we should be back down to two objects
     objs = [{"type": "b"}, {"type": "c"}]
-    reconcile_db(j, jinja2_env, {}, objs, vars, [], force=True)
+    reconcile_db(j, {}, objs, [], force=True)
 
     # type=c is the new object, getting us to 3
     objs = j.find_objs(dep.PUBLIC_SPACE, {})

@@ -16,12 +16,13 @@ from conseq.depexec import (
 )
 from conseq.util import indent_str
 import re
+from conseq.template import create_jinja2_env
 
 log = logging.getLogger(__name__)
 
 
 def print_rules(state_dir, depfile, config_file, mode, rule_name):
-    rules = read_rules(state_dir, depfile, config_file)
+    rules = read_rules(state_dir, depfile, config_file, create_jinja2_env())
     if mode == "all":
         names = [rule.name for rule in rules]
     elif mode == "up":
@@ -81,7 +82,7 @@ def localize_if_necessary(resolver, value):
         return value, False
 
 def localize_cmd(state_dir, space_, predicates, depfile, config_file):
-    rules = read_rules(state_dir, depfile, config_file)
+    rules = read_rules(state_dir, depfile, config_file, create_jinja2_env())
 
     resolver = xref.Resolver(state_dir, rules.vars)
 
@@ -127,15 +128,13 @@ def stage_cmd(export_file, conseq_file, output_script):
         db_path = os.path.join(tmpdir, "db.sqlite3")
         j = dep.open_job_db(db_path)
 
-        export_contents = read_rules(tmpdir, export_file, config_file=None)
+        export_contents = read_rules(tmpdir, export_file, config_file=None, jinja2_env=create_jinja2_env())
 
         # process add-if-missing statements
         depexec.reconcile_db(
             j,
-            export_contents.jinja2_env,
             export_contents.get_rule_specifications(),
             export_contents.objs,
-            export_contents.vars,
             export_contents.types.values()
         )
 
@@ -146,16 +145,14 @@ def stage_cmd(export_file, conseq_file, output_script):
 
         # now try to apply the rules in the conseq file provided to find input artifacts
 
-        rules = read_rules(tmpdir, conseq_file, config_file=None)
+        rules = read_rules(tmpdir, conseq_file, config_file=None, jinja2_env=create_jinja2_env())
         # resolver = xref.Resolver(tmpdir, rules.vars)
 
         # process add-if-missing statements in the rule file
         depexec.reconcile_db(
             j,
-            rules.jinja2_env,
             rules.get_rule_specifications(),
             rules.objs,
-            rules.vars,
             rules.types.values(),
             force=False,
             print_missing_objs=False
@@ -387,7 +384,7 @@ def list_cmd(state_dir):
 def export_cmd(state_dir, depfile, config_file, dest_gs_path, exclude_patterns):
     out = StringIO()
 
-    rules = read_rules(state_dir, depfile, config_file)
+    rules = read_rules(state_dir, depfile, config_file, create_jinja2_env())
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
 
     objs = j.find_objs(PUBLIC_SPACE, {})
@@ -536,7 +533,7 @@ def debugrun(state_dir, depfile, target, override_vars, config_file : Optional[s
     print("opening", db_path)
     j = dep.open_job_db(db_path)
 
-    rules = read_rules(state_dir, depfile, config_file)
+    rules = read_rules(state_dir, depfile, config_file, create_jinja2_env())
 
     resolver = xref.Resolver(state_dir, rules.vars)
 
