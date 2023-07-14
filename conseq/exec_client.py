@@ -202,6 +202,8 @@ class ClientExecution:
         outputs: List[PropsType],
         captured_stdouts: Union[List[str], Tuple[str, str]],
         desc_name: str,
+        executor_parameters: dict,
+        *,
         watch_regex=None,
     ) -> None:
         self.transform = transform
@@ -213,6 +215,7 @@ class ClientExecution:
         self.desc_name = desc_name
         self.log_grep_state = {}
         self.watch_regex = watch_regex
+        self.executor_parameters = executor_parameters
         assert job_dir != None
 
     def _resolve_filenames(self, props):
@@ -242,6 +245,7 @@ class ClientExecution:
             outputs=self.outputs,
             captured_stdouts=self.captured_stdouts,
             desc_name=self.desc_name,
+            executor_parameters=self.executor_parameters,
         )
         return json.dumps(d)
 
@@ -372,9 +376,17 @@ class DelegateExecution(ClientExecution):
         file_fetcher: Callable,
         label: str,
         results_path: str,
+        executor_parameters: dict,
     ) -> None:
         super(DelegateExecution, self).__init__(
-            transform, id, job_dir, proc, outputs, captured_stdouts, desc_name
+            transform,
+            id,
+            job_dir,
+            proc,
+            outputs,
+            captured_stdouts,
+            desc_name,
+            executor_parameters,
         )
         self.remote = remote
         self.file_fetcher = file_fetcher
@@ -396,6 +408,7 @@ class DelegateExecution(ClientExecution):
             local_job_dir=self.job_dir,
             label=self.label,
             results_path=self._results_path,
+            executor_parameters=self.executor_parameters,
         )
         if hasattr(self.proc, "pid"):
             d["pid"] = self.proc.pid
@@ -540,6 +553,7 @@ def local_exec_script(
         outputs,
         captured_stdouts,
         desc_name,
+        {},
         watch_regex=watch_regex,
     )
 
@@ -635,15 +649,23 @@ class NullResolveState(ResolveState):
 
 class ExternProc:
     def __init__(
-        self, job_id, check_cmd_template, is_running_pattern, terminate_cmd_template
+        self,
+        job_id,
+        check_cmd_template,
+        is_running_pattern,
+        terminate_cmd_template,
+        executor_parameters,
     ):
         self.job_id = job_id
         self.check_cmd_template = check_cmd_template
-        self.is_running_pattern = is_running_pattern
         self.terminate_cmd_template = terminate_cmd_template
+        self.is_running_pattern = is_running_pattern
+        self.executor_parameters = executor_parameters
 
     def poll(self):
-        check_cmd = self.check_cmd_template.format(job_id=self.job_id)
+        check_cmd = self.check_cmd_template.apply(
+            JOB_ID=self.job_id, parameters=self.executor_parameters
+        ).strip()
         output = subprocess.check_output(check_cmd, shell=True)
         output = output.decode("utf8")
         # TODO: Would be nice to write this and the output to the delegate log for debugging
@@ -656,7 +678,9 @@ class ExternProc:
         return None
 
     def terminate(self):
-        terminate_cmd = self.terminate_cmd_template.format(job_id=self.job_id)
+        terminate_cmd = self.check_cmd_template.apply(
+            JOB_ID=self.job_id, parameters=self.executor_parameters
+        ).strip()
         log.warning("Executing: %s", terminate_cmd)
         subprocess.check_call(terminate_cmd, shell=True)
 
@@ -718,6 +742,7 @@ class LocalExecClient(ExecClient):
             d["outputs"],
             d["captured_stdouts"],
             d["desc_name"],
+            {},
         )
 
     def preprocess_inputs(
@@ -1040,11 +1065,13 @@ class AsyncDelegateExecClient:
         d = json.loads(external_ref)
         remote = helper.new_remote(d["remote_url"], d["local_job_dir"],)
         file_fetcher = self._mk_file_fetcher(remote)
+        executor_parameters = d["executor_parameters"]
         proc = ExternProc(
             d["x_job_id"],
             self.check_cmd_template,
             self.is_running_pattern,
             self.terminate_cmd_template,
+            executor_parameters,
         )
         return DelegateExecution(
             d["transform"],
@@ -1058,6 +1085,7 @@ class AsyncDelegateExecClient:
             file_fetcher,
             d["label"],
             d["results_path"],
+            executor_parameters,
         )
 
     def preprocess_inputs(self, resolver, inputs: Tuple[BoundInput]):
@@ -1153,7 +1181,7 @@ class AsyncDelegateExecClient:
         stdout_path = os.path.abspath(os.path.join(job_dir, "delegate.log"))
 
         full_command = self.run_command_template.apply(
-            COMMAND=command, JOB=rel_job_dir, **executor_parameters
+            COMMAND=command, JOB=rel_job_dir, parameters=executor_parameters
         ).strip()
 
         stdout_file_obj = open(stdout_path, "wt")
@@ -1201,6 +1229,7 @@ class AsyncDelegateExecClient:
             self.check_cmd_template,
             self.is_running_pattern,
             self.terminate_cmd_template,
+            executor_parameters,
         )
         return DelegateExecution(
             name,
@@ -1214,6 +1243,7 @@ class AsyncDelegateExecClient:
             file_fetcher,
             self.label,
             results_path,
+            executor_parameters,
         )
 
     def _mk_file_fetcher(self, remote):
@@ -1276,6 +1306,7 @@ class DelegateExecClient:
             file_fetcher,
             d["label"],
             d["results_path"],
+            d["executor_parameters"],
         )
 
     def preprocess_inputs(
@@ -1377,7 +1408,7 @@ class DelegateExecClient:
         stderr_path = os.path.abspath(os.path.join(job_dir, "delegate-stderr.txt"))
 
         full_command = self.command_template.apply(
-            COMMAND=command, JOB=rel_job_dir, **executor_parameters
+            COMMAND=command, JOB=rel_job_dir, parameters=executor_parameters
         ).strip()
 
         assert_is_single_command(full_command)
@@ -1421,6 +1452,7 @@ class DelegateExecClient:
             file_fetcher,
             self.label,
             results_path,
+            executor_parameters,
         )
 
     def _mk_file_fetcher(self, remote: Remote) -> Callable:

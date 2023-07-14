@@ -68,7 +68,9 @@ def test_delegate_exec_client_commands(tmpdir, monkeypatch):
             GS_TEST_REMOTE_URL_ROOT + "/CAS",
             TEST_HELPER_PATH,
             exec_client.TemplatePartial(
-                jinja2_env, {}, """docker run --rm {{ image_name }} {{COMMAND}}"""
+                jinja2_env,
+                {},
+                """docker run --rm {{ parameters.image_name }} {{COMMAND}}""",
             ),
             "python",
             recycle_past_runs=False,
