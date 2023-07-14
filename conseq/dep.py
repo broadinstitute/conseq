@@ -22,10 +22,10 @@ from conseq.db import get_cursor, transaction
 from conseq.timeit import timeblock
 from conseq.parser import TypeDefStmt
 import dataclasses
+
 log = logging.getLogger(__name__)
 
 DISABLE_AUTO_CREATE_RULES = False
-
 
 
 STATUS_STARTED = "started"
@@ -40,8 +40,10 @@ RE_STATUS_DEFERRED = "deferred"
 
 PUBLIC_SPACE = "public"
 
+
 class MissingObj(Exception):
     pass
+
 
 def _delete_execution_by_id(c, execution_id):
     c.execute("SELECT id FROM rule_execution WHERE execution_id = ?", (execution_id,))
@@ -512,7 +514,9 @@ class RuleSet:
             (RE_STATUS_STARTED, execution_id, rule_id),
         )
 
-    def completed_execution(self, execution_id, new_status) -> Union[int, Literal["norow"]]:
+    def completed_execution(
+        self, execution_id, new_status
+    ) -> Union[int, Literal["norow"]]:
         # returns rule_execution_id
         assert execution_id != None
         if new_status == STATUS_COMPLETED:
@@ -821,10 +825,11 @@ class PropsMatch:
             first = False
         return True
 
+
 class Template:
     def __init__(
         self,
-        queries: Sequence[Union[ForEach,ForAll]],
+        queries: Sequence[Union[ForEach, ForAll]],
         predicates: Sequence[Any],
         transform: str,
         output_matches_expectation: Callable[[Any], bool] = lambda x: True,
@@ -987,8 +992,6 @@ class Template:
             return results
 
 
-
-
 class RuleAndDerivativesFilter:
     def __init__(self, rules_allowed, last_existing_id):
         self.rules_allowed = rules_allowed
@@ -1020,7 +1023,7 @@ class Jobs:
         Top level class gluing everything together
     """
 
-    rule_template_by_name : Dict[str, Template]
+    rule_template_by_name: Dict[str, Template]
 
     def __init__(self, db: Connection) -> None:
         self.db = db
@@ -1129,15 +1132,18 @@ class Jobs:
         with transaction(self.db):
             self.rule_set.write_rule_specifications(rule_specs)
 
-    def add_type_def(self, type_def : TypeDefStmt):
+    def add_type_def(self, type_def: TypeDefStmt):
         with transaction(self.db):
             c = get_cursor()
-            c.execute("insert into type_def (name, definition_json) values (?, ?)", [type_def.name, json.dumps(dataclasses.asdict(type_def))])
-    
+            c.execute(
+                "insert into type_def (name, definition_json) values (?, ?)",
+                [type_def.name, json.dumps(dataclasses.asdict(type_def))],
+            )
+
     def get_type_defs(self):
         with transaction(self.db):
             c = get_cursor()
-            c.execute("select name, definition_json from type_def");
+            c.execute("select name, definition_json from type_def")
             typedefs = []
             for row in c.fetchall():
                 typedefs.append(TypeDefStmt(**json.loads(row[1])))
@@ -1241,9 +1247,7 @@ class Jobs:
                 assert len(output.keys()) > 0
                 obj_id = self.add_obj(space, timestamp, output)
                 interned_outputs.append(self.objects.get(obj_id))
-            return self._record_completed(
-                execution_id, new_status, interned_outputs
-            )
+            return self._record_completed(execution_id, new_status, interned_outputs)
 
     def update_exec_xref(self, exec_id, xref, job_dir):
         with transaction(self.db):
@@ -1364,10 +1368,13 @@ class Jobs:
             for job in self.log.get_all():
                 print("all job:", job)
 
+
 from .db import prepare_db_connection
+
+
 def open_job_db(filename: str) -> Jobs:
-    db= prepare_db_connection(filename)
-    return      Jobs(db)
+    db = prepare_db_connection(filename)
+    return Jobs(db)
 
 
 # These methods exist solely to monkey patch in hooks to record events in the context of tests

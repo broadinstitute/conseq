@@ -55,8 +55,6 @@ class StorageConnection:
         raise NotImplementedError()
 
 
-
-
 class GSStorageConnection(StorageConnection):
     def __init__(self):
         self.c = None
@@ -468,6 +466,7 @@ def pull(
             stage_dir=stage_dir,
         )
 
+
 def read_config(filename):
     config = {}
     with open(filename, "rt") as fd:
@@ -523,7 +522,6 @@ def _parse_mapping_str(file_mapping):
     else:
         remote_path = local_path = file_mapping
     return (remote_path, local_path)
-
 
 
 def exec_cmd(args, config):

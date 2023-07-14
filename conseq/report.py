@@ -4,6 +4,7 @@ from conseq.dep import open_job_db, Obj, PUBLIC_SPACE
 from collections import namedtuple, defaultdict
 import jinja2
 
+
 def generate_report_cmd(state_dir, dest_dir):
     from .template import create_template_jinja2_env
 
@@ -55,7 +56,7 @@ def generate_report_cmd(state_dir, dest_dir):
         }
     )
     j = open_job_db(os.path.join(state_dir, "db.sqlite3"))
-    typedefs  = {x.name: x for x in j.get_type_defs()}
+    typedefs = {x.name: x for x in j.get_type_defs()}
 
     objs = j.find_objs(PUBLIC_SPACE, {})
     executions = j.get_all_executions()
@@ -84,14 +85,12 @@ def generate_report_cmd(state_dir, dest_dir):
             execution = execution_by_output.get(obj.id)
             downstream_executions = execution_by_input[obj.id]
             content = obj_template.render(
-                    obj=obj,
-                    execution=execution,
-                    downstream_executions=downstream_executions,
-                )
-            assert isinstance(content, str)
-            fd.write(
-                content
+                obj=obj,
+                execution=execution,
+                downstream_executions=downstream_executions,
             )
+            assert isinstance(content, str)
+            fd.write(content)
 
     def get_disk_usage(job_dir):
         if job_dir is None:
@@ -119,13 +118,11 @@ def generate_report_cmd(state_dir, dest_dir):
                 )
 
         with open(fn, "wt") as fd:
-            content =                 execution_template.render(
-                    execution=execution, files=files, disk_usage=disk_usage
-                )
-            assert isinstance(content, str)
-            fd.write(
-                content
+            content = execution_template.render(
+                execution=execution, files=files, disk_usage=disk_usage
             )
+            assert isinstance(content, str)
+            fd.write(content)
 
     ExecSummary = namedtuple("ExecSummary", "execs disk_usage")
     execs_by_name = defaultdict(lambda: ExecSummary([], 0))
@@ -152,13 +149,11 @@ def generate_report_cmd(state_dir, dest_dir):
     with open(f"{dest_dir}/index.html", "wt") as fd:
         sorted_objs_by_type = sorted(objs_by_type.items())
         sorted_execs_by_name = sorted(execs_by_name.items())
-        content =             index_template.render(
-                objs_by_type=sorted_objs_by_type,
-                execs_by_name=sorted_execs_by_name,
-                rules_with_size=rules_with_size,
-                typedefs=typedefs
-            )
-        assert isinstance(content, str)
-        fd.write(
-            content
+        content = index_template.render(
+            objs_by_type=sorted_objs_by_type,
+            execs_by_name=sorted_execs_by_name,
+            rules_with_size=rules_with_size,
+            typedefs=typedefs,
         )
+        assert isinstance(content, str)
+        fd.write(content)

@@ -8,6 +8,7 @@ class BoundInput:
     value: Dict
     copy_to: Optional[str]
 
+
 PropValue = TypeVar("PropValue", bound=Union[str, Dict[str, str]])
 
 PropsType = Dict[str, PropValue]

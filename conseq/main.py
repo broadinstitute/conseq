@@ -10,6 +10,7 @@ from conseq.types import Obj
 import os
 import pdb
 
+
 class RegExpMatch:
     def __init__(self, pattern):
         self.pattern = re.compile(pattern)
@@ -45,7 +46,6 @@ def add_list(sub):
         commands.list_cmd(args.dir)
 
     parser.set_defaults(func=_list)
-
 
 
 def add_ls(sub):
@@ -360,10 +360,13 @@ def add_rules(sub):
 
     parser.set_defaults(func=rules)
 
+
 def add_debugrun(sub):
     def debugrun(args):
         config_path = _get_config_file_path(args)
-        commands.debugrun(args.dir, args.file, args.rule, {}, config_path, args.save_inputs_filename )
+        commands.debugrun(
+            args.dir, args.file, args.rule, {}, config_path, args.save_inputs_filename
+        )
 
     parser = sub.add_parser(
         "debugrun",
@@ -371,7 +374,11 @@ def add_debugrun(sub):
     )
     parser.add_argument("file", metavar="FILE", help="the input file to parse")
     parser.add_argument("rule", help="the name of the rule to attempt to run")
-    parser.add_argument("--save-inputs", dest="save_inputs_filename", help="If specified write out the inputs dictionary to the given filename")
+    parser.add_argument(
+        "--save-inputs",
+        dest="save_inputs_filename",
+        help="If specified write out the inputs dictionary to the given filename",
+    )
     parser.set_defaults(func=debugrun)
 
 
@@ -397,7 +404,11 @@ def add_export(sub):
             exclude_patterns = []
 
         commands.export_cmd(
-            args.dir, args.file, _get_config_file_path(args), args.dest, exclude_patterns
+            args.dir,
+            args.file,
+            _get_config_file_path(args),
+            args.dest,
+            exclude_patterns,
         )
 
     parser = sub.add_parser(
@@ -513,9 +524,17 @@ def main(args=None):
         help="The directory to write working versions of files to",
         default="state",
     )
-    parser.add_argument("--pdb", action="store_true", help="Run inside of pdb so that the debugger is started on exception")
+    parser.add_argument(
+        "--pdb",
+        action="store_true",
+        help="Run inside of pdb so that the debugger is started on exception",
+    )
     parser.add_argument("--verbose", dest="verbose", action="store_true")
-    parser.add_argument("--config", help="Path to initial config", default=os.path.expanduser("~/.conseq"))
+    parser.add_argument(
+        "--config",
+        help="Path to initial config",
+        default=os.path.expanduser("~/.conseq"),
+    )
     parser.set_defaults(func=None)
 
     sub = parser.add_subparsers()

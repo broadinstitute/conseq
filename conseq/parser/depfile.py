@@ -32,9 +32,9 @@ class depfileBuffer(Buffer):
         whitespace=None,
         nameguard=None,
         comments_re=None,
-        eol_comments_re='#.*?$',
+        eol_comments_re="#.*?$",
         ignorecase=None,
-        namechars='',
+        namechars="",
         **kwargs
     ):
         super(depfileBuffer, self).__init__(
@@ -55,12 +55,12 @@ class depfileParser(Parser):
         whitespace=None,
         nameguard=None,
         comments_re=None,
-        eol_comments_re='#.*?$',
+        eol_comments_re="#.*?$",
         ignorecase=None,
         left_recursion=True,
         parseinfo=True,
         keywords=None,
-        namechars='',
+        namechars="",
         buffer_class=depfileBuffer,
         **kwargs
     ):
@@ -107,11 +107,11 @@ class depfileParser(Parser):
                 self._triple_squoted_string_()
             with self._option():
                 self._squoted_string_()
-            self._error('no available options')
+            self._error("no available options")
 
     @tatsumasu()
     def _identifier_(self):  # noqa
-        self._pattern('[A-Za-z]+[A-Za-z0-9_+-]*')
+        self._pattern("[A-Za-z]+[A-Za-z0-9_+-]*")
 
     @tatsumasu()
     def _json_value_(self):  # noqa
@@ -122,62 +122,55 @@ class depfileParser(Parser):
                 self._json_obj_()
             with self._option():
                 self._json_array_()
-            self._error('no available options')
+            self._error("no available options")
 
     @tatsumasu()
     def _json_array_(self):  # noqa
         with self._choice():
             with self._option():
-                self._token('[')
+                self._token("[")
                 self._json_value_()
-                self.name_last_node('first')
+                self.name_last_node("first")
 
                 def block2():
-                    self._token(',')
+                    self._token(",")
                     self._json_value_()
-                    self.name_last_node('value')
+                    self.name_last_node("value")
+
                 self._closure(block2)
-                self.name_last_node('rest')
-                self._token(']')
+                self.name_last_node("rest")
+                self._token("]")
             with self._option():
-                self._token('[')
-                self._token(']')
-            self._error('no available options')
-        self.ast._define(
-            ['first', 'rest', 'value'],
-            []
-        )
+                self._token("[")
+                self._token("]")
+            self._error("no available options")
+        self.ast._define(["first", "rest", "value"], [])
 
     @tatsumasu()
     def _json_name_value_pair_(self):  # noqa
         self._quoted_string_()
-        self.name_last_node('name')
-        self._token(':')
+        self.name_last_node("name")
+        self._token(":")
         self._json_value_()
-        self.name_last_node('value')
-        self.ast._define(
-            ['name', 'value'],
-            []
-        )
+        self.name_last_node("value")
+        self.ast._define(["name", "value"], [])
 
     @tatsumasu()
     def _json_obj_(self):  # noqa
-        self._token('{')
+        self._token("{")
         self._json_name_value_pair_()
-        self.name_last_node('first')
+        self.name_last_node("first")
 
         def block2():
-            self._token(',')
+            self._token(",")
             self._json_name_value_pair_()
+
         self._closure(block2)
-        self.name_last_node('rest')
+        self.name_last_node("rest")
         with self._optional():
-            self._token(',')
-        self._token('}')
-        self.ast._define(
-            ['first', 'rest'],
-            []
-        )
+            self._token(",")
+        self._token("}")
+        self.ast._define(["first", "rest"], [])
 
     @tatsumasu()
     def _query_variable_(self):  # noqa
@@ -188,60 +181,59 @@ class depfileParser(Parser):
         with self._choice():
             with self._option():
                 self._quoted_string_()
-                self._token(':')
+                self._token(":")
                 with self._group():
                     with self._choice():
                         with self._option():
                             self._json_value_()
                         with self._option():
                             self._query_variable_()
-                        self._error('no available options')
+                        self._error("no available options")
             with self._option():
                 self._quoted_string_()
-                self._token('~')
+                self._token("~")
                 self._quoted_string_()
-            self._error('no available options')
+            self._error("no available options")
 
     @tatsumasu()
     def _pattern_based_query_obj_(self):  # noqa
-        self._token('{')
+        self._token("{")
         self._query_name_value_pair_()
 
         def block0():
-            self._token(',')
+            self._token(",")
             self._query_name_value_pair_()
+
         self._closure(block0)
-        self._token('}')
+        self._token("}")
 
     @tatsumasu()
     def _fileref_option_(self):  # noqa
-        self._token('copy_to')
+        self._token("copy_to")
 
     @tatsumasu()
     def _fileref_query_obj_(self):  # noqa
         with self._group():
             with self._choice():
                 with self._option():
-                    self._token('fileref')
+                    self._token("fileref")
                 with self._option():
-                    self._token('filename')
-                self._error('no available options')
-        self._token('(')
+                    self._token("filename")
+                self._error("no available options")
+        self._token("(")
         self._quoted_string_()
-        self.name_last_node('filename')
+        self.name_last_node("filename")
 
         def block3():
-            self._token(',')
+            self._token(",")
             self._fileref_option_()
-            self._token('=')
+            self._token("=")
             self._quoted_string_()
+
         self._closure(block3)
-        self.name_last_node('options')
-        self._token(')')
-        self.ast._define(
-            ['filename', 'options'],
-            []
-        )
+        self.name_last_node("options")
+        self._token(")")
+        self.ast._define(["filename", "options"], [])
 
     @tatsumasu()
     def _query_obj_(self):  # noqa
@@ -250,19 +242,19 @@ class depfileParser(Parser):
                 self._pattern_based_query_obj_()
             with self._option():
                 self._fileref_query_obj_()
-            self._error('no available options')
+            self._error("no available options")
 
     @tatsumasu()
     def _input_spec_each_(self):  # noqa
         self._identifier_()
-        self._token('=')
+        self._token("=")
         self._query_obj_()
 
     @tatsumasu()
     def _input_spec_all_(self):  # noqa
         self._identifier_()
-        self._token('=')
-        self._token('all')
+        self._token("=")
+        self._token("all")
         self._query_obj_()
 
     @tatsumasu()
@@ -272,18 +264,19 @@ class depfileParser(Parser):
                 self._input_spec_each_()
             with self._option():
                 self._input_spec_all_()
-            self._error('no available options')
+            self._error("no available options")
 
     @tatsumasu()
     def _input_specs_(self):  # noqa
         self._input_spec_()
 
         def block0():
-            self._token(',')
+            self._token(",")
             self._input_spec_()
+
         self._closure(block0)
         with self._optional():
-            self._token(',')
+            self._token(",")
 
     @tatsumasu()
     def _output_specs_(self):  # noqa
@@ -292,29 +285,30 @@ class depfileParser(Parser):
                 self._json_obj_()
 
                 def block0():
-                    self._token(',')
+                    self._token(",")
                     self._json_obj_()
+
                 self._closure(block0)
                 with self._optional():
-                    self._token(',')
+                    self._token(",")
             with self._option():
-                self._token('none')
-            self._error('no available options')
+                self._token("none")
+            self._error("no available options")
 
     @tatsumasu()
     def _construct_cache_key_run_(self):  # noqa
-        self._token('construct-cache-key-run')
+        self._token("construct-cache-key-run")
         self._quoted_string_()
         with self._optional():
-            self._token('with')
+            self._token("with")
             self._quoted_string_()
 
     @tatsumasu()
     def _run_statement_(self):  # noqa
-        self._token('run')
+        self._token("run")
         self._quoted_string_()
         with self._optional():
-            self._token('with')
+            self._token("with")
             self._quoted_string_()
 
     @tatsumasu()
@@ -322,8 +316,9 @@ class depfileParser(Parser):
         self._quoted_string_()
 
         def block0():
-            self._token(',')
+            self._token(",")
             self._quoted_string_()
+
         self._closure(block0)
 
     @tatsumasu()
@@ -331,94 +326,95 @@ class depfileParser(Parser):
         with self._group():
             with self._choice():
                 with self._option():
-                    self._token('inputs')
-                    self._token(':')
+                    self._token("inputs")
+                    self._token(":")
                     self._input_specs_()
                 with self._option():
-                    self._token('outputs')
-                    self._token(':')
+                    self._token("outputs")
+                    self._token(":")
                     self._output_specs_()
                 with self._option():
-                    self._token('outputs-expected')
-                    self._token(':')
+                    self._token("outputs-expected")
+                    self._token(":")
                     with self._group():
                         self._identifier_()
 
                         def block0():
-                            self._token(',')
+                            self._token(",")
                             self._identifier_()
+
                         self._closure(block0)
                 with self._option():
-                    self._token('executor')
-                    self._token(':')
+                    self._token("executor")
+                    self._token(":")
                     self._identifier_()
                     self._json_obj_()
                 with self._option():
-                    self._token('executor')
-                    self._token(':')
+                    self._token("executor")
+                    self._token(":")
                     self._identifier_()
                 with self._option():
-                    self._token('watch-regex')
-                    self._token(':')
+                    self._token("watch-regex")
+                    self._token(":")
                     self._quoted_string_()
                 with self._option():
-                    self._token('publish')
-                    self._token(':')
+                    self._token("publish")
+                    self._token(":")
                     self._quoted_string_()
                 with self._option():
-                    self._token('resources')
-                    self._token(':')
+                    self._token("resources")
+                    self._token(":")
                     self._json_obj_()
                 with self._option():
-                    self._token('uses')
-                    self._token(':')
+                    self._token("uses")
+                    self._token(":")
                     self._file_list_()
-                self._error('no available options')
+                self._error("no available options")
 
     @tatsumasu()
     def _rule_(self):  # noqa
-        self._token('rule')
+        self._token("rule")
         self._identifier_()
-        self.name_last_node('name')
-        self._token(':')
+        self.name_last_node("name")
+        self._token(":")
 
         def block2():
             self._rule_parameters_()
+
         self._closure(block2)
-        self.name_last_node('params')
+        self.name_last_node("params")
 
         def block4():
             self._construct_cache_key_run_()
+
         self._closure(block4)
-        self.name_last_node('cachekeystmts')
+        self.name_last_node("cachekeystmts")
 
         def block6():
             self._run_statement_()
+
         self._closure(block6)
-        self.name_last_node('stmts')
-        self.ast._define(
-            ['cachekeystmts', 'name', 'params', 'stmts'],
-            []
-        )
+        self.name_last_node("stmts")
+        self.ast._define(["cachekeystmts", "name", "params", "stmts"], [])
 
     @tatsumasu()
     def _add_if_missing_(self):  # noqa
-
         def block0():
             with self._choice():
                 with self._option():
-                    self._token('add-if-missing')
+                    self._token("add-if-missing")
                 with self._option():
-                    self._token('add-artifact')
-                self._error('no available options')
+                    self._token("add-artifact")
+                self._error("no available options")
+
         self._closure(block0)
         self._json_obj_()
 
     @tatsumasu()
     def _remember_executed_input_(self):  # noqa
-        self._token('input')
+        self._token("input")
         self._quoted_string_()
-        self._token(':')
+        self._token(":")
 
         def block0():
             with self._choice():
@@ -426,46 +422,49 @@ class depfileParser(Parser):
                     self._json_obj_()
                 with self._option():
                     self._json_array_()
-                self._error('no available options')
+                self._error("no available options")
+
         self._closure(block0)
 
     @tatsumasu()
     def _remember_executed_output_(self):  # noqa
-        self._token('output')
-        self._token(':')
+        self._token("output")
+        self._token(":")
         self._json_obj_()
 
     @tatsumasu()
     def _remember_executed_(self):  # noqa
-        self._token('remember-executed')
-        self._token('transform')
-        self._token(':')
+        self._token("remember-executed")
+        self._token("transform")
+        self._token(":")
         self._quoted_string_()
 
         def block0():
             self._remember_executed_input_()
+
         self._closure(block0)
 
         def block1():
             self._remember_executed_output_()
+
         self._closure(block1)
 
     @tatsumasu()
     def _exec_profile_(self):  # noqa
-        self._token('executor-template')
+        self._token("executor-template")
         self._identifier_()
         self._json_obj_()
 
     @tatsumasu()
     def _var_stmt_(self):  # noqa
-        self._token('let')
+        self._token("let")
         self._identifier_()
-        self._token('=')
+        self._token("=")
         self._quoted_string_()
 
     @tatsumasu()
     def _include_stmt_(self):  # noqa
-        self._token('include')
+        self._token("include")
         self._quoted_string_()
 
     @tatsumasu()
@@ -474,71 +473,69 @@ class depfileParser(Parser):
 
     @tatsumasu()
     def _eval_statement_(self):  # noqa
-        self._token('eval')
+        self._token("eval")
         self._quoted_string_()
 
     @tatsumasu()
     def _conditional_(self):  # noqa
-        self._token('if')
+        self._token("if")
         self._conditional_expr_()
-        self.name_last_node('condition')
-        self._token(':')
+        self.name_last_node("condition")
+        self._token(":")
         self._declarations_()
-        self.name_last_node('true_body')
+        self.name_last_node("true_body")
 
         def block3():
-            self._token('elif')
+            self._token("elif")
             self._conditional_expr_()
-            self._token(':')
+            self._token(":")
             self._declarations_()
+
         self._closure(block3)
-        self.name_last_node('elif_clauses')
+        self.name_last_node("elif_clauses")
         with self._optional():
-            self._token('else')
-            self._token(':')
+            self._token("else")
+            self._token(":")
             self._declarations_()
-        self.name_last_node('else_clause')
-        self._token('endif')
-        self.ast._define(
-            ['condition', 'elif_clauses', 'else_clause', 'true_body'],
-            []
-        )
+        self.name_last_node("else_clause")
+        self._token("endif")
+        self.ast._define(["condition", "elif_clauses", "else_clause", "true_body"], [])
 
     @tatsumasu()
     def _type_definition_field_(self):  # noqa
         with self._group():
             with self._choice():
                 with self._option():
-                    self._token('description')
-                    self._token(':')
+                    self._token("description")
+                    self._token(":")
                     self._quoted_string_()
                 with self._option():
-                    self._token('required')
-                    self._token(':')
+                    self._token("required")
+                    self._token(":")
                     self._json_array_()
-                self._error('no available options')
+                self._error("no available options")
 
     @tatsumasu()
     def _type_definition_(self):  # noqa
-        self._token('{')
+        self._token("{")
         self._type_definition_field_()
 
         def block0():
-            self._token(',')
+            self._token(",")
             self._type_definition_field_()
+
         self._closure(block0)
-        self._token('}')
+        self._token("}")
 
     @tatsumasu()
     def _type_def_stmt_(self):  # noqa
-        self._token('type')
+        self._token("type")
         self._identifier_()
-        self._token('=')
+        self._token("=")
         self._type_definition_()
 
     @tatsumasu()
     def _declarations_(self):  # noqa
-
         def block0():
             with self._choice():
                 with self._option():
@@ -559,7 +556,8 @@ class depfileParser(Parser):
                     self._eval_statement_()
                 with self._option():
                     self._type_def_stmt_()
-                self._error('no available options')
+                self._error("no available options")
+
         self._positive_closure(block0)
 
     @tatsumasu()
@@ -696,8 +694,8 @@ class depfileSemantics(object):
 
 def main(filename, start=None, **kwargs):
     if start is None:
-        start = 'triple_dbl_quoted_string'
-    if not filename or filename == '-':
+        start = "triple_dbl_quoted_string"
+    if not filename or filename == "-":
         text = sys.stdin.read()
     else:
         with open(filename) as f:
@@ -706,14 +704,14 @@ def main(filename, start=None, **kwargs):
     return parser.parse(text, rule_name=start, filename=filename, **kwargs)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import json
     from tatsu.util import asjson
 
-    ast = generic_main(main, depfileParser, name='depfile')
-    print('AST:')
+    ast = generic_main(main, depfileParser, name="depfile")
+    print("AST:")
     print(ast)
     print()
-    print('JSON:')
+    print("JSON:")
     print(json.dumps(asjson(ast), indent=2))
     print()

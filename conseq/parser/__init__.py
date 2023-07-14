@@ -8,9 +8,11 @@ from conseq.parser import depfile
 from typing import List, Union
 import dataclasses
 
+
 @dataclass
 class QueryVariable:
     name: str
+
 
 @dataclass
 class RunStmt:
@@ -18,22 +20,26 @@ class RunStmt:
     command: str
     script: str
 
-@dataclass 
+
+@dataclass
 class TypeDefStmt:
     name: str
     description: str
     required: List[str]
+
 
 @dataclass
 class ExecProfileStmt:
     name: str
     properties: Dict[str, Any]
 
+
 @dataclass
 class RememberExecutedStmt:
     transform: str
     inputs: Dict[str, Any]
     outputs: List[Any]
+
 
 @dataclass
 class InputSpec:
@@ -42,28 +48,34 @@ class InputSpec:
     for_all: object
     copy_to: str
 
+
 @dataclass
 class IncludeStatement:
-    filename : str
+    filename: str
+
 
 @dataclass
 class LetStatement:
     name: str
     value: str
 
+
 @dataclass
 class AddIfMissingStatement:
     json_obj: Dict[str, Any]
+
 
 @dataclass
 class IfStatement:
     condition: str
     when_true: List["Statement"]
-    when_false: List["Statement"] 
+    when_false: List["Statement"]
+
 
 @dataclass
 class EvalStatement:
     body: str
+
 
 class FileRef:
     def __init__(self, filename, copy_to=None):
@@ -90,11 +102,11 @@ class Rule:
 
     def __init__(self, name):
         self.name = name
-        self.filename : Optional[str] = None
-        self.lineno : Optional[int] = None
-        self.inputs  = []
+        self.filename: Optional[str] = None
+        self.lineno: Optional[int] = None
+        self.inputs = []
         self.outputs: Optional[Any] = None
-        self.run_stmts : List[RunStmt] = []
+        self.run_stmts: List[RunStmt] = []
         self.executor = "default"
         self.executor_parameters = {}
         self.watch_regex = None
@@ -229,7 +241,7 @@ class Semantics(object):
 
     def output_expected_def(self, ast):
         raise Exception("unimp")
-    
+
     def rule(self, ast):
         # raise Exception()
         # print("rule", repr(ast))
@@ -311,7 +323,7 @@ class Semantics(object):
             else:
                 assert prop == "required"
                 required = value
-        
+
         return TypeDefStmt(ast[1], description, required)
 
     def var_stmt(self, ast):
@@ -361,7 +373,9 @@ class Semantics(object):
             files.append(x[1])
         return files
 
+
 Statement = Union[LetStatement, IfStatement, IncludeStatement, TypeDefStmt, Rule]
+
 
 def parse_str(text, filename=None):
     parser = depfile.depfileParser(parseinfo=False)

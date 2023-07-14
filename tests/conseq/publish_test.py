@@ -23,7 +23,6 @@ def test_publish(tmpdir):
         let S3_STAGING_URL="{{ TEST_REMOTE_URL_ROOT }}/staging"
     """
 
-
     storage_api, bucket_name, key_prefix = _parse_remote(TEST_REMOTE_URL_ROOT)
     assert storage_api == "s3"
     AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")

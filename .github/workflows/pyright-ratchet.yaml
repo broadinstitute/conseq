@@ -26,4 +26,3 @@ jobs:
         run: poetry run pyright-ratchet run pyright
       - name: Run pytests
         run: poetry run pytest
-

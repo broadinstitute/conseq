@@ -1,7 +1,8 @@
 import collections
 from typing import Sequence, Dict, Any, Tuple
 
-def count_unique_values_per_property(instances : Sequence[Dict[str, Any]]):
+
+def count_unique_values_per_property(instances: Sequence[Dict[str, Any]]):
     per_prop = collections.defaultdict(lambda: set())
 
     # first determine all properties
@@ -30,7 +31,7 @@ def count_unique_values_per_property(instances : Sequence[Dict[str, Any]]):
     return [(property, len(values)) for property, values in per_prop.items()]
 
 
-def split_props_by_counts(property_counts : Sequence[Tuple[str, int]]):
+def split_props_by_counts(property_counts: Sequence[Tuple[str, int]]):
     common = []
     varying = []
     for property, count in property_counts:
@@ -41,7 +42,3 @@ def split_props_by_counts(property_counts : Sequence[Tuple[str, int]]):
     common.sort()
     varying.sort()
     return common, varying
-
-   
-
-

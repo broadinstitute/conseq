@@ -1,6 +1,7 @@
 from conseq.depquery import count_unique_values_per_property, split_props_by_counts
 import collections
 
+
 def count_instances_with_values(property, instances):
     per_value = collections.defaultdict(lambda: 0)
     for x in instances:
@@ -9,6 +10,7 @@ def count_instances_with_values(property, instances):
             per_value[x[property]] += 1
     return per_value.items()
 
+
 def count_instances_with_properties(properties, instances):
     per_property = collections.defaultdict(lambda: 0)
     for x in instances:
@@ -16,6 +18,7 @@ def count_instances_with_properties(properties, instances):
             if property in x:
                 per_property[property] += 1
     return per_property.items()
+
 
 class MockStore:
     def __init__(self, values):
@@ -40,7 +43,8 @@ class MockStore:
     def find_prop_values(self, query, property):
         instances = self.get_instances(query)
         return count_instances_with_values(property, instances)
-    
+
+
 class AugmentedStore:
     def __init__(self, instances):
         self.store = MockStore(instances)
@@ -80,7 +84,7 @@ class AugmentedStore:
         v = self.store.find_prop_values(query, property)
         v, next = self.slice_range(v, first, max_count, lambda x: x[0])
         return {"values": v, "next": next}
-    
+
     def get_instances(self, query, sort_props, first, max_count):
         "returns: {common: list of PropConsts, properties: list of string, instances: list of dicts, next: token}"
 
@@ -102,7 +106,13 @@ class AugmentedStore:
         counts = count_unique_values_per_property(subset)
         common, varying = split_props_by_counts(counts)
 
-        return {"common": common, "properties": varying, "instances": subset, "next": next}    
+        return {
+            "common": common,
+            "properties": varying,
+            "instances": subset,
+            "next": next,
+        }
+
 
 store = AugmentedStore(
     [

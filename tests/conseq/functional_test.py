@@ -244,6 +244,7 @@ def test_regexp_query_expands_var(tmpdir):
     )
     assert len(j.get_all_executions()) == 2
 
+
 def test_type_defs(tmpdir):
     j = run_conseq(
         tmpdir,
@@ -263,6 +264,7 @@ def test_type_defs(tmpdir):
     # current policy is to remember all types that have ever been defined. Maybe not a good solution. Re-evalute this later
     types = j.get_type_defs()
     assert len(types) == 2
+
 
 def test_fileref_copy_to(tmpdir):
     file_a = tmpdir.join("a")
@@ -442,7 +444,7 @@ def test_relative_path_in_artifact(tmpdir):
     # datafile.write("sample")
 
     # datafile_path = os.path.relpath(str(datafile), str(tmpdir))
-    
+
     j = run_conseq(
         tmpdir,
         """
@@ -453,6 +455,7 @@ def test_relative_path_in_artifact(tmpdir):
     assert len(objects) == 1
     object = objects[0]
     assert os.path.abspath(object.props["path"]) == str(tmpdir)
+
 
 def test_clobbers_from_rules_with_all_are_okay(tmpdir):
     # if two rules emit the same artifact, the second one should fail. Don't allow a rule to clobber an
@@ -604,16 +607,30 @@ def test_debugrun(tmpdir):
     state_dir = str(tmpdir.join("state"))
     commands = [
         ["--dir", state_dir, "run", config_file],
-        ["--dir", state_dir, "debugrun", config_file, "sample_rule", "--save-inputs", str(inputs_dest)]]
+        [
+            "--dir",
+            state_dir,
+            "debugrun",
+            config_file,
+            "sample_rule",
+            "--save-inputs",
+            str(inputs_dest),
+        ],
+    ]
     from conseq.main import main
 
     for command in commands:
         print("running: {}".format(command))
         main(command)
-    
+
     import json
+
     written_inputs = json.loads(inputs_dest.read())
-    assert written_inputs == {"single": {"type": "x", "value": "y", '$manually-added': 'true'}, "list":[{"type": "element", "value": "1", '$manually-added': 'true'}]}
+    assert written_inputs == {
+        "single": {"type": "x", "value": "y", "$manually-added": "true"},
+        "list": [{"type": "element", "value": "1", "$manually-added": "true"}],
+    }
+
 
 def test_commands(tmpdir):
     # don't actually test any of the functionality of these commands, only that they execute error free

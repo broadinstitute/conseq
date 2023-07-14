@@ -54,22 +54,27 @@ def create_client_for(
         uid = uuid.uuid4().hex
     # remote_url = TEST_REMOTE_URL_ROOT + "/" + uid
 
-        #     resources,
-        #     properties["label"],
-        #     config["WORKING_DIR"],
-        #     config["S3_STAGING_URL"] + "/exec-results/" + config["EXECUTION_ID"],
-        #     config["S3_STAGING_URL"],
-        #     properties["HELPER_PATH"],
-        #     _make_template(properties["COMMAND_TEMPLATE"]),
-        #     config.get("PYTHON_PATH", "python"),
-        #     config["AWS_ACCESS_KEY_ID"],
-        #     config["AWS_SECRET_ACCESS_KEY"],
-        #     reuse_past_runs,
-        # )
+    #     resources,
+    #     properties["label"],
+    #     config["WORKING_DIR"],
+    #     config["S3_STAGING_URL"] + "/exec-results/" + config["EXECUTION_ID"],
+    #     config["S3_STAGING_URL"],
+    #     properties["HELPER_PATH"],
+    #     _make_template(properties["COMMAND_TEMPLATE"]),
+    #     config.get("PYTHON_PATH", "python"),
+    #     config["AWS_ACCESS_KEY_ID"],
+    #     config["AWS_SECRET_ACCESS_KEY"],
+    #     reuse_past_runs,
+    # )
     from conseq.template import create_jinja2_env
+
     jinja2_env = create_jinja2_env()
-    c = exec_client.create_client("delegate", {"WORKING_DIR": workdir}, 
-                                  {"HELPER_PATH": TEST_HELPER_PATH}, jinja2_env)
+    c = exec_client.create_client(
+        "delegate",
+        {"WORKING_DIR": workdir},
+        {"HELPER_PATH": TEST_HELPER_PATH},
+        jinja2_env,
+    )
 
     # c = exec_client.DelegateExecClient(
     #     TEST_RESOURCES,
@@ -239,7 +244,7 @@ def test_delegate_reattach(conseq_delegate_test_docker_image_name, tmpdir, use_a
         resolver_state,
         {"mem": 10.0},
         watch_regex=None,
-        executor_parameters={}
+        executor_parameters={},
     )
     print(e)
     extern_id = e.get_external_id()
@@ -290,8 +295,7 @@ def test_terminate(conseq_delegate_test_docker_image_name, tmpdir, use_async):
         resolver_state,
         {"mem": 10.0},
         watch_regex=None,
-                executor_parameters={}
-
+        executor_parameters={},
     )
 
     result = e.get_completion()

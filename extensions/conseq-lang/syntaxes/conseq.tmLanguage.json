@@ -96,11 +96,11 @@
           "match": "([^\"]*)(\"[^\"]*)({{[^\"]+}})([^\"]*\")([^\"]*)",
           "captures": [
             {},
-            { "patterns": [ { "include": "source.python" } ] },
+            { "patterns": [{ "include": "source.python" }] },
             { "name": "string.python" },
             { "name": "string.regexp.jinja" },
             { "name": "string.python" },
-            { "patterns": [ { "include": "source.python" } ] }
+            { "patterns": [{ "include": "source.python" }] }
           ]
         }
       },
@@ -112,9 +112,7 @@
           "end": "\\s*(\\2)",
           "beginCaptures": [
             {
-              "patterns": [
-                { "include": "#keywords" }
-              ]
+              "patterns": [{ "include": "#keywords" }]
             }
           ],
           "patterns": [
@@ -123,14 +121,10 @@
               "end": "\\)$",
               "beginCaptures": {
                 "1": {
-                  "patterns": [
-                    { "include": "source.python" }
-                  ]
+                  "patterns": [{ "include": "source.python" }]
                 }
               },
-              "patterns": [
-                { "include": "#jinja-in-python" }
-              ]
+              "patterns": [{ "include": "#jinja-in-python" }]
             },
             {
               "begin": "\\{",

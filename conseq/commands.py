@@ -66,6 +66,7 @@ def print_history(state_dir):
 
         print("")
 
+
 def localize_if_necessary(resolver, value):
     if isinstance(value, dict):
         assert len(value) == 1
@@ -80,6 +81,7 @@ def localize_if_necessary(resolver, value):
             raise Exception(f"unhandled value: {value}")
     else:
         return value, False
+
 
 def localize_cmd(state_dir, space_, predicates, depfile, config_file):
     rules = read_rules(state_dir, depfile, config_file, create_jinja2_env())
@@ -118,6 +120,7 @@ def lsexec(state_dir):
     for execution in executions:
         _print_execution(execution)
 
+
 def stage_cmd(export_file, conseq_file, output_script):
     from conseq import depexec, exec_client
     import tempfile
@@ -128,14 +131,16 @@ def stage_cmd(export_file, conseq_file, output_script):
         db_path = os.path.join(tmpdir, "db.sqlite3")
         j = dep.open_job_db(db_path)
 
-        export_contents = read_rules(tmpdir, export_file, config_file=None, jinja2_env=create_jinja2_env())
+        export_contents = read_rules(
+            tmpdir, export_file, config_file=None, jinja2_env=create_jinja2_env()
+        )
 
         # process add-if-missing statements
         depexec.reconcile_db(
             j,
             export_contents.get_rule_specifications(),
             export_contents.objs,
-            export_contents.types.values()
+            export_contents.types.values(),
         )
 
         # handle the remember-executed statements
@@ -145,7 +150,9 @@ def stage_cmd(export_file, conseq_file, output_script):
 
         # now try to apply the rules in the conseq file provided to find input artifacts
 
-        rules = read_rules(tmpdir, conseq_file, config_file=None, jinja2_env=create_jinja2_env())
+        rules = read_rules(
+            tmpdir, conseq_file, config_file=None, jinja2_env=create_jinja2_env()
+        )
         # resolver = xref.Resolver(tmpdir, rules.vars)
 
         # process add-if-missing statements in the rule file
@@ -155,7 +162,7 @@ def stage_cmd(export_file, conseq_file, output_script):
             rules.objs,
             rules.types.values(),
             force=False,
-            print_missing_objs=False
+            print_missing_objs=False,
         )
 
         applications = []
@@ -202,7 +209,9 @@ def stage_cmd(export_file, conseq_file, output_script):
         for transform in rules.rule_by_name.keys():
             rule = rules.get_rule(transform)
             if rule.executor not in rules.exec_clients:
-                print(f"Warning: {rule.name} uses execution profile {rule.executor} which does not appear in this file. You may need to manually add this.")
+                print(
+                    f"Warning: {rule.name} uses execution profile {rule.executor} which does not appear in this file. You may need to manually add this."
+                )
             assert not rule.is_publish_rule, "Publish rules are not allowed"
 
         # these are the artifacts that we want to add to the conseq file
@@ -227,7 +236,7 @@ def stage_cmd(export_file, conseq_file, output_script):
             # inputs, resolver_state = client.preprocess_inputs(
             #     resolver, [BoundInput("tmp", artifact, None)]
             # )
-            
+
             artifact_dict = dict(artifact.props)
             if artifact_dict.get("type") == "$fileref":
                 # skip these because they should be specified on the rule itself
@@ -239,9 +248,7 @@ def stage_cmd(export_file, conseq_file, output_script):
             # print("artifact", artifact_dict)
             inputs_to_hardcode.append(artifact_dict)
 
-        _write_test_script(
-            conseq_file, inputs_to_hardcode, output_script
-        )
+        _write_test_script(conseq_file, inputs_to_hardcode, output_script)
 
 
 def _write_test_script(conseq_file, inputs_to_hardcode, output_script):
@@ -375,7 +382,6 @@ def rm_cmd(state_dir, dry_run, _space, query):
     remove_obj_and_children(j, root_obj_ids, dry_run)
 
 
-
 def list_cmd(state_dir):
     j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
     j.dump()
@@ -403,10 +409,7 @@ def export_cmd(state_dir, depfile, config_file, dest_gs_path, exclude_patterns):
                         "When pushing to S3, need the following configuration"
                     )
 
-            cas_remote = helper.new_remote(
-                vars["S3_STAGING_URL"],
-                "."
-            )
+            cas_remote = helper.new_remote(vars["S3_STAGING_URL"], ".")
         return cas_remote
 
     def process_value(value):
@@ -506,7 +509,9 @@ def export_cmd(state_dir, depfile, config_file, dest_gs_path, exclude_patterns):
         with open(dest_gs_path, "wt") as fd:
             fd.write(out.getvalue())
 
+
 from typing import Optional
+
 
 def _application_to_dict(resolver, bindings):
     result = {}
@@ -523,10 +528,17 @@ def _application_to_dict(resolver, bindings):
         else:
             result[name] = [_obj_to_dict(obj) for obj in objs]
 
-    return result                
+    return result
 
 
-def debugrun(state_dir, depfile, target, override_vars, config_file : Optional[str], save_inputs_filename: Optional[str]):
+def debugrun(
+    state_dir,
+    depfile,
+    target,
+    override_vars,
+    config_file: Optional[str],
+    save_inputs_filename: Optional[str],
+):
     db_path = os.path.join(state_dir, "db.sqlite3")
     print("opening", db_path)
     j = dep.open_job_db(db_path)
@@ -554,7 +566,7 @@ def debugrun(state_dir, depfile, target, override_vars, config_file : Optional[s
         index = 0
         for space, bindings, rule_name in applications:
             index += 1
-            assert space == PUBLIC_SPACE # space doesn't actually get used anymore
+            assert space == PUBLIC_SPACE  # space doesn't actually get used anymore
             inputs = _application_to_dict(resolver, bindings)
             if len(applications) == 1:
                 output_filename = save_inputs_filename
@@ -563,7 +575,7 @@ def debugrun(state_dir, depfile, target, override_vars, config_file : Optional[s
             log.info(f"Writing inputs for {rule_name} to {output_filename}")
             with open(output_filename, "wt") as fd:
                 fd.write(json.dumps(inputs, indent=2))
-    
+
 
 def gc(state_dir):
     db_path = os.path.join(state_dir, "db.sqlite3")
@@ -602,5 +614,3 @@ def gc(state_dir):
         shutil.rmtree(job_dir)
 
     j.gc()
-
-

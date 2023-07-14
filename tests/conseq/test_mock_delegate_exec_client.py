@@ -11,10 +11,12 @@ import subprocess
 from conseq.types import PropsType
 from conseq.exec_client import NullResolveState, RemoteResolveState
 
+
 @pytest.fixture(scope="session")
 def conseq_delegate_test_docker_image_name():
     subprocess.check_call(["bash", "./build.sh"], cwd="conseq-delegate-test")
     return "conseq-delegate-test"
+
 
 GS_TEST_REMOTE_URL_ROOT = "gs://broad-achilles-kubeque/conseq-test"
 TEST_HELPER_PATH = "python /helper.py"
@@ -26,27 +28,25 @@ import subprocess
 from conseq.template import create_jinja2_env, render_template
 
 
-
-class MockProc():
+class MockProc:
     def __init__(self):
         self.pid = 100000000
 
-def test_delegate_exec_client_commands(
-    tmpdir,
-    monkeypatch
-):
+
+def test_delegate_exec_client_commands(tmpdir, monkeypatch):
     assert tmpdir is not None
     mock_helper = MagicMock()
     mock_helper.new_remote().remote_url = "fake_remote_url"
     mock_popen = create_autospec(subprocess.Popen)
+
     def _mock_popen(args, **kwargs):
         # verify that the expansion worked and we're running the right command
         assert args[0] == "bash"
         assert args[1] == "-c"
-        assert args[2].startswith('exec docker run --rm image-xyz python /helper.py')
+        assert args[2].startswith("exec docker run --rm image-xyz python /helper.py")
         return MockProc()
 
-    # zee temple of shakyfruit 
+    # zee temple of shakyfruit
 
     mock_popen.side_effect = _mock_popen
 
@@ -67,7 +67,9 @@ def test_delegate_exec_client_commands(
             GS_TEST_REMOTE_URL_ROOT,
             GS_TEST_REMOTE_URL_ROOT + "/CAS",
             TEST_HELPER_PATH,
-            exec_client.TemplatePartial( jinja2_env, {}, """docker run --rm {{ image_name }} {{COMMAND}}"""),
+            exec_client.TemplatePartial(
+                jinja2_env, {}, """docker run --rm {{ image_name }} {{COMMAND}}"""
+            ),
             "python",
             recycle_past_runs=False,
         )
@@ -86,12 +88,12 @@ def test_delegate_exec_client_commands(
         resolver_state=RemoteResolveState([], []),
         resources={},
         watch_regex=None,
-        executor_parameters={"image_name": "image-xyz"}
+        executor_parameters={"image_name": "image-xyz"},
     )
-    
+
     external_id = execution1.get_external_id()
 
-    # make sure reattach works and results in an execution with the same external id (since 
+    # make sure reattach works and results in an execution with the same external id (since
     # we can't easily compare executions directly)
     c2 = create_client()
     execution2 = c2.reattach(external_id)

@@ -61,7 +61,7 @@ class Rules:
     def get_rule(self, name):
         return self.rule_by_name[name]
 
-    def set_rule(self, name, rule : Rule):
+    def set_rule(self, name, rule: Rule):
         if name in self.rule_by_name:
             raise Exception("Duplicate rules for {}".format(name))
         self.rule_by_name[name] = rule
@@ -136,10 +136,13 @@ def _load_initial_config(state_dir: str, depfile: str, config_file: Optional[str
 def _not_callable(x):
     raise Exception("internal error")
 
+
 from typing import Any, List
 from jinja2 import Environment
+
+
 class EvalContext:
-    def __init__(self, rules : Rules, filename : str, hashcache, jinja2_env : Environment):
+    def __init__(self, rules: Rules, filename: str, hashcache, jinja2_env: Environment):
         self.rules = rules
         self.filename = filename
         self.hashcache = hashcache
@@ -147,7 +150,7 @@ class EvalContext:
 
         __render_template = [_not_callable]
         _render_template = lambda x: __render_template[0](x)
-        
+
         __render_template[0] = lambda x: render_template(
             rules.jinja2_env, x, rules.vars
         )
@@ -156,10 +159,10 @@ class EvalContext:
         self.config = config
 
 
-def _eval_stmts(statements : List[Any], context : EvalContext):
+def _eval_stmts(statements: List[Any], context: EvalContext):
     rules = context.rules
     root_dir = os.path.dirname(os.path.abspath(context.filename))
-    
+
     def rt(x):
         return render_template(rules.jinja2_env, x, rules.vars)
 
@@ -171,16 +174,20 @@ def _eval_stmts(statements : List[Any], context : EvalContext):
         elif isinstance(dec, parser.AddIfMissingStatement):
             script_path = os.path.abspath(context.filename)
             script_dir = os.path.dirname(script_path)
-            expanded_artifact = expand_dict(context.jinja2_env, dec.json_obj, context.config, SCRIPT_PATH=script_path, SCRIPT_DIR=script_dir)
+            expanded_artifact = expand_dict(
+                context.jinja2_env,
+                dec.json_obj,
+                context.config,
+                SCRIPT_PATH=script_path,
+                SCRIPT_DIR=script_dir,
+            )
             rules.add_if_missing(expanded_artifact)
         elif isinstance(dec, parser.LetStatement):
             rules.set_var(dec.name, dec.value)
         elif isinstance(dec, parser.IncludeStatement):
             _filename = os.path.expanduser(dec.filename)
             statements = parser.parse(_filename)
-            _eval_stmts(
-                statements, context
-            )
+            _eval_stmts(statements, context)
         elif isinstance(dec, parser.TypeDefStmt):
             rules.add_type(dec)
         elif isinstance(dec, parser.ExecProfileStmt):
@@ -199,6 +206,7 @@ def _eval_stmts(statements : List[Any], context : EvalContext):
             dec.filename = context.filename
             rules.set_rule(dec.name, dec)
 
+
 def _eval_rule(dec, rt, hashcache, root_dir, rules):
     # rewrite any filerefs
     inputs = []
@@ -208,9 +216,7 @@ def _eval_rule(dec, rt, hashcache, root_dir, rules):
             assert dec.filename
             script_dir = os.path.dirname(dec.filename)
 
-            filename = os.path.abspath(
-                os.path.join(script_dir, rt(fileref.filename))
-            )
+            filename = os.path.abspath(os.path.join(script_dir, rt(fileref.filename)))
             # print(
             #     "re-anchoring",
             #     fileref.filename,
@@ -256,12 +262,14 @@ def _eval_rule(dec, rt, hashcache, root_dir, rules):
             "$fileref/{}".format(filename), new_query_obj, False, None
         )
         inputs.append(input)
-    
+
     return inputs
 
 
-def _eval_if(if_statement, context : EvalContext):
-    condition_result = eval(if_statement.condition, context.eval_context, context.eval_context)
+def _eval_if(if_statement, context: EvalContext):
+    condition_result = eval(
+        if_statement.condition, context.eval_context, context.eval_context
+    )
     if condition_result:
         _eval_stmts(if_statement.when_true, context)
     else:
@@ -280,7 +288,12 @@ def read_deps(filename, hashcache, jinja2_env, initial_vars={}) -> Rules:
 
 
 def read_rules(
-    state_dir: str, depfile: str, config_file: Optional[str], jinja2_env, *, initial_config={}
+    state_dir: str,
+    depfile: str,
+    config_file: Optional[str],
+    jinja2_env,
+    *,
+    initial_config={}
 ) -> Rules:
     hashcache = HashCache(os.path.join(state_dir, "hashcache"))
     _initial_config = _load_initial_config(state_dir, depfile, config_file)

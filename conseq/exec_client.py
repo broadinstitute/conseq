@@ -22,6 +22,7 @@ import tempfile
 import signal
 from conseq.template import MissingTemplateVar, render_template
 
+
 class TemplatePartial:
     def __init__(self, jinja2_env, config, text: str) -> None:
         self.text = text
@@ -32,9 +33,11 @@ class TemplatePartial:
     def apply(self, **kwargs):
         return render_template(self.jinja2_env, self.text, self.config, **kwargs)
 
+
 CACHE_KEY_FILENAME = "conseq-cache-key.json"
 
 log = logging.getLogger(__name__)
+
 
 class PidProcStub:
     def __init__(self, pid: int) -> None:
@@ -56,7 +59,7 @@ class PidProcStub:
             return None
         except OSError:
             return 0
-    
+
     def terminate(self):
         os.kill(self.pid, signal.SIGTERM)
 
@@ -111,8 +114,10 @@ def log_job_output(
         )
         _tail_file(stderr_path)
 
+
 class ExecutionStub:
     pass
+
 
 class FailedExecutionStub(ExecutionStub):
     def __init__(self, id, message, transform, job_dir=None):
@@ -128,7 +133,7 @@ class FailedExecutionStub(ExecutionStub):
         log.error(self.message)
         return ExecResult(self.message, None)
 
-    @property    
+    @property
     def proc(self):
         raise Exception("This stub doesn't have a real process")
 
@@ -140,7 +145,7 @@ class SuccessfulExecutionStub(ExecutionStub):
         self.transform = transform
         self.job_dir = job_dir
 
-    @property    
+    @property
     def proc(self):
         raise Exception("This stub doesn't have a real process")
 
@@ -185,8 +190,8 @@ class ExecResult:
 
 
 class ClientExecution:
-    exec_xref : str
-    
+    exec_xref: str
+
     def __init__(
         self,
         transform: str,
@@ -251,9 +256,7 @@ class ClientExecution:
         log.error("Task failed %s: %s", self.desc_name, failure)
         _log_local_failure(self.captured_stdouts)
 
-    def get_completion(
-        self
-    ) -> ExecResult:
+    def get_completion(self) -> ExecResult:
         result = self._get_completion()
         if result.failure_msg is not None:
             self._log_failure(result.failure_msg)
@@ -352,6 +355,7 @@ class ClientExecution:
             )
 
         return ExecResult(None, outputs, cache_key=cache_key)
+
 
 class DelegateExecution(ClientExecution):
     def __init__(
@@ -770,7 +774,7 @@ class LocalExecClient(ExecClient):
         resolve_state: ResolveState,
         resources: Dict[str, float],
         watch_regex,
-        executor_parameters: Dict[str, str]
+        executor_parameters: Dict[str, str],
     ) -> ClientExecution:
         assert executor_parameters == {}, "Local executors don't accept parameters"
         assert isinstance(resolve_state, NullResolveState)
@@ -953,15 +957,15 @@ def process_inputs_for_remote_exec(
     log.debug("files_to_download: %s", files_to_download)
     return files_to_download, files_to_upload_and_download, result
 
+
 def get_staging_url(config):
     if "STAGING_URL" in config:
         return config["STAGING_URL"]
     return config["S3_STAGING_URL"]
 
+
 def create_publish_exec_client(config):
-    return PublishExecClient(
-        get_staging_url(config)
-    )
+    return PublishExecClient(get_staging_url(config))
 
 
 def make_results_path(cas_remote_url: str, pull_map_url: str) -> str:
@@ -982,9 +986,7 @@ def load_existing_results(id, remote, results_path, transform):
 
 class PublishExecClient:
     def __init__(self, cas_remote_url):
-        self.cas_remote = helper.new_remote(
-            cas_remote_url, "."
-        )
+        self.cas_remote = helper.new_remote(cas_remote_url, ".")
 
     def preprocess_inputs(self, resolver, inputs):
         result = process_inputs_for_publishing(self.cas_remote, inputs)
@@ -1041,10 +1043,7 @@ class AsyncDelegateExecClient:
 
     def reattach(self, external_ref):
         d = json.loads(external_ref)
-        remote = helper.new_remote(
-            d["remote_url"],
-            d["local_job_dir"],
-        )
+        remote = helper.new_remote(d["remote_url"], d["local_job_dir"],)
         file_fetcher = self._mk_file_fetcher(remote)
         proc = ExternProc(
             d["x_job_id"],
@@ -1090,8 +1089,8 @@ class AsyncDelegateExecClient:
         resolver_state,
         resources,
         watch_regex,
-        executor_parameters: Dict[str, str]
-):
+        executor_parameters: Dict[str, str],
+    ):
         assert (
             watch_regex is None
         ), "delegated executors cannot watch logs, watch-regex not allowed"
@@ -1120,14 +1119,8 @@ class AsyncDelegateExecClient:
 
         write_wrapper_script(local_wrapper_path, None, prologue, run_stmts, None)
 
-        remote = helper.new_remote(
-            remote_url,
-            local_job_dir,
-        )
-        cas_remote = helper.new_remote(
-            self.cas_remote_url,
-            local_job_dir,
-        )
+        remote = helper.new_remote(remote_url, local_job_dir,)
+        cas_remote = helper.new_remote(self.cas_remote_url, local_job_dir,)
         for _, dest in source_and_dest:
             assert dest[0] != "/"
 
@@ -1167,11 +1160,9 @@ class AsyncDelegateExecClient:
         full_command = self.run_command_template.apply(
             COMMAND=command, JOB=rel_job_dir, **executor_parameters
         ).strip()
- 
+
         stdout_file_obj = open(stdout_path, "wt")
-        bash_cmd = "exec {full_command}".format(
-            full_command=full_command
-        )
+        bash_cmd = "exec {full_command}".format(full_command=full_command)
         close_fds = True
 
         log.warning("executing: %s", bash_cmd)
@@ -1185,7 +1176,7 @@ class AsyncDelegateExecClient:
             preexec_fn=os.setsid,
             cwd=job_dir,
             stdout=stdout_file_obj,
-            stderr=subprocess.STDOUT
+            stderr=subprocess.STDOUT,
         )
         stdout_file_obj.close()
 
@@ -1276,10 +1267,7 @@ class DelegateExecClient:
     def reattach(self, external_ref: str) -> DelegateExecution:
         print("reattach", repr(external_ref))
         d = json.loads(external_ref)
-        remote = helper.new_remote(
-            d["remote_url"],
-            d["local_job_dir"],
-        )
+        remote = helper.new_remote(d["remote_url"], d["local_job_dir"],)
         file_fetcher = self._mk_file_fetcher(remote)
         return DelegateExecution(
             d["transform"],
@@ -1294,7 +1282,6 @@ class DelegateExecClient:
             d["label"],
             d["results_path"],
         )
-    
 
     def preprocess_inputs(
         self, resolver: Resolver, inputs: Tuple[BoundInput]
@@ -1322,8 +1309,8 @@ class DelegateExecClient:
         resolver_state: ResolveState,
         resources: Dict[str, float],
         watch_regex,
-        executor_parameters: Dict[str, str]
-) -> DelegateExecution:
+        executor_parameters: Dict[str, str],
+    ) -> DelegateExecution:
         assert isinstance(resolver_state, ResolveState)
 
         assert (
@@ -1355,14 +1342,8 @@ class DelegateExecClient:
 
         write_wrapper_script(local_wrapper_path, None, prologue, run_stmts, None)
 
-        remote = helper.new_remote(
-            remote_url,
-            local_job_dir,
-        )
-        cas_remote = helper.new_remote(
-            self.cas_remote_url,
-            local_job_dir,
-        )
+        remote = helper.new_remote(remote_url, local_job_dir,)
+        cas_remote = helper.new_remote(self.cas_remote_url, local_job_dir,)
         for _, dest in source_and_dest:
             assert dest[0] != "/"
 
@@ -1498,12 +1479,15 @@ def _log_remote_failure(file_fetch, msg):
                 stderr_path_to_print=stderr_path,
             )
 
+
 def assert_is_single_command(command):
     # A source of confusion is commands which span multiple lines but are missing backslashes
     # make sure that all newlines have a preceeding "\"
     for line in command.split("\n")[:-1]:
         if len(line) == 0 or line[-1] != "\\":
-            raise Exception(f"The command {command} would likely not work as expected because it spans multiple lines and is missing \"\\\" at the end of the lines. Specifically the line {repr(line)} ends with {repr(line[-1])}")
+            raise Exception(
+                f'The command {command} would likely not work as expected because it spans multiple lines and is missing "\\" at the end of the lines. Specifically the line {repr(line)} ends with {repr(line[-1])}'
+            )
 
 
 def assert_has_only_props(
@@ -1517,9 +1501,9 @@ def assert_has_only_props(
 
 
 def create_client(name, config, properties, jinja2_env):
-    def _make_template( text):
+    def _make_template(text):
         return TemplatePartial(jinja2_env, config, text)
-    
+
     resources = {"slots": 1}
     for k, v in properties.get("resources", {}).items():
         resources[k] = float(v)
@@ -1587,4 +1571,6 @@ def create_client(name, config, properties, jinja2_env):
             reuse_past_runs,
         )
     else:
-        raise Exception(f"Unrecognized executor type: {type} (expected: 'local', 'delegate' or 'async-delegate')")
+        raise Exception(
+            f"Unrecognized executor type: {type} (expected: 'local', 'delegate' or 'async-delegate')"
+        )

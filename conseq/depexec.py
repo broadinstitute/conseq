@@ -47,8 +47,11 @@ log = logging.getLogger(__name__)
 Artifact = PropsType
 
 import json
+
+
 def Local(name):
     return {"$filename": name}
+
 
 def publish(*items):
     with open("results.json", "w") as fd:
@@ -58,6 +61,7 @@ def publish(*items):
 class FatalUserError(Exception):
     pass
 
+
 def make_output_check(output_expectations):
     def is_outputs_good(outputs):
         if len(output_expectations) == 0:
@@ -65,7 +69,9 @@ def make_output_check(output_expectations):
         breakpoint()
         print(output_expectations)
         return False
+
     return is_outputs_good
+
 
 def to_template(jinja2_env: Environment, rule: Rule, config: PropsType) -> Template:
     queries, predicates = convert_input_spec_to_queries(jinja2_env, rule, config)
@@ -129,9 +135,7 @@ def format_inputs(inputs: Dict[str, Dict[str, str]]) -> str:
 def publish_manifest(location, dictionary, config):
     from conseq import helper
 
-    remote = helper.new_remote(
-        os.path.dirname(location), "."
-    )
+    remote = helper.new_remote(os.path.dirname(location), ".")
     remote.upload_str(os.path.basename(location), json.dumps(dictionary, indent=2))
 
 
@@ -168,10 +172,7 @@ def _run_locally(job_dir, run_stmts: List[str]):
 def _get_cached_result(key_hash: str, config: Dict[str, Any]):
     from conseq import helper
 
-    remote = helper.new_remote(
-        config["CLOUD_STORAGE_CACHE_ROOT"],
-        None
-    )
+    remote = helper.new_remote(config["CLOUD_STORAGE_CACHE_ROOT"], None)
     results_path = os.path.join(
         config["CLOUD_STORAGE_CACHE_ROOT"], key_hash, "results.json"
     )
@@ -210,10 +211,7 @@ def _store_cached_result(
     assert isinstance(cache_key, dict)
     from conseq import helper
 
-    remote = helper.new_remote(
-        config["CLOUD_STORAGE_CACHE_ROOT"],
-        None
-    )
+    remote = helper.new_remote(config["CLOUD_STORAGE_CACHE_ROOT"], None)
 
     cache_dir, canonical_key = _compute_cache_key_path(cache_key, config)
 
@@ -331,7 +329,7 @@ def execute(
                 resolver_state,
                 rule.resources,
                 rule.watch_regex,
-                rule.executor_parameters
+                rule.executor_parameters,
             )
         elif outputs is not None:
             log.warning("No commands to run for rule %s", name)
@@ -373,10 +371,13 @@ def get_job_dir(state_dir: str, job_id: int) -> str:
 
 
 from dataclasses import dataclass
+
+
 @dataclass
 class SummaryRec:
-    count : int
-    dirs : List[str]
+    count: int
+    dirs: List[str]
+
 
 def get_long_execution_summary(
     executing: Union[List[Execution], List[DelegateExecution]],
@@ -799,7 +800,9 @@ def expand_run(
         script_body = render_template(jinja2_env, script_body, config, **kwargs)
     return (command, script_body)
 
+
 from conseq.template import expand_dict_item, expand_dict
+
 
 def expand_outputs(
     jinja2_env: Environment, output: PropsType, config: PropsType, **kwargs,
@@ -987,7 +990,7 @@ def reconcile_db(
     objs: List[PropsType],
     type_defs: List[TypeDefStmt],
     force: Optional[bool] = None,
-    print_missing_objs: bool = True
+    print_missing_objs: bool = True,
 ) -> None:
     # rewrite the objects, expanding templates and marking this as one which was manually added from the config file
     update_rule_specs_in_db = True
@@ -1019,7 +1022,6 @@ def reconcile_db(
         else:
             update_rule_specs_in_db = False
 
-
     for obj in new_objs:
         add_artifact_if_missing(j, obj)
 
@@ -1028,6 +1030,7 @@ def reconcile_db(
 
     for type_def in type_defs:
         j.add_type_def(type_def)
+
 
 class LazyConfigDict:
     def __init__(self, rules, jinja2_env):
@@ -1044,7 +1047,10 @@ class LazyConfigDict:
             return None
         return render_template(self.jinja2_env, value, self.rules.get_vars())
 
+
 from conseq.template import create_jinja2_env
+
+
 def main(
     depfile: str,
     state_dir: str,
@@ -1084,7 +1090,9 @@ def main(
 
     jinja2_env = create_jinja2_env()
     # pass in override_vars as the initial config so we can write conditions which reference those variables
-    rules = read_rules(state_dir, depfile, config_file, jinja2_env, initial_config=override_vars)
+    rules = read_rules(
+        state_dir, depfile, config_file, jinja2_env, initial_config=override_vars
+    )
     rule_specifications = rules.get_rule_specifications()
 
     if not rules.has_client_defined("default"):
@@ -1109,7 +1117,9 @@ def main(
     # finish initializing exec clients
     for name, props in list(rules.exec_clients.items()):
         if isinstance(props, dict):
-            client = exec_client.create_client(name, LazyConfigDict(rules, jinja2_env), props, jinja2_env)
+            client = exec_client.create_client(
+                name, LazyConfigDict(rules, jinja2_env), props, jinja2_env
+            )
             rules.add_client(name, client)
 
     # Reattach or cancel jobs from previous invocation

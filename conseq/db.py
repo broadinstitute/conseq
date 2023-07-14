@@ -1,11 +1,13 @@
 import sqlite3
 import os
-#from dep import Jobs
+
+# from dep import Jobs
 from contextlib import contextmanager
 import sqlite3
 import threading
 from sqlite3 import Connection, Cursor
 from typing import Iterable, Iterator
+
 
 def prepare_db_connection(filename: str):
     needs_create = not os.path.exists(filename)
@@ -32,7 +34,7 @@ def prepare_db_connection(filename: str):
                 "create table space (name string, parent string)",
                 "insert into space (name) values ('public')",
                 "create table rule_snapshot (transform STRING PRIMARY KEY, definition string)",
-                "create table type_def (name string primary key, definition_json string)"
+                "create table type_def (name string primary key, definition_json string)",
             ]
         )
     else:
@@ -102,4 +104,3 @@ def transaction(db: Connection) -> Iterator:
 def get_cursor() -> Cursor:
     assert current_db_cursor_state.cursor != None
     return current_db_cursor_state.cursor
-

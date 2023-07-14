@@ -55,8 +55,6 @@ class StorageConnection:
         raise NotImplementedError()
 
 
-
-
 class GSStorageConnection(StorageConnection):
     def __init__(self):
         self.c = None
@@ -516,16 +514,9 @@ def _parse_mapping_str(file_mapping):
     return (remote_path, local_path)
 
 
-
 def exec_cmd(args):
-    remote = new_remote(
-        args.remote_url,
-        args.local_dir
-    )
-    cas_remote = new_remote(
-        args.cas_remote_url,
-        args.local_dir
-    )
+    remote = new_remote(args.remote_url, args.local_dir)
+    cas_remote = new_remote(args.cas_remote_url, args.local_dir)
 
     pull_map = []
     if args.download_pull_map is not None:

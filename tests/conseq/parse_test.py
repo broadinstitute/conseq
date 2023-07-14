@@ -111,7 +111,6 @@ def test_publish_rule(monkeypatch):
     assert rule.publish_location == "sample{{inputs.a.other}}"
 
 
-
 def _parse_exp(text, nonterminal):
     parser = depfile.depfileParser(parseinfo=True)
     return parser.parse(
@@ -160,15 +159,21 @@ def test_parse_json():
     )
     assert value == {"a": ["1", "2"]}
 
+
 from typing import List, Any
 from conseq.template import create_jinja2_env
 from conseq.config import Rules, _eval_stmts
 from conseq.hashcache import HashCache
 
-def eval_stmts(rules : Rules, statements: List[Any], tmpdir, filename="none"):
+
+def eval_stmts(rules: Rules, statements: List[Any], tmpdir, filename="none"):
     from conseq.config import _eval_stmts, EvalContext
-    context = EvalContext(rules, filename, HashCache(str(tmpdir.join("hashcache"))), create_jinja2_env())
+
+    context = EvalContext(
+        rules, filename, HashCache(str(tmpdir.join("hashcache"))), create_jinja2_env()
+    )
     _eval_stmts(statements, context)
+
 
 def test_parse_if(tmpdir):
 
@@ -236,8 +241,6 @@ def test_generic_eval(tmpdir):
     assert rules.vars["a"] == "1"
 
 
-
-
 def test_file_ref(tmpdir):
     rules = Rules()
     # rules.set_var(name, value)
@@ -253,11 +256,7 @@ def test_file_ref(tmpdir):
         filename=str(tmpdir.join("sample.conseq")),
     )
 
-    eval_stmts(
-        rules,
-        statements,
-        tmpdir,
-        filename=str(tmpdir) + "/none")
+    eval_stmts(rules, statements, tmpdir, filename=str(tmpdir) + "/none")
     a = rules.get_rule("a")
     assert a is not None
     print(a.inputs)
@@ -281,7 +280,7 @@ def test_file_ref_with_copy_to(tmpdir):
     """,
         filename=str(tmpdir.join("sample.conseq")),
     )
-    eval_stmts(rules, statements,tmpdir)
+    eval_stmts(rules, statements, tmpdir)
 
     a = rules.get_rule("a")
     assert a is not None
@@ -341,29 +340,32 @@ def test_construct_cache_key(tmpdir):
     assert len(statements) == 1
     statements[0].cache_key_constructor == [("python", "print(0)")]
 
+
 def test_type_def_no_required():
     statements = parser.parse_str(
-    '''
+        """
         type sample = { description: "desc" }
-    '''
+    """
     )
     assert len(statements) == 1
     assert statements[0] == TypeDefStmt("sample", "desc", [])
 
+
 def test_type_def_no_desc():
     statements = parser.parse_str(
-    '''
+        """
         type sample = { required: ["x", "y"] }
-    '''
+    """
     )
     assert len(statements) == 1
     assert statements[0] == TypeDefStmt("sample", None, ["x", "y"])
 
+
 def test_type_def_full():
     statements = parser.parse_str(
-    '''
+        """
         type sample = { description: "both", required: ["x", "y"] }
-    '''
+    """
     )
     assert len(statements) == 1
     assert statements[0] == TypeDefStmt("sample", "both", ["x", "y"])

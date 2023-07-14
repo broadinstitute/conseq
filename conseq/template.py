@@ -12,6 +12,7 @@ class LazyValue:
     def __init__(self, callback):
         self.callback = callback
 
+
 class AugmentedConfig:
     def __init__(self, config, extra_values):
         self.extra_values = extra_values
@@ -26,7 +27,7 @@ class AugmentedConfig:
         if name in self.extra_values:
             return True
         return name in self.config
-    
+
     def __getitem__(self, name):
         if name in self.extra_values:
             return self.extra_values[name]
@@ -91,7 +92,8 @@ class MissingTemplateVar(Exception):
             self.message, var_block, self.template
         )
 
-def render_template(jinja2_env, template_text : str, config : Dict[str, Any], **kwargs):
+
+def render_template(jinja2_env, template_text: str, config: Dict[str, Any], **kwargs):
     assert isinstance(
         template_text, six.string_types
     ), "Expected string for template but got {}".format(repr(template_text))
@@ -111,7 +113,10 @@ def render_template(jinja2_env, template_text : str, config : Dict[str, Any], **
             raise Exception("Can only use SCRIPT_DIR variable inside of rules")
         return kwargs["task"]["SCRIPT_DIR"]
 
-    kwargs["config"] = LazyConfig(render_template_callback, AugmentedConfig(config, {"SCRIPT_DIR": LazyValue(_get_script_dir)}))
+    kwargs["config"] = LazyConfig(
+        render_template_callback,
+        AugmentedConfig(config, {"SCRIPT_DIR": LazyValue(_get_script_dir)}),
+    )
 
     return render_template_callback(template_text)
 
@@ -169,4 +174,3 @@ def expand_dict(
         new_output[k] = v
 
     return new_output
-
