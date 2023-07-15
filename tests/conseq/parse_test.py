@@ -310,8 +310,20 @@ def test_file_refs_with_vars(tmpdir):
 
 
 def test_relative_file_paths(tmpdir):
-    sample_rel_path = os.path.relpath(__file__, os.path.abspath(str(tmpdir)))
+    # get a relative path to __file__ using tmpdir as the directory
+    root_dir = os.path.abspath(str(tmpdir))
+    # bunch of asserts to try and debug why this test is failing under github actions but not locally
+    assert os.path.exists(root_dir)
+    assert os.path.exists(__file__)
+    sample_abs_path = os.path.abspath(__file__)
+    assert os.path.exists(sample_abs_path)
+    sample_rel_path = os.path.relpath(os.path.abspath(__file__), root_dir)
+    # make sure this really is a relative path
     assert sample_rel_path[0] != "/"
+    assert os.path.exists(os.path.join(root_dir, sample_rel_path))
+    print(
+        f"relative={sample_rel_path}, abspath={sample_abs_path}, relative-to={root_dir}"
+    )
 
     statements = parser.parse_str(
         f"""
@@ -323,6 +335,12 @@ def test_relative_file_paths(tmpdir):
 
     rules = Rules()
     eval_stmts(rules, statements, tmpdir)
+
+    # created an artifact for the sample file
+    assert len(rules.objs) == 1
+    assert os.path.abspath(rules.objs[0]["filename"]["$filename"]) == sample_abs_path
+    assert os.path.abspath(rules.objs[0]["name"]) == sample_abs_path
+
     a = rules.get_rule("a")
     assert a is not None
     print(a.inputs)
