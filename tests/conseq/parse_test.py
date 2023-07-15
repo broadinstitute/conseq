@@ -312,7 +312,7 @@ def test_file_refs_with_vars(tmpdir):
 def test_relative_file_paths(tmpdir):
     # get a relative path to __file__ using tmpdir as the directory
     root_dir = os.path.abspath(str(tmpdir))
-    # bunch of asserts to try and debug why this test is failing under github actions but not locally
+    # bunch of asserts to help debug why this test is failing under github actions but not locally
     assert os.path.exists(root_dir)
     assert os.path.exists(__file__)
     sample_abs_path = os.path.abspath(__file__)
@@ -344,9 +344,7 @@ def test_relative_file_paths(tmpdir):
     a = rules.get_rule("a")
     assert a is not None
     print(a.inputs)
-    assert os.path.abspath(a.inputs[0].json_obj["name"]) == os.path.abspath(
-        sample_rel_path
-    )
+    assert os.path.abspath(a.inputs[0].json_obj["name"]) == sample_abs_path
 
 
 def test_construct_cache_key(tmpdir):
