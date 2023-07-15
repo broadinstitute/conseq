@@ -34,7 +34,6 @@ depfile.py: error: Argument of type "Unknown | None" cannot be assigned to param
 exec_client.py: error: Argument of type "Dict[Unknown, Unknown]" cannot be assigned to parameter "obj_" of type "Obj" in function "resolve"
 exec_client.py: error: Argument of type "ExternProc" cannot be assigned to parameter "proc" of type "PidProcStub | Popen[Unknown]" in function "__init__"
 exec_client.py: error: Argument of type "List[Any] | None" cannot be assigned to parameter "outputs" of type "List[Any]" in function "local_exec_script"
-exec_client.py: error: Argument of type "List[PropsType[Unknown]] | None" cannot be assigned to parameter "outputs" of type "List[PropsType[Unknown]]" in function "__init__"
 exec_client.py: error: Argument of type "List[str] | Tuple[str, str]" cannot be assigned to parameter "output_files" of type "List[str]" in function "grep_logs"
 exec_client.py: error: Argument of type "Unknown | None" cannot be assigned to parameter "v" of type "Dict[str, str] | str" in function "flatten_value"
 exec_client.py: error: Argument of type "dict[str, int]" cannot be assigned to parameter "resources" of type "Dict[str, float]" in function "__init__"

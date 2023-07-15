@@ -27,7 +27,7 @@ from conseq.config import get_staging_url
 class TemplatePartial:
     def __init__(self, jinja2_env, config, text: str) -> None:
         self.text = text
-        assert isinstance(config, dict)
+        # assert isinstance(config, dict)
         self.config = config
         self.jinja2_env = jinja2_env
 
@@ -199,7 +199,7 @@ class ClientExecution:
         id: int,
         job_dir: str,
         proc: Union[PidProcStub, Popen],
-        outputs: List[PropsType],
+        outputs: Optional[List[PropsType]],
         captured_stdouts: Union[List[str], Tuple[str, str]],
         desc_name: str,
         executor_parameters: dict,
@@ -369,7 +369,7 @@ class DelegateExecution(ClientExecution):
         id: int,
         job_dir: str,
         proc: Union[PidProcStub, Popen],
-        outputs: List[PropsType],
+        outputs: Optional[List[PropsType]],
         captured_stdouts: Union[List[str], Tuple[str, str]],
         desc_name: str,
         remote: Remote,
@@ -377,6 +377,7 @@ class DelegateExecution(ClientExecution):
         label: str,
         results_path: str,
         executor_parameters: dict,
+        delegate_log: str,
     ) -> None:
         super(DelegateExecution, self).__init__(
             transform,
@@ -392,6 +393,7 @@ class DelegateExecution(ClientExecution):
         self.file_fetcher = file_fetcher
         self.label = label
         self._results_path = results_path
+        self.delegate_log = delegate_log
 
     def get_state_label(self) -> str:
         return self.label
@@ -409,6 +411,7 @@ class DelegateExecution(ClientExecution):
             label=self.label,
             results_path=self._results_path,
             executor_parameters=self.executor_parameters,
+            delegate_log=self.delegate_log,
         )
         if hasattr(self.proc, "pid"):
             d["pid"] = self.proc.pid
@@ -654,13 +657,18 @@ class ExternProc:
         check_cmd_template,
         is_running_pattern,
         terminate_cmd_template,
+        complete_cmd_template,
         executor_parameters,
+        delegate_log,
     ):
         self.job_id = job_id
         self.check_cmd_template = check_cmd_template
         self.terminate_cmd_template = terminate_cmd_template
         self.is_running_pattern = is_running_pattern
+        self.complete_cmd_template = complete_cmd_template
         self.executor_parameters = executor_parameters
+        self.complete_cmd_ran = False
+        self.delegate_log = delegate_log
 
     def poll(self):
         check_cmd = self.check_cmd_template.apply(
@@ -668,12 +676,27 @@ class ExternProc:
         ).strip()
         output = subprocess.check_output(check_cmd, shell=True)
         output = output.decode("utf8")
-        # TODO: Would be nice to write this and the output to the delegate log for debugging
-        # print("Check_cmd: {}".format(check_cmd))
-        # print("output: {}".format(output))
         m = re.search(self.is_running_pattern, output)
-        # print("output={} is_running_pattern={}, m={}".format(repr(output), self.is_running_pattern, m))
         if m is None:
+            # the job is done running if we can't find the pattern
+            if not self.complete_cmd_ran and self.complete_cmd_template is not None:
+                complete_cmd = self.complete_cmd_template.apply(
+                    JOB_ID=self.job_id, parameters=self.executor_parameters
+                ).strip()
+                log.warning(
+                    "Executing: %s and writing output to %s",
+                    complete_cmd,
+                    self.delegate_log,
+                )
+                with open(self.delegate_log, "at") as log_fd:
+                    subprocess.call(
+                        complete_cmd,
+                        shell=True,
+                        stdout=log_fd,
+                        stderr=subprocess.STDOUT,
+                    )
+                self.complete_cmd_ran = True
+
             return 0
         return None
 
@@ -1027,12 +1050,17 @@ class AsyncDelegateExecClient:
         check_cmd_template,
         is_running_pattern,
         terminate_cmd_template,
+        complete_cmd_template,
         x_job_id_pattern,
         recycle_past_runs,
     ):
         assert isinstance(run_command_template, TemplatePartial)
         assert isinstance(check_cmd_template, TemplatePartial)
         assert isinstance(terminate_cmd_template, TemplatePartial)
+        assert isinstance(helper_path, TemplatePartial)
+        assert complete_cmd_template is None or isinstance(
+            complete_cmd_template, TemplatePartial
+        )
         self.resources = resources
         self.helper_path = helper_path
         self.local_workdir = local_workdir
@@ -1046,6 +1074,7 @@ class AsyncDelegateExecClient:
         self.terminate_cmd_template = terminate_cmd_template
         self.x_job_id_pattern = x_job_id_pattern
         self.recycle_past_runs = recycle_past_runs
+        self.complete_cmd_template = complete_cmd_template
 
     def _extract_job_id(self, output):
         m = re.search(self.x_job_id_pattern, output)
@@ -1071,7 +1100,9 @@ class AsyncDelegateExecClient:
             self.check_cmd_template,
             self.is_running_pattern,
             self.terminate_cmd_template,
+            self.complete_cmd_template,
             executor_parameters,
+            d["delegate_log"],
         )
         return DelegateExecution(
             d["transform"],
@@ -1086,6 +1117,7 @@ class AsyncDelegateExecClient:
             d["label"],
             d["results_path"],
             executor_parameters,
+            d["delegate_log"],
         )
 
     def preprocess_inputs(self, resolver, inputs: Tuple[BoundInput]):
@@ -1169,7 +1201,7 @@ class AsyncDelegateExecClient:
             ". "
             "bash wrapper.sh".format(
                 results_path=results_path,
-                helper_path=self.helper_path,
+                helper_path=self.helper_path.apply(parameters=executor_parameters),
                 remote_url=remote_url,
                 pull_map=pull_map,
                 cas_remote_url=self.cas_remote_url,
@@ -1229,7 +1261,9 @@ class AsyncDelegateExecClient:
             self.check_cmd_template,
             self.is_running_pattern,
             self.terminate_cmd_template,
+            self.complete_cmd_template,
             executor_parameters,
+            stdout_path,
         )
         return DelegateExecution(
             name,
@@ -1244,6 +1278,7 @@ class AsyncDelegateExecClient:
             self.label,
             results_path,
             executor_parameters,
+            stdout_path,
         )
 
     def _mk_file_fetcher(self, remote):
@@ -1307,6 +1342,7 @@ class DelegateExecClient:
             d["label"],
             d["results_path"],
             d["executor_parameters"],
+            d["delegate_log"],
         )
 
     def preprocess_inputs(
@@ -1404,8 +1440,7 @@ class DelegateExecClient:
         )
 
         #### start of local execution of delegate
-        stdout_path = os.path.abspath(os.path.join(job_dir, "delegate-stdout.txt"))
-        stderr_path = os.path.abspath(os.path.join(job_dir, "delegate-stderr.txt"))
+        stdout_path = os.path.abspath(os.path.join(job_dir, "delegate.log"))
 
         full_command = self.command_template.apply(
             COMMAND=command, JOB=rel_job_dir, parameters=executor_parameters
@@ -1414,14 +1449,12 @@ class DelegateExecClient:
         assert_is_single_command(full_command)
 
         if capture_output:
-            bash_cmd = "exec {full_command} > {stdout_path} 2> {stderr_path}".format(
-                **locals()
-            )
-            captured_stdouts = (stdout_path, stderr_path)
+            bash_cmd = "exec {full_command} > {stdout_path} 2&>1".format(**locals())
+            captured_stdouts = [stdout_path]
             close_fds = True
         else:
             bash_cmd = "exec {full_command}".format(**locals())
-            captured_stdouts = None
+            captured_stdouts = []
             close_fds = False
 
         log.warning("executing: %s", bash_cmd)
@@ -1453,6 +1486,7 @@ class DelegateExecClient:
             self.label,
             results_path,
             executor_parameters,
+            stdout_path,
         )
 
     def _mk_file_fetcher(self, remote: Remote) -> Callable:
@@ -1522,8 +1556,8 @@ def assert_has_only_props(
 ) -> None:
     keys = set(properties.keys())
     keys.difference_update(optional)
-    assert keys == set(names), "Expected properties: {}, but got {}".format(
-        names, properties.keys()
+    assert sorted(names) == sorted(names), "Expected properties: {}, but got {}".format(
+        sorted(names), sorted(properties.keys())
     )
 
 
@@ -1574,8 +1608,9 @@ def create_client(name, config, properties, jinja2_env):
                 "label",
                 "TERMINATE_CMD_TEMPLATE",
                 "JOB_ID_PATTERN",
+                "COMPLETED_CMD_TEMPLATE",
             ],
-            optional=["REUSE_PAST_RUNS"],
+            optional=["REUSE_PAST_RUNS", "COMPLETED_CMD_TEMPLATE"],
         )
 
         reuse_past_runs_str = properties.get("REUSE_PAST_RUNS", "true").lower()
@@ -1588,12 +1623,13 @@ def create_client(name, config, properties, jinja2_env):
             config["WORKING_DIR"],
             get_staging_url(config) + "/exec-results/" + config["EXECUTION_ID"],
             get_staging_url(config),
-            properties["HELPER_PATH"],
+            _make_template(properties["HELPER_PATH"]),
             _make_template(properties["COMMAND_TEMPLATE"]),
             config.get("PYTHON_PATH", "python"),
             _make_template(properties["CHECK_COMMAND_TEMPLATE"]),
             properties["IS_RUNNING_PATTERN"],
             _make_template(properties["TERMINATE_CMD_TEMPLATE"]),
+            _make_template(properties.get("COMPLETED_CMD_TEMPLATE")),
             properties["JOB_ID_PATTERN"],
             reuse_past_runs,
         )

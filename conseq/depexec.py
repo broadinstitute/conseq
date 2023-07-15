@@ -24,6 +24,7 @@ from conseq.config import Rules
 from conseq.config import read_rules
 from conseq.dep import ForEach, Jobs, RuleExecution, Template
 from conseq.exec_client import (
+    AsyncDelegateExecClient,
     DelegateExecClient,
     DelegateExecution,
     ClientExecution,
@@ -32,6 +33,8 @@ from conseq.exec_client import (
     bind_inputs,
     CACHE_KEY_FILENAME,
 )
+import uuid
+
 from conseq.parser import QueryVariable
 from conseq.parser import Rule, RunStmt, TypeDefStmt
 from conseq.template import MissingTemplateVar, render_template
@@ -233,13 +236,17 @@ def execute(
     config: PropsType,
     capture_output: bool,
     resolver_state: ResolveState,
-    client: Union[DelegateExecClient, LocalExecClient],
+    client: Union[AsyncDelegateExecClient, DelegateExecClient, LocalExecClient],
     use_cached_results: bool,
 ) -> Union[ClientExecution, exec_client.ExecutionStub]:
     try:
         prologue = render_template(jinja2_env, config["PROLOGUE"], config)
 
-        task_vars = {"HASH": _compute_task_hash(name, inputs)}
+        task_vars = {
+            "HASH": _compute_task_hash(name, inputs),
+            "UUID": uuid.uuid4().hex,
+            "RULE": name,
+        }
         if rule.filename is not None:
             task_vars["SCRIPT_PATH"] = os.path.abspath(rule.filename)
             task_vars["SCRIPT_DIR"] = os.path.dirname(os.path.abspath(rule.filename))
@@ -320,6 +327,12 @@ def execute(
             )
 
             debug_log.log_execute(name, id, job_dir, inputs, run_stmts)
+
+            # make a copy of the parameters on the rule
+            # and add those additional parameters that should automaticlly be set
+            executor_parameters = dict(rule.executor_parameters)
+            executor_parameters.update(task_vars)
+
             execution = client.exec_script(
                 name,
                 id,
@@ -332,7 +345,7 @@ def execute(
                 resolver_state,
                 rule.resources,
                 rule.watch_regex,
-                rule.executor_parameters,
+                executor_parameters,
             )
         elif outputs is not None:
             log.warning("No commands to run for rule %s", name)
@@ -1041,6 +1054,12 @@ class LazyConfigDict:
     def __init__(self, rules, jinja2_env):
         self.rules = rules
         self.jinja2_env = jinja2_env
+
+    def __contains__(self, key):
+        return key in self.rules.get_vars()
+
+    def __iter__(self):
+        return iter(self.rules.get_vars())
 
     def __getitem__(self, key):
         value = self.rules.get_vars()[key]

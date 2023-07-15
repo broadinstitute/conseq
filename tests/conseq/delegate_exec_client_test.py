@@ -148,6 +148,7 @@ def create_async_client_for(
         check_cmd_template,
         is_running_pattern,
         terminate_cmd_template,
+        None,
         x_job_id_pattern,
         False,
     )

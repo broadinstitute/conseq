@@ -151,17 +151,27 @@ class S3StorageConnection(StorageConnection):
             k.set_metadata("sha256", sha256)
 
 
+class LazyConstructorDict:
+    def __init__(self, constructor_dict):
+        self.constructor_dict = constructor_dict
+        self.values_dict = {}
+
+    def __getitem__(self, key):
+        if key not in self.values_dict:
+            self.values_dict[key] = self.constructor_dict[key]()
+        return self.values_dict[key]
+
+
 def new_remote(remote_url, local_dir):
-    sc = S3StorageConnection()
-    gs = GSStorageConnection()
-    return Remote(remote_url, local_dir, {"s3": sc, "gs": gs})
+    return Remote(
+        remote_url,
+        local_dir,
+        LazyConstructorDict({"s3": S3StorageConnection, "gs": GSStorageConnection}),
+    )
 
 
 class Remote:
-    def __init__(
-        self, remote_url: str, local_dir: str, sc: Dict[str, StorageConnection]
-    ):
-        assert isinstance(sc, dict)
+    def __init__(self, remote_url: str, local_dir: str, sc: LazyConstructorDict):
         self.connections = sc
         self.remote_url = remote_url
         self.local_dir = local_dir
