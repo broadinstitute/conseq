@@ -534,61 +534,156 @@ $ conseq gc
 You can define custom "execution profiles" which tell conseq how to launch
 jobs on remote machines.
 
-You need only configure:
+To do this you'll need to provide templates for how to construct the command used to submit the job.
 
-1. a template for the command used to submit the job and get a job ID conseq
-   can use to track the job.
-2. a template for the command used to poll the job and ask whether the job has completed or not.
-
-Here's a configuration for submitting via dsub:
+An execution profile will look like the following:
 
 ```
-exec-profile dsub-tda-img {
- "type": "async-delegate",
- "label": "dsub-runner-img",
- "resources": { "slots": "5" },
- "HELPER_PATH": "python3 /helper.py",
- "COMMAND_TEMPLATE": """{{config.DSUB_PATH}}/dsub \
-     --project broad-achilles \
-     --zones "us-east1*" \
-     --logging gs://conseq-logging/logging/{JOB} \
-     --image us.gcr.io/broad-achilles/depmap-pipeline-tda:v4 \
-     --env AWS_ACCESS_KEY_ID={{config.AWS_ACCESS_KEY_ID}} \
-     --env AWS_SECRET_ACCESS_KEY={{config.AWS_SECRET_ACCESS_KEY}} \
-     --min-ram 10 \
-     --command '{COMMAND}'""", # AWS keys needed for boto
- "CHECK_COMMAND_TEMPLATE": """{{config.DSUB_PATH}}/dstat \
-     --project broad-achilles \
-     --jobs {job_id} \
-     --status 'RUNNING'""",
- "IS_RUNNING_PATTERN": "Status", # Really anything because we are only
-                                 # listing running jobs. Just make sure
-                                 # there's some output
- "TERMINATE_CMD_TEMPLATE": "{{config.DSUB_PATH}}/ddel --project broad-achilles --jobs {job_id}",
- "JOB_ID_PATTERN": "{{ config.DSUB_JOB_ID_PATTERN }}"
+exec-profile sample {
+  "type": "delegate",
+  "resources": { "slots": "5" },
+  ... additional properties depending on type ...
 }
+```
+
+The profile above is defining a new execution profile named "sample" which can be used to execute rules by adding the "executor" option to rules, such as:
+
+```
+rule calculate_things:
+  executor: sample
+  run ...
+```
+
+The `type` field indicates which kind of execution profile this is, and "resources" limit the number of jobs which can use the execution profile concurrently. By default, all conseq jobs consume one `slot`, from resources, so the `sample` execution profile will allow 5 jobs to run in parallel.
+
+The following values for `type` are supported:
+
+- `local`: Run the job on the local machine. This is the type used by the default execution profile. Generally one shouldn't need to define a second "local" execution profile.
+- `delegate`: Delegates the execution to another service. In this mode conseq will use a template to construct a command to submit the job to run elsewhere. You need only define a command which does the submission and blocks until the job completes.
+- `async-delegate`: Delegates the execution to another service, but instead of assuming the command waits for the command to complete, use a second command to poll the status of the job.
+
+Both types that support remote execution (`delegate` and `async-delegate`) will cause conseq to upload the inputs that those commands need to cloud storage before the job execution start. As such, the command they generate will actually be to run a "conseq-helper" tool, which needs to be installed on the remote machine. The "conseq-help" command will handle download the input files and then uploading the results.
+
+### async-delegate
+
+This type requires the following properties to be set:
+
+#### HELPER_PATH
+
+This must be the path to the conseq helper script on the remote machine.
+
+#### COMMAND_TEMPLATE
+
+A jinja template for how to construct the job submission command. The following properties will be availible to the template: SCRIPT_DIR, SCRIPT_NAME, config, COMMAND, UUID, JOB (the path to the job directory relative to the state directory (ie: "r32" which would be the 32nd job, and files are written to `state/r32`), parameters
+
+#### JOB_ID_PATTERN
+
+A regular expression which is used to identify the ID which can be used to track the job status. This pattern will be matched to the output from running the command COMMAND_TEMPLATE.
+
+#### CHECK_COMMAND_TEMPLATE
+
+A jinja template for the command to run to check whether the job is still running or not. If the output matches `IS_RUNNING_PATTERN`, then the job is considered still running. If it does not match the pattern, it's considered complete.
+
+#### IS_RUNNING_PATTERN
+
+A regular expression used to check the ouptut of `CHECK_COMMAND_TEMPLATE`.
+
+#### TERMINATE_CMD_TEMPLATE
+
+A jinja template for the command to stop the command in the event of the user requesting that all jobs be terminated.
+
+#### COMPLETED_CMD_TEMPLATE
+
+A jinja template for an optional command to run after the job is complete. This can be useful for performing any cleanup required or to get any additional information from the job and write it to the local log file for debugging.
+
+```
+let STAGING_URL = "gs://preprocessing-pipeline-outputs/conseq/depmap"
+let DEFAULT_DOCKER_IMAGE = "us.gcr.io/broad-achilles/depmap-pipeline-run:v42"
+let DEFAULT_GCP_PROJECT = "broad-achilles"
+let DEFAULT_GCP_ZONE = "us-central*"
+let DSUB_PATH="dsub"
+let DSTAT_PATH="dstat"
+let DDEL_PATH="ddel"
+
+# match either format (comes from different versions of dsub)
+# Job: python3--pmontgom--210414-132401-98
+#  job-id: python3--pmontgom--210414-132401-98
+let DSUB_JOB_ID_PATTERN="""(?:(?:Job)|(?:job-id)): (\S+)"""
+
+executor-template dsub {
+  "type": "async-delegate",
+  "resources": { "slots": "100" },
+  "HELPER_PATH": "{{ parameters.helper_path | default('/usr/bin/python3 /helper.py') }}",
+  "COMMAND_TEMPLATE": """{{ config.DSUB_PATH }} \
+      --project {{ config.DEFAULT_GCP_PROJECT }} \
+      --zones '{{ config.DEFAULT_GCP_ZONE }}' \
+      --logging {{ config.STAGING_URL }}/logs/{{ parameters.UUID }} \
+      --image {{ parameters.docker_image | default(config.DEFAULT_DOCKER_IMAGE) }} \
+      --min-ram {{ parameters.min_ram | default("4") }} \
+      --command '{{ COMMAND }}'""",
+  "CHECK_COMMAND_TEMPLATE": """{{config.DSTAT_PATH}} \
+      --project {{ config.DEFAULT_GCP_PROJECT }} \
+      --jobs {{ JOB_ID }} \
+      --status 'RUNNING'""",
+  "IS_RUNNING_PATTERN": "Status", # Really anything because we are only
+                                  # listing running jobs. Just make sure
+                                  # there's some output
+  "TERMINATE_CMD_TEMPLATE": "{{ config.DDEL_PATH }} --project {{ config.DEFAULT_GCP_PROJECT }} --jobs {{ JOB_ID }}",
+  "JOB_ID_PATTERN": """(?:(?:Job: )|(?:Launched job-id: ))(\S+).*""",
+  "COMPLETED_CMD_TEMPLATE" : """{{config.DSTAT_PATH}} \
+    --project  {{ config.DEFAULT_GCP_PROJECT }} \
+    --jobs {{ JOB_ID }} \
+    --status '*' --full && \
+    gsutil cat {{ config.STAGING_URL }}/logs/{{ parameters.UUID }}/{{ JOB_ID }}.log"""
+}
+```
+
+executor-template sparkles {
+"type": "async-delegate",
+"resources": { "slots": "100" },
+"HELPER_PATH": "{{ parameters.helper_path | default('/usr/bin/python3 /helper.py') }}",
+"COMMAND_TEMPLATE": """{{ config.SPARKLES_PATH }} \
+ --config {{ config.SPARKLES_CONFIG }} \
+ sub --image {{ parameters.docker_image | default(config.DEFAULT_DOCKER_IMAGE) }} \
+ '{{ COMMAND }}'""",
+"CHECK_COMMAND_TEMPLATE": """{{config.SPARKLES_PATH }} \
+ --config {{ config.SPARKLES_CONFIG }} \
+ status {{ JOB_ID }}""",
+"IS_RUNNING_PATTERN": "RUNNING",
+"TERMINATE_CMD_TEMPLATE": "{{ config.SPARKLES_PATH }} \
+ --config {{ config.SPARKLES_CONFIG }} \
+ kill {{ JOB_ID }}",
+
+# could submit job with UUID as job ID
+
+"JOB_ID_PATTERN": """(?:(?:Job: )|(?:Launched job-id: ))(\S+).\*""",
+"COMPLETED_CMD_TEMPLATE" : """{{ config.SPARKLES_PATH }} \
+ --config {{ config.SPARKLES_CONFIG }} \
+ logs --all
+"""
+}
+
 ```
 
 Configuration for running via docker:
 
 ```
-exec-profile async-docker-tda-img {
-  "type": "async-delegate",
-  "label": "ddddd",
-  "resources": { "slots": "1" },
-  "HELPER_PATH": "python3 /helper.py",
-  "COMMAND_TEMPLATE": """docker run \
-      --rm \
-      -d \
-      -e AWS_ACCESS_KEY_ID={{config.AWS_ACCESS_KEY_ID}} \
-      -e AWS_SECRET_ACCESS_KEY={{config.AWS_SECRET_ACCESS_KEY}} \
-      us.gcr.io/broad-achilles/depmap-pipeline-tda:v4 \
-      {COMMAND}""", # AWS keys needed for boto
-  "JOB_ID_PATTERN": """(\S+)""",
-  "CHECK_COMMAND_TEMPLATE": "docker ps -f id={job_id} --format running",
-  "IS_RUNNING_PATTERN": "running", # this is the only output if the job is running
-  "TERMINATE_CMD_TEMPLATE": "docker kill {job_id}"
+
+exec-profile docker {
+"type": "async-delegate",
+"resources": { "slots": "1" },
+"HELPER_PATH": "{{ parameters.helper_path | default('/usr/bin/python3 /helper.py') }}",
+"COMMAND_TEMPLATE": """docker run \
+ --rm \
+ -d \
+ us.gcr.io/broad-achilles/depmap-pipeline-tda:v4 \
+ {COMMAND}""", # AWS keys needed for boto
+"JOB_ID_PATTERN": """(\S+)""",
+"CHECK_COMMAND_TEMPLATE": "docker ps -f id={job_id} --format running",
+"IS_RUNNING_PATTERN": "running", # this is the only output if the job is running
+"TERMINATE_CMD_TEMPLATE": "docker kill {job_id}"
 }
+
 ```
 
 # Conseq Development
@@ -608,3 +703,14 @@ and PyCharm.
 
 Use these instructions to import the `./conseq/extensions/conseq-lang` directory:
 https://www.jetbrains.com/help/pycharm/tutorial-using-textmate-bundles.html#importing-bundles
+
+TODO:
+exec profile for sparkles
+type defs
+  - validate these on job completion
+  - make sure these have a description
+  - make sure report shows description
+Add descriptions to rules.
+
+Alternative grammar?
+```

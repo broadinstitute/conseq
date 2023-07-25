@@ -24,8 +24,24 @@ class RunStmt:
 @dataclass
 class TypeDefStmt:
     name: str
+    description: Optional[str]
+    fields: List[str]
+
+
+@dataclass
+class TypeDefFields:
+    fields: List[str]
+
+
+@dataclass
+class TypeDefDescription:
     description: str
-    required: List[str]
+
+
+@dataclass
+class TypeDefinition:
+    description: Optional[str]
+    fields: List[str]
 
 
 @dataclass
@@ -112,10 +128,11 @@ class Rule:
         self.watch_regex = None
         assert self.name != "" and self.name != " "
         self.resources = {"slots": 1.0}
-        self.output_expectations = []
+        self.description = None
         self.publish_location = None
         self.cache_key_constructor = []
         self.uses_files = []
+        self.output_expectations = None
 
     def to_json(self):
         return json.dumps(
@@ -178,6 +195,13 @@ class Semantics(object):
             script_body = None
         return RunStmt(exec_profile, ast[1], script_body)
 
+    def identifier_list(self, ast):
+        identifiers = [ast[0]]
+        rest = ast[1]
+        for x in rest:
+            identifiers.append(x[1])
+        return identifiers
+
     def construct_cache_key_run(self, ast):
         exec_profile = "default"
         assert ast[0] == "construct-cache-key-run"
@@ -239,8 +263,25 @@ class Semantics(object):
         assert isinstance(ast, six.string_types)
         return QueryVariable(ast)
 
-    def output_expected_def(self, ast):
-        raise Exception("unimp")
+    def type_definition_component(self, ast):
+        if ast[0] == "fields":
+            return TypeDefFields(ast[2])
+        else:
+            assert ast[0] == "description"
+            return TypeDefDescription(ast[2])
+
+    def type_definition(self, ast):
+        fields = []
+        description = None
+        components = [ast[0]]
+        components.extend(ast[1])
+        for component in components:
+            if isinstance(component, TypeDefFields):
+                fields = component.fields
+            else:
+                assert isinstance(component, TypeDefDescription)
+                description = component.description
+        return TypeDefinition(fields=fields, description=description)
 
     def rule(self, ast):
         # raise Exception()
@@ -276,8 +317,8 @@ class Semantics(object):
                 rule.resources = dict([(k, float(v)) for k, v in statement[2].items()])
                 if "slots" not in rule.resources:
                     rule.resources["slots"] = 1
-            elif statement[0] == "outputs-expected":
-                rule.output_expectations = statement[2]
+            elif statement[0] == "description":
+                rule.description = statement[2]
             elif statement[0] == "publish":
                 rule.publish_location = statement[2]
                 assert rule.is_publish_rule
@@ -314,17 +355,7 @@ class Semantics(object):
         return specs
 
     def type_def_stmt(self, ast):
-        props = [ast[3][1]] + [x[1] for x in ast[3][2]]
-        description = None
-        required = []
-        for prop, _, value in props:
-            if prop == "description":
-                description = value
-            else:
-                assert prop == "required"
-                required = value
-
-        return TypeDefStmt(ast[1], description, required)
+        return TypeDefStmt(ast[1], ast[3].description, ast[3].fields)
 
     def var_stmt(self, ast):
         return LetStatement(ast[1], ast[3])

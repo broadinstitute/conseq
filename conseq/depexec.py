@@ -67,9 +67,8 @@ class FatalUserError(Exception):
 
 def make_output_check(output_expectations):
     def is_outputs_good(outputs):
-        if len(output_expectations) == 0:
+        if output_expectations is None or len(output_expectations) == 0:
             return True
-        breakpoint()
         print(output_expectations)
         return False
 
@@ -511,6 +510,35 @@ def _amend_outputs(
     return [_amend(x) for x in artifacts]
 
 
+def get_type_check_failures(
+    j: Jobs, artifacts: List[Dict], type_defs_by_name: Dict[str, TypeDefStmt]
+):
+    failures = []
+    for artifact in artifacts:
+        type_name = artifact.get("type")
+        if type_name is None:
+            log.warning(f"Output artifact {artifact} is missing type field.")
+            continue
+        type_def = type_defs_by_name.get(type_name)
+
+        if type_def is None:
+            #     failures.append(f"Output artifact was {artifact} but type \"{type_name}\" is not defined")
+            continue
+
+        missing_fields = set(type_def.fields).difference(artifact.keys())
+        if len(missing_fields) > 0:
+            failures.append(
+                f"Output artifact {artifact} with type {type_name} is missing the following properties: {', '.join(sorted(missing_fields))}"
+            )
+
+    if len(failures) == 0:
+        return None
+    else:
+        failure_message = "; ".join(failures)
+        log.error("%s", failure_message)
+        return failure_message
+
+
 def main_loop(
     jinja2_env: Environment,
     j: Jobs,
@@ -544,6 +572,10 @@ def main_loop(
     start_count = 0
     job_ids_to_ignore = set()
     skip_remaining = False
+
+    type_defs_by_name = {}
+    for type_def in j.get_type_defs():
+        type_defs_by_name[type_def.name] = type_def
 
     def get_pending():
         pending_jobs = j.get_pending()
@@ -744,6 +776,10 @@ def main_loop(
                                 log.error(_failure)
                         if len(_failures) > 0:
                             failure = ", ".join(_failures)
+
+                if failure is None and completion is not None:
+                    # check outputs have all the required fields (as defined by 'type')
+                    failure = get_type_check_failures(j, completion, type_defs_by_name)
 
                 if failure is not None:
                     job_id = j.record_completed(timestamp, e.id, dep.STATUS_FAILED, {})

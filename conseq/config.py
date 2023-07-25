@@ -50,6 +50,13 @@ class Rules:
                     repr(self.vars[name]),
                 )
             else:
+                if name in self.vars:
+                    log.warning(
+                        "Overwrote value of %s with %s (was previously %s)",
+                        name,
+                        value,
+                        self.vars.get(name),
+                    )
                 self.vars[name] = value
 
     def get_vars(self):
@@ -67,6 +74,8 @@ class Rules:
         self.rule_by_name[name] = rule
 
     def add_client(self, name, client):
+        if name in self.exec_clients:
+            raise Exception(f"Duplicate executor profiles named {name}")
         self.exec_clients[name] = client
 
     def has_client_defined(self, name):
@@ -279,7 +288,7 @@ def _eval_if(if_statement, context: EvalContext):
 def read_deps(filename, hashcache, jinja2_env, initial_vars={}) -> Rules:
     rules = Rules()
     for name, value in initial_vars.items():
-        rules.set_var(name, value)
+        rules.set_var(name, value, is_override=True)
 
     statements = parser.parse(filename)
     context = EvalContext(rules, filename, hashcache, jinja2_env)
@@ -293,11 +302,19 @@ def read_rules(
     config_file: Optional[str],
     jinja2_env,
     *,
-    initial_config={}
+    initial_config={},
 ) -> Rules:
     hashcache = HashCache(os.path.join(state_dir, "hashcache"))
     _initial_config = _load_initial_config(state_dir, depfile, config_file)
-    _initial_config.update(initial_config)
+    for name, value in initial_config.items():
+        # if name in _initial_config:
+        log.warn(
+            "Overriding %s with value %s (was %s)",
+            name,
+            value,
+            _initial_config.get(name),
+        )
+        _initial_config[name] = value
     rules = read_deps(depfile, hashcache, jinja2_env, initial_vars=_initial_config)
     return rules
 

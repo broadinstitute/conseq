@@ -360,10 +360,11 @@ def test_construct_cache_key(tmpdir):
     ]
 
 
-def test_type_def_no_required():
+def test_type_def_no_fields():
     statements = parser.parse_str(
         """
-        type sample = { description: "desc" }
+        type sample:
+          description: "desc" 
     """
     )
     assert len(statements) == 1
@@ -373,21 +374,38 @@ def test_type_def_no_required():
 def test_type_def_no_desc():
     statements = parser.parse_str(
         """
-        type sample = { required: ["x", "y"] }
+        type sample:
+          fields: x
     """
     )
     assert len(statements) == 1
-    assert statements[0] == TypeDefStmt("sample", None, ["x", "y"])
+    assert statements[0] == TypeDefStmt("sample", None, ["x"])
 
 
 def test_type_def_full():
     statements = parser.parse_str(
         """
-        type sample = { description: "both", required: ["x", "y"] }
+        type sample:
+          description: "both"
+          fields: x, y,z
     """
     )
     assert len(statements) == 1
-    assert statements[0] == TypeDefStmt("sample", "both", ["x", "y"])
+    assert statements[0] == TypeDefStmt("sample", "both", ["x", "y", "z"])
+
+
+def test_parse_rule_with_description():
+    example = """
+    rule A:
+        description: "sample rule"
+        run "echo hello"
+    """
+    decs = parser.parse_str(example)
+    assert len(decs) == 1
+
+    r = decs[0]
+    assert isinstance(r, parser.Rule)
+    assert r.description == "sample rule"
 
 
 def test_parse_rule_with_executor():

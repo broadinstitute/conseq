@@ -1135,6 +1135,8 @@ class Jobs:
     def add_type_def(self, type_def: TypeDefStmt):
         with transaction(self.db):
             c = get_cursor()
+            # replace any existing type
+            c.execute("delete from type_def where name = ?", [type_def.name])
             c.execute(
                 "insert into type_def (name, definition_json) values (?, ?)",
                 [type_def.name, json.dumps(dataclasses.asdict(type_def))],

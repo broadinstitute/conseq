@@ -81,8 +81,8 @@ file_list = quoted_string { "," quoted_string }*
     ;
 
 rule_parameters = ("inputs" ":" input_specs |
+    "description" ":" quoted_string |
     "outputs" ":" output_specs |
-    "outputs-expected" ":" ( identifier {"," identifier} * ) |
     "executor" ":" identifier json_obj |
     "executor" ":" identifier |
     "watch-regex" ":" quoted_string |
@@ -117,9 +117,19 @@ eval_statement = "eval" quoted_string ;
 
 conditional = "if" condition:conditional_expr ":" true_body:declarations elif_clauses:{ "elif" conditional_expr ":" declarations }* else_clause:[ "else" ":" declarations ] "endif" ;
 
-type_definition_field = ( "description" ":" quoted_string | "required" ":" json_array ) ;
-type_definition = "{"  type_definition_field {"," type_definition_field}* "}";
-type_def_stmt = "type" identifier "=" type_definition ;
+quotable_identifier = identifier | quoted_string ;
+
+type_def_stmt = "type" quotable_identifier ":" type_definition ;
+type_definition_component = "description" ":" quoted_string |
+                  "required" ":" identifier_list ;
+type_definition = type_definition_component { type_definition_component } 
+                  ;
+identifier_list = quotable_identifier {"," quotable_identifier}* ;
+
+# example (yaml like): 
+# type matrix-file:
+#   description: "xzxcvsdfasdf"
+#   fields: filename, label, size
 
 declarations = { rule | include_stmt | var_stmt | add_if_missing | exec_profile | remember_executed | conditional | eval_statement | type_def_stmt }+ ;
 

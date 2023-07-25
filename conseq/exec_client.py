@@ -825,7 +825,6 @@ class LocalExecClient(ExecClient):
         watch_regex,
         executor_parameters: Dict[str, str],
     ) -> ClientExecution:
-        assert executor_parameters == {}, "Local executors don't accept parameters"
         assert isinstance(resolve_state, NullResolveState)
 
         for src, dst in resolve_state.files_to_copy:

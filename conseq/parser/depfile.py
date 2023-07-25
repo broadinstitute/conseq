@@ -330,20 +330,13 @@ class depfileParser(Parser):
                     self._token(":")
                     self._input_specs_()
                 with self._option():
+                    self._token("description")
+                    self._token(":")
+                    self._quoted_string_()
+                with self._option():
                     self._token("outputs")
                     self._token(":")
                     self._output_specs_()
-                with self._option():
-                    self._token("outputs-expected")
-                    self._token(":")
-                    with self._group():
-                        self._identifier_()
-
-                        def block0():
-                            self._token(",")
-                            self._identifier_()
-
-                        self._closure(block0)
                 with self._option():
                     self._token("executor")
                     self._token(":")
@@ -502,37 +495,52 @@ class depfileParser(Parser):
         self.ast._define(["condition", "elif_clauses", "else_clause", "true_body"], [])
 
     @tatsumasu()
-    def _type_definition_field_(self):  # noqa
-        with self._group():
-            with self._choice():
-                with self._option():
-                    self._token("description")
-                    self._token(":")
-                    self._quoted_string_()
-                with self._option():
-                    self._token("required")
-                    self._token(":")
-                    self._json_array_()
-                self._error("no available options")
-
-    @tatsumasu()
-    def _type_definition_(self):  # noqa
-        self._token("{")
-        self._type_definition_field_()
-
-        def block0():
-            self._token(",")
-            self._type_definition_field_()
-
-        self._closure(block0)
-        self._token("}")
+    def _quotable_identifier_(self):  # noqa
+        with self._choice():
+            with self._option():
+                self._identifier_()
+            with self._option():
+                self._quoted_string_()
+            self._error("no available options")
 
     @tatsumasu()
     def _type_def_stmt_(self):  # noqa
         self._token("type")
-        self._identifier_()
-        self._token("=")
+        self._quotable_identifier_()
+        self._token(":")
         self._type_definition_()
+
+    @tatsumasu()
+    def _type_definition_component_(self):  # noqa
+        with self._choice():
+            with self._option():
+                self._token("description")
+                self._token(":")
+                self._quoted_string_()
+            with self._option():
+                self._token("fields")
+                self._token(":")
+                self._identifier_list_()
+            self._error("no available options")
+
+    @tatsumasu()
+    def _type_definition_(self):  # noqa
+        self._type_definition_component_()
+
+        def block0():
+            self._type_definition_component_()
+
+        self._closure(block0)
+
+    @tatsumasu()
+    def _identifier_list_(self):  # noqa
+        self._quotable_identifier_()
+
+        def block0():
+            self._token(",")
+            self._quotable_identifier_()
+
+        self._closure(block0)
 
     @tatsumasu()
     def _declarations_(self):  # noqa
@@ -676,13 +684,19 @@ class depfileSemantics(object):
     def conditional(self, ast):  # noqa
         return ast
 
-    def type_definition_field(self, ast):  # noqa
+    def quotable_identifier(self, ast):  # noqa
+        return ast
+
+    def type_def_stmt(self, ast):  # noqa
+        return ast
+
+    def type_definition_component(self, ast):  # noqa
         return ast
 
     def type_definition(self, ast):  # noqa
         return ast
 
-    def type_def_stmt(self, ast):  # noqa
+    def identifier_list(self, ast):  # noqa
         return ast
 
     def declarations(self, ast):  # noqa

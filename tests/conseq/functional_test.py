@@ -251,7 +251,8 @@ def test_type_defs(tmpdir):
     j = run_conseq(
         tmpdir,
         """
-    type apple = { description: "fruit" }
+    type apple:
+       description: "fruit"
     """,
     )
     types = j.get_type_defs()
@@ -259,7 +260,8 @@ def test_type_defs(tmpdir):
     j = run_conseq(
         tmpdir,
         """
-    type banana = { description: "fruit too" }
+    type banana:
+      description: "fruit too" 
     """,
         assert_clean=False,
     )
