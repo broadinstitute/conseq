@@ -26,7 +26,7 @@
     "jinja": {
       "patterns": [
         {
-          "comment": "HACK: Below we are using regexp event though it is semantically incorrect. It just provides really nice highlighting.",
+          "comment": "HACK: Below we are using regexp even though it is semantically incorrect. It just provides really nice highlighting.",
           "name": "string.regexp.jinja",
           "begin": "{{",
           "end": "}}"
@@ -236,7 +236,7 @@
         },
         {
           "name": "keyword.other.conseq",
-          "match": "\\b(include|run|rule|add-if-missing|exec_profile)\\b"
+          "match": "\\b(include|run|rule|add-if-missing|add-artifact|exec-profile)\\b"
         },
         {
           "name": "keyword.operator.expression.eval.conseq",
