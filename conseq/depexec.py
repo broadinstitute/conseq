@@ -698,7 +698,7 @@ def main_loop(
 
                 # if we're required confirmation from the user, do this before we continue
                 if req_confirm:
-                    answer = ui.confirm_execution(job.transform, inputs)
+                    answer = ui.confirm_execution(job.transform, format_inputs(inputs))
                     if answer == "a":
                         req_confirm = False
                     elif answer == "q":
@@ -1181,7 +1181,7 @@ def main(
             client = exec_client.create_client(
                 name, LazyConfigDict(rules, jinja2_env), props, jinja2_env
             )
-            rules.add_client(name, client)
+            rules.add_client(name, client, replace=True)
 
     # Reattach or cancel jobs from previous invocation
     executing = []

@@ -73,9 +73,12 @@ class Rules:
             raise Exception("Duplicate rules for {}".format(name))
         self.rule_by_name[name] = rule
 
-    def add_client(self, name, client):
-        if name in self.exec_clients:
-            raise Exception(f"Duplicate executor profiles named {name}")
+    def add_client(self, name, client, replace=False):
+        if not replace:
+            if name in self.exec_clients:
+                raise Exception(f"Duplicate executor profiles named {name}")
+        else:
+            assert name in self.exec_clients
         self.exec_clients[name] = client
 
     def has_client_defined(self, name):

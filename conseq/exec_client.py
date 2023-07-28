@@ -1618,7 +1618,7 @@ def create_client(name, config, properties, jinja2_env):
 
         return AsyncDelegateExecClient(
             resources,
-            properties["label"],
+            name,
             config["WORKING_DIR"],
             get_staging_url(config) + "/exec-results/" + config["EXECUTION_ID"],
             get_staging_url(config),
