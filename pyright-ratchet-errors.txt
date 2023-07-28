@@ -1,7 +1,5 @@
-__init__.py: error: Argument missing for parameter "required" (reportGeneralTypeIssues)
 __init__.py: error: Argument of type "None" cannot be assigned to parameter "copy_to" of type "str" in function "__init__"
 __init__.py: error: Argument of type "Unknown | IfStatement | list[Unknown]" cannot be assigned to parameter "when_false" of type "List[Statement]" in function "__init__"
-__init__.py: error: Argument of type "Unknown | None" cannot be assigned to parameter "description" of type "str" in function "__init__"
 __init__.py: error: Argument of type "Unknown | None" cannot be assigned to parameter "script" of type "str" in function "__init__"
 __init__.py: error: Cannot assign member "options" for type "Rule"
 __init__.py: error: Cannot assign member "watch_regex" for type "Rule"
@@ -57,6 +55,5 @@ helper.py: error: Argument of type "str | None" cannot be assigned to parameter 
 helper.py: error: Cannot assign member "_MAX_MULTIPART_SIZE" for type "Blob"
 main.py: error: Argument of type "Unknown | None" cannot be assigned to parameter "config_file" of type "str" in function "main"
 main_test.py: error: Argument of type "None" cannot be assigned to parameter "id" of type "int" in function "__init__"
-parse_test.py: error: Argument of type "None" cannot be assigned to parameter "description" of type "str" in function "__init__"
 template.py: error: Argument of type "(template_name: Unknown) -> bool" cannot be assigned to parameter "autoescape" of type "bool" in function "__init__"
 xref.py: error: "Never" is not iterable (reportGeneralTypeIssues)

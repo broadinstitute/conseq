@@ -366,10 +366,6 @@ class Semantics(object):
     def add_if_missing(self, ast):
         return AddIfMissingStatement(ast[1])
 
-    def type_def(self, ast):
-        properties = [ast[4]] + ast[5]
-        return TypeDefStmt(ast[1], properties)
-
     def conditional_expr(self, ast):
         exp = compile(ast, "<conseq-config>", "eval")
         return exp
