@@ -71,11 +71,12 @@ def is_valid_value(v):
     return isinstance(v, str)
 
 
-def _tail_file(filename, line_count=20, out=sys.stderr):
+def _get_tail_file(filename, line_count=20):
     if not os.path.exists(filename):
         log.error("Cannot tail {} because no such file exists".format(filename))
         return
 
+    lines = []
     with open(filename, "rt") as fd:
         fd.seek(0, 2)
         file_len = fd.tell()
@@ -83,37 +84,22 @@ def _tail_file(filename, line_count=20, out=sys.stderr):
         fd.seek(max(0, file_len - 100000), 0)
         lines = fd.read().split("\n")
         for line in lines[-line_count:]:
-            print(line)
-    out.flush()
+            lines.append(line + "\n")
+
+    return "".join(lines)
 
 
 def log_job_output(
-    stdout_path,
-    stderr_path,
-    line_count=20,
-    stdout_path_to_print=None,
-    stderr_path_to_print=None,
+    log_path, log_name=None, line_count=20,
 ):
-    if stdout_path_to_print is None:
-        stdout_path_to_print = stdout_path
-    if stderr_path_to_print is None:
-        stderr_path_to_print = stderr_path
+    if log_name is None:
+        log_name = log_path
 
-    if stdout_path is not None:
+    if log_path is not None:
         log.error(
-            "Dumping last {} lines of stdout ({})".format(
-                line_count, stdout_path_to_print
-            )
+            "%s",
+            f"Dumping last {line_count} lines of {log_name} ({log_path}):\n{_get_tail_file(log_path)}",
         )
-        _tail_file(stdout_path)
-
-    if stderr_path is not None:
-        log.error(
-            "Dumping last {} lines of stderr ({})".format(
-                line_count, stderr_path_to_print
-            )
-        )
-        _tail_file(stderr_path)
 
 
 class ExecutionStub:
@@ -1509,7 +1495,8 @@ def _resolve_filenames(remote: Remote, artifact: PropsType) -> PropsType:
 
 def _log_local_failure(captured_stdouts):
     if captured_stdouts != None:
-        log_job_output(captured_stdouts[0], captured_stdouts[1])
+        log_job_output(captured_stdouts[0], "stdout")
+        log_job_output(captured_stdouts[1], "stderr")
 
 
 def _log_remote_failure(file_fetch, msg):
@@ -1520,24 +1507,18 @@ def _log_remote_failure(file_fetch, msg):
             log.info("Fetching error and output logs for failed job's 'helper'")
             helper_stderr_path = file_fetch("helper_stderr.txt", tmpstderr.name)
             helper_stdout_path = file_fetch("helper_stdout.txt", tmpstdout.name)
-            log_job_output(
-                tmpstdout.name,
-                tmpstderr.name,
-                stdout_path_to_print=helper_stderr_path,
-                stderr_path_to_print=helper_stdout_path,
-            )
+
+            log_job_output(tmpstderr.name, helper_stderr_path)
+            log_job_output(tmpstdout.name, helper_stdout_path)
 
     with tempfile.NamedTemporaryFile() as tmpstderr:
         with tempfile.NamedTemporaryFile() as tmpstdout:
             log.info("Fetching error and output logs for failed job")
             stderr_path = file_fetch("stderr.txt", tmpstderr.name)
             stdout_path = file_fetch("stdout.txt", tmpstdout.name)
-            log_job_output(
-                tmpstdout.name,
-                tmpstderr.name,
-                stdout_path_to_print=stdout_path,
-                stderr_path_to_print=stderr_path,
-            )
+
+            log_job_output(tmpstderr.name, stderr_path)
+            log_job_output(tmpstdout.name, stdout_path)
 
 
 def assert_is_single_command(command):
