@@ -509,11 +509,6 @@ $ conseq report html
 The above command will create a directory named "html" and you can
 open `html/index.html` to browse the report.
 
-## Generate artifacts and rules diagram
-
-- `conseq altdot release_3_vbox.conseq > dag.dot`
-- Open dag.dot in Graphviz (or execute `dot dag.dot -Tpng -o dag.png`)
-
 ## Cleaning up space from past runs
 
 Whenever rules or artifacts manually added via `add-if-missing` change,
