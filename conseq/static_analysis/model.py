@@ -63,6 +63,38 @@ class DAG:
     rules: list[RuleNode]
 
 
+def artifact_satisfies_constraints(artifact_key, constraints):
+    """
+    Check if an artifact satisfies the given constraints.
+    
+    Args:
+        artifact_key: A tuple of (name, value) pairs representing the artifact properties
+        constraints: Constraints object with properties to match against
+        
+    Returns:
+        bool: True if the artifact satisfies all constraints, False otherwise
+    """
+    for constraint in constraints.properties:
+        constraint_name = constraint.name
+        constraint_value = constraint.value
+        
+        # Skip unknown constraints
+        if isinstance(constraint_value, Unknown):
+            continue
+        
+        # Check if the artifact has a matching property
+        artifact_matches = False
+        for prop_name, prop_value in artifact_key:
+            if prop_name == constraint_name and prop_value == constraint_value:
+                artifact_matches = True
+                break
+        
+        if not artifact_matches:
+            return False
+            
+    return True
+
+
 def createDAG(rules: list[Rule]) -> DAG:
     # Create a mapping of property patterns to rule nodes
     rule_nodes = {}
@@ -95,28 +127,7 @@ def createDAG(rules: list[Rule]) -> DAG:
             
             # Find matching artifacts based on constraints
             for artifact_key, artifact_node in artifact_nodes.items():
-                # Check if this artifact matches the constraints
-                matches = True
-                for constraint in constraints.properties:
-                    constraint_name = constraint.name
-                    constraint_value = constraint.value
-                    
-                    # Skip unknown constraints
-                    if isinstance(constraint_value, Unknown):
-                        continue
-                    
-                    # Check if the artifact has a matching property
-                    artifact_matches = False
-                    for prop_name, prop_value in artifact_key:
-                        if prop_name == constraint_name and prop_value == constraint_value:
-                            artifact_matches = True
-                            break
-                    
-                    if not artifact_matches:
-                        matches = False
-                        break
-                
-                if matches:
+                if artifact_satisfies_constraints(artifact_key, constraints):
                     # This artifact matches the constraints
                     rule_node.inputs.append(artifact_node)
                     artifact_node.consumed_by.append(rule_node)
