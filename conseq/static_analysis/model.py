@@ -46,26 +46,33 @@ class Rule:
 
 
 @dataclass
-class ArtifactNode:
+class ArtifactMatchNode:
     produced_by: "RuleNode"
-    artifact: Artifact
-    consumed_by: list["RuleNode"]
+    binding: Binding
+    artifact: OutputArtifact
+    consumed_by: "RuleNode"
 
 
 @dataclass
 class RuleNode:
     rule: Rule
-    inputs: list[ArtifactNode]
-    outputs: list[ArtifactNode]
+    inputs: list[ArtifactMatchNode]
+    outputs: list[ArtifactMatchNode]
 
 
 @dataclass
 class DAG:
     rules: list[RuleNode]
 
+    @property
+    def roots(self):
+        return [node for node in self.rules if len(node.inputs) == 0]
+
 
 def artifact_satisfies_constraints(
-    artifact: Artifact, constraints: Constraints
+    artifact: Artifact,
+    constraints: Constraints,
+    cache: dict[Union[Constraints, Artifact], set[tuple[str, str]]],
 ) -> bool:
     """
     Check if an artifact satisfies the given constraints.
@@ -77,13 +84,21 @@ def artifact_satisfies_constraints(
     Returns:
         bool: True if the artifact satisfies all constraints, False otherwise
     """
+    if constraints in cache:
+        required = cache[constraints]
+    else:
+        required = {
+            (name, value)
+            for name, value in constraints.properties
+            if not isinstance(value, Unknown)
+        }
+        cache[constraints] = required
 
-    required = {
-        (name, value)
-        for name, value in constraints.properties
-        if not isinstance(value, Unknown)
-    }
-    artifact_pairs = [(pair.name, pair.value) for pair in artifact.properties]
+    if artifact in cache:
+        artifact_pairs = cache[artifact]
+    else:
+        artifact_pairs = {(pair.name, pair.value) for pair in artifact.properties}
+        cache[artifact] = artifact_pairs
 
     return required.issubset(artifact_pairs)
 
@@ -91,40 +106,70 @@ def artifact_satisfies_constraints(
 def createDAG(rules: list[Rule]) -> DAG:
     # Create a mapping of property patterns to rule nodes
     rule_nodes: dict[Rule, RuleNode] = {}
-    artifact_nodes: dict[Artifact, ArtifactNode] = {}
+    cache = {}
 
     # First pass: create RuleNodes for all rules
     for rule in rules:
         rule_node = RuleNode(rule=rule, inputs=[], outputs=[])
         rule_nodes[rule] = rule_node
 
-    # Second pass: create ArtifactNodes and connect them
-    for rule in rules:
-        rule_node = rule_nodes[rule]
+    def all_bindings():
+        for rule in rules:
+            for input in rule.inputs:
+                yield rule, input
 
-        # Create output artifact nodes
-        for output in rule.outputs:
-            artifact_node = ArtifactNode(
-                produced_by=rule_node, consumed_by=[], artifact=output.artifact
-            )
-            artifact_nodes[output.artifact] = artifact_node
+    def all_artifact_outputs():
+        for rule in rules:
+            for output in rule.outputs:
+                yield rule, output
 
-            rule_node.outputs.append(artifact_node)
+    # Second pass: For each constraint, find all matching input artifacts and set up bi-directional references
+    for binding_rule, binding in all_bindings():
+        for output_rule, artifact_output in all_artifact_outputs():
+            if artifact_satisfies_constraints(
+                artifact_output.artifact, binding.constraints, cache
+            ):
+                # The output artifact matches the input constraints of a different rule. So link them up
+                match = ArtifactMatchNode(
+                    produced_by=rule_nodes[output_rule],
+                    binding=binding,
+                    artifact=artifact_output,
+                    consumed_by=rule_nodes[binding_rule],
+                )
 
-    # Third pass: For each constraint, find all matching input artifacts
-    for rule in rules:
-        rule_node = rule_nodes[rule]
-
-        # Connect input constraints to matching artifact nodes
-        for binding in rule.inputs:
-            constraints = binding.constraints
-
-            # Find matching artifacts based on constraints
-            for artifact_node in artifact_nodes.values():
-                if artifact_satisfies_constraints(artifact_node, constraints):
-                    # This artifact matches the constraints
-                    rule_node.inputs.append(artifact_node)
-                    artifact_node.consumed_by.append(rule_node)
+                match.produced_by.outputs.append(match)
+                match.consumed_by.inputs.append(match)
 
     # Return the DAG with all rule nodes
     return DAG(rules=list(rule_nodes.values()))
+
+
+class Transitions:
+    rule: Rule
+    start_blocked_by_uncompleted_rules: list[Rule]
+    completion_blocked_by_uncompleted_rules: list[Rule]
+
+
+def calc_run_depenendencies(dag: DAG) -> list[Transitions]:
+    # all rules can be one of three states: start-blocked -> not-complete -> complete
+    # based on the DAG, identify a set of checks per rule which determine when to transition.
+    transitions = []
+    for rule_node in dag.rules:
+        start_blocked_by_uncompleted_rules = []
+        completion_blocked_by_uncompleted_rules = []
+        for input in rule_node.inputs:
+            completion_blocked_by_uncompleted_rules.append(input.produced_by.rule)
+        for input in rule_node.inputs:
+            # if we have a node which consumes "all" artifacts, we need to wait for the rules
+            # which could possibly create these artifacts to fully complete before we know
+            # we have all such artifacts.
+            if input.binding.cardinality == "all":
+                start_blocked_by_uncompleted_rules.append(input.produced_by.rule)
+        transitions.append(
+            Transitions(
+                rule=rule_node.rule,
+                start_blocked_by_uncompleted_rules=start_blocked_by_uncompleted_rules,
+                completion_blocked_by_uncompleted_rules=completion_blocked_by_uncompleted_rules,
+            )
+        )
+    return transitions
