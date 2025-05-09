@@ -48,6 +48,7 @@ class Rule:
 @dataclass
 class ArtifactNode:
     produced_by: "RuleNode"
+    artifact: Artifact
     consumed_by: list["RuleNode"]
 
 
@@ -63,74 +64,67 @@ class DAG:
     rules: list[RuleNode]
 
 
-def artifact_satisfies_constraints(artifact_key: tuple[tuple[str, str], ...], constraints: Constraints) -> bool:
+def artifact_satisfies_constraints(
+    artifact: Artifact, constraints: Constraints
+) -> bool:
     """
     Check if an artifact satisfies the given constraints.
     
     Args:
-        artifact_key: A tuple of (name, value) pairs representing the artifact properties
+        artifact: Artifact with the artifact properties
         constraints: Constraints object with properties to match against
         
     Returns:
         bool: True if the artifact satisfies all constraints, False otherwise
     """
-    for constraint in constraints.properties:
-        constraint_name = constraint.name
-        constraint_value = constraint.value
-        
-        # Skip unknown constraints
-        if isinstance(constraint_value, Unknown):
-            continue
-        
-        # Check if the artifact has a matching property
-        artifact_matches = False
-        for prop_name, prop_value in artifact_key:
-            if prop_name == constraint_name and prop_value == constraint_value:
-                artifact_matches = True
-                break
-        
-        if not artifact_matches:
-            return False
-            
-    return True
+
+    required = {
+        (name, value)
+        for name, value in constraints.properties
+        if not isinstance(value, Unknown)
+    }
+    artifact_pairs = [(pair.name, pair.value) for pair in artifact.properties]
+
+    return required.issubset(artifact_pairs)
 
 
 def createDAG(rules: list[Rule]) -> DAG:
     # Create a mapping of property patterns to rule nodes
-    rule_nodes = {}
-    artifact_nodes = {}
-    
+    rule_nodes: dict[Rule, RuleNode] = {}
+    artifact_nodes: dict[Artifact, ArtifactNode] = {}
+
     # First pass: create RuleNodes for all rules
     for rule in rules:
         rule_node = RuleNode(rule=rule, inputs=[], outputs=[])
         rule_nodes[rule] = rule_node
-    
+
     # Second pass: create ArtifactNodes and connect them
     for rule in rules:
         rule_node = rule_nodes[rule]
-        
+
         # Create output artifact nodes
         for output in rule.outputs:
-            # Create a unique key for this artifact based on its properties
-            artifact_key = tuple((p.name, str(p.value)) for p in output.artifact.properties)
-            
-            # Create or get the artifact node
-            if artifact_key not in artifact_nodes:
-                artifact_nodes[artifact_key] = ArtifactNode(produced_by=rule_node, consumed_by=[])
-            
-            artifact_node = artifact_nodes[artifact_key]
+            artifact_node = ArtifactNode(
+                produced_by=rule_node, consumed_by=[], artifact=output.artifact
+            )
+            artifact_nodes[output.artifact] = artifact_node
+
             rule_node.outputs.append(artifact_node)
-        
+
+    # Third pass: For each constraint, find all matching input artifacts
+    for rule in rules:
+        rule_node = rule_nodes[rule]
+
         # Connect input constraints to matching artifact nodes
         for binding in rule.inputs:
             constraints = binding.constraints
-            
+
             # Find matching artifacts based on constraints
-            for artifact_key, artifact_node in artifact_nodes.items():
-                if artifact_satisfies_constraints(artifact_key, constraints):
+            for artifact_node in artifact_nodes.values():
+                if artifact_satisfies_constraints(artifact_node, constraints):
                     # This artifact matches the constraints
                     rule_node.inputs.append(artifact_node)
                     artifact_node.consumed_by.append(rule_node)
-    
+
     # Return the DAG with all rule nodes
     return DAG(rules=list(rule_nodes.values()))
