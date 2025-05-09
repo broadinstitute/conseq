@@ -63,7 +63,7 @@ class DAG:
     rules: list[RuleNode]
 
 
-def artifact_satisfies_constraints(artifact_key, constraints):
+def artifact_satisfies_constraints(artifact_key: tuple[tuple[str, str], ...], constraints: Constraints) -> bool:
     """
     Check if an artifact satisfies the given constraints.
     
