@@ -11,7 +11,8 @@ from conseq.static_analysis.model import (
 )
 import os
 from .model import createDAG, DAG
-from typing import Optional
+from typing import Optional, List
+from conseq.parser import AddIfMissingStatement
 
 def analyze(file: str, dir: str, dot_output: Optional[str] = None):
     jinja2_env = create_jinja2_env()
@@ -20,6 +21,14 @@ def analyze(file: str, dir: str, dot_output: Optional[str] = None):
     depfile=file,
     config_file=None,
     jinja2_env=jinja2_env)
+
+    # Collect all add-if-missing statements
+    add_if_missing_artifacts = []
+    for rule in rules:
+        if hasattr(rule, 'objs') and rule.objs:
+            for obj in rule.objs:
+                if isinstance(obj, AddIfMissingStatement):
+                    add_if_missing_artifacts.append(obj.json_obj)
 
     # Convert conseq rules to static analysis model rules
     model_rules = []
@@ -66,6 +75,32 @@ def analyze(file: str, dir: str, dot_output: Optional[str] = None):
 
         model_rule = Rule(name=rule.name, inputs=bindings, outputs=outputs)
         model_rules.append(model_rule)
+    
+    # Create a synthetic rule for add-if-missing artifacts if any exist
+    if add_if_missing_artifacts:
+        add_if_missing_outputs = []
+        for artifact_props in add_if_missing_artifacts:
+            props = []
+            for key, value in artifact_props.items():
+                if isinstance(value, dict) or isinstance(value, list):
+                    # Skip complex objects for simplicity
+                    continue
+                if not isinstance(key, str) or not isinstance(value, str):
+                    continue
+                props.append(Pair(name=key, value=value))
+            
+            if props:  # Only add if we have valid properties
+                artifact = Artifact(properties=props)
+                output_artifact = OutputArtifact(artifact=artifact, cardinality="one")
+                add_if_missing_outputs.append(output_artifact)
+        
+        if add_if_missing_outputs:  # Only create the rule if we have outputs
+            add_if_missing_rule = Rule(
+                name="add-if-missing", 
+                inputs=[], 
+                outputs=add_if_missing_outputs
+            )
+            model_rules.append(add_if_missing_rule)
 
     # Create the DAG
     dag = createDAG(model_rules)
