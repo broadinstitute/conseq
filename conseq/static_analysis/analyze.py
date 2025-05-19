@@ -8,10 +8,12 @@ from conseq.static_analysis.model import (
     Pair,
     Artifact,
     OutputArtifact,
+    ArtifactMatchNode,
+    RuleNode,
 )
 import os
 from .model import createDAG, DAG
-from typing import Optional, List
+from typing import Optional, List, Set
 from conseq.parser import AddIfMissingStatement
 
 def analyze(file: str, dir: str, dot_output: Optional[str] = None):
@@ -132,6 +134,51 @@ def analyze(file: str, dir: str, dot_output: Optional[str] = None):
                 )
 
     return 0
+
+
+def get_terminal_children(dag: DAG, artifact_node: ArtifactMatchNode) -> Set[RuleNode]:
+    """
+    Returns the set of downstream terminal rules reachable from the given artifact node.
+    
+    A terminal rule is a rule that has no outputs or whose outputs are not consumed by any other rule.
+    
+    Args:
+        dag: The DAG object
+        artifact_node: The starting artifact node
+        
+    Returns:
+        A set of terminal RuleNode objects
+    """
+    terminal_rules = set()
+    visited_rules = set()
+    
+    def dfs(node):
+        if node.consumed_by is None:
+            # This artifact is not consumed by any rule
+            return
+        
+        rule = node.consumed_by
+        
+        if rule in visited_rules:
+            # Avoid cycles
+            return
+        
+        visited_rules.add(rule)
+        
+        # Check if this rule is terminal (has no outputs or outputs not consumed)
+        is_terminal = True
+        for output in rule.outputs:
+            if output.consumed_by is not None:
+                is_terminal = False
+                dfs(output)
+        
+        if is_terminal:
+            terminal_rules.add(rule)
+    
+    # Start DFS from the given artifact node
+    dfs(artifact_node)
+    
+    return terminal_rules
 
 
 def writeDOT(dag: DAG, filename: str):
