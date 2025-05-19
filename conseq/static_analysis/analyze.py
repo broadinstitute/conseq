@@ -32,6 +32,8 @@ def analyze(file: str, dir: str):
                 if isinstance(value, dict) or isinstance(value, list):
                     # Skip complex objects for simplicity
                     continue
+                assert isinstance(key, str)
+                assert isinstance(value, str)
                 constraints_props.append(Pair(name=key, value=value))
 
             cardinality = "all" if input_spec.for_all else "one"
@@ -51,6 +53,8 @@ def analyze(file: str, dir: str):
                     if isinstance(value, dict) or isinstance(value, list):
                         # Skip complex objects for simplicity
                         continue
+                    assert isinstance(key, str)
+                    assert isinstance(value, str)
                     props.append(Pair(name=key, value=value))
 
                 # Assume "one" cardinality for outputs
