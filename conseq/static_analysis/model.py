@@ -72,7 +72,7 @@ class DAG:
 def artifact_satisfies_constraints(
     artifact: Artifact,
     constraints: Constraints,
-    cache: dict[Union[Constraints, Artifact], set[tuple[str, str]]],
+    cache: dict[Union[Constraints, Artifact], set[tuple[str, Union[str, Unknown]]]],
 ) -> bool:
     """
     Check if an artifact satisfies the given constraints.
@@ -85,12 +85,12 @@ def artifact_satisfies_constraints(
         bool: True if the artifact satisfies all constraints, False otherwise
     """
     if constraints in cache:
-        required = cache[constraints]
+        required: set[tuple[str, Union[str, Unknown]]] = cache[constraints]
     else:
-        required = {
-            (name, value)
-            for name, value in constraints.properties
-            if not isinstance(value, Unknown)
+        required: set[tuple[str, Union[str, Unknown]]] = {
+            (pair.name, pair.value)
+            for pair in constraints.properties
+            if not isinstance(pair.value, Unknown)
         }
         cache[constraints] = required
 
@@ -103,10 +103,27 @@ def artifact_satisfies_constraints(
     return required.issubset(artifact_pairs)
 
 
+class IdentityDict:
+    def __init__(self):
+        self.m = {}
+
+    def __contains__(self, value):
+        return id(value) in self.m
+
+    def __setitem__(self, key, value):
+        self.m[id(key)] = value
+
+    def __getitem__(self, key):
+        return self.m[id(key)]
+
+    def values(self):
+        return self.m.values()
+
+
 def createDAG(rules: list[Rule]) -> DAG:
     # Create a mapping of property patterns to rule nodes
-    rule_nodes: dict[Rule, RuleNode] = {}
-    cache = {}
+    rule_nodes: dict[Rule, RuleNode] = IdentityDict()
+    cache = IdentityDict()
 
     # First pass: create RuleNodes for all rules
     for rule in rules:
