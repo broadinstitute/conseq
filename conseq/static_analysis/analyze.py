@@ -20,7 +20,70 @@ from ..parser import RememberExecutedStmt, Rule as ConseqRule
 
 
 def _convert_conseq_remember_exec_to_dag_rule(rem_exec: RememberExecutedStmt):
-    raise NotImplementedError()
+    """
+    Convert a RememberExecutedStmt to a Rule for the DAG.
+    
+    Args:
+        rem_exec: The RememberExecutedStmt to convert
+        
+    Returns:
+        A Rule object representing the remembered execution
+    """
+    # Convert inputs to bindings
+    bindings = []
+    for var_name, input_value in rem_exec.inputs.items():
+        # Handle both single objects and lists of objects
+        if isinstance(input_value, list):
+            # For lists, create a binding with "all" cardinality
+            for obj in input_value:
+                constraints_props = []
+                for key, value in obj.items():
+                    if not isinstance(value, str):
+                        continue
+                    constraints_props.append(Pair(name=key, value=value))
+                
+                binding = Binding(
+                    variable=var_name,
+                    cardinality="all",
+                    constraints=Constraints(properties=constraints_props),
+                )
+                bindings.append(binding)
+        else:
+            # For single objects, create a binding with "one" cardinality
+            constraints_props = []
+            for key, value in input_value.items():
+                if not isinstance(value, str):
+                    continue
+                constraints_props.append(Pair(name=key, value=value))
+            
+            binding = Binding(
+                variable=var_name,
+                cardinality="one",
+                constraints=Constraints(properties=constraints_props),
+            )
+            bindings.append(binding)
+    
+    # Convert outputs to output artifacts
+    outputs = []
+    for output in rem_exec.outputs:
+        props = []
+        for key, value in output.items():
+            if isinstance(value, dict) or isinstance(value, list):
+                # Skip complex objects for simplicity
+                continue
+            if not isinstance(key, str) or not isinstance(value, str):
+                continue
+            props.append(Pair(name=key, value=value))
+        
+        if props:  # Only add if we have valid properties
+            artifact = Artifact(properties=props)
+            output_artifact = OutputArtifact(artifact=artifact, cardinality="one")
+            outputs.append(output_artifact)
+    
+    # Create a rule with the transform name
+    rule_name = f"remember-executed:{rem_exec.transform}"
+    model_rule = Rule(name=rule_name, inputs=bindings, outputs=outputs)
+    return model_rule
 
 
 def _convert_conseq_rule_to_dag_rule(rule: ConseqRule):
