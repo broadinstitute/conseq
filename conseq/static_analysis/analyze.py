@@ -1,4 +1,4 @@
-from conseq.config import read_deps
+from conseq.config import read_deps, read_rules
 from conseq.hashcache import HashCache
 from conseq.template import create_jinja2_env
 from conseq.static_analysis.model import (
@@ -11,15 +11,15 @@ from conseq.static_analysis.model import (
 )
 import os
 from .model import createDAG, DAG
+from typing import Optional
 
-
-def analyze(file: str, dir: str, dot_output: str = None):
-    # Create a temporary hashcache
-    hashcache = HashCache(os.path.join(dir, "hashcache"))
+def analyze(file: str, dir: str, dot_output: Optional[str] = None):
     jinja2_env = create_jinja2_env()
-
-    # Read the rules from the depfile
-    rules = read_deps(file, hashcache, jinja2_env)
+    rules = read_rules(
+    state_dir=dir,
+    depfile=file,
+    config_file=None,
+    jinja2_env=jinja2_env)
 
     # Convert conseq rules to static analysis model rules
     model_rules = []
@@ -29,11 +29,13 @@ def analyze(file: str, dir: str, dot_output: str = None):
         for input_spec in rule.inputs:
             constraints_props = []
             for key, value in input_spec.json_obj.items():
-                if isinstance(value, dict) or isinstance(value, list):
-                    # Skip complex objects for simplicity
+                if not isinstance(value, str):
                     continue
+                # if isinstance(value, dict) or isinstance(value, list):
+                #     # Skip complex objects for simplicity
+                #     continue
                 assert isinstance(key, str)
-                assert isinstance(value, str)
+                assert isinstance(value, str), f"value is {value}"
                 constraints_props.append(Pair(name=key, value=value))
 
             cardinality = "all" if input_spec.for_all else "one"
