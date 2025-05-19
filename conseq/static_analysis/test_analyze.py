@@ -1,5 +1,6 @@
 import os
 import tempfile
+import pytest
 from conseq.static_analysis.model import createDAG, Rule, Binding, Constraints, Pair, Artifact, OutputArtifact
 
 def test_simple_dag():
@@ -73,7 +74,7 @@ def test_simple_dag():
     assert rule_b_node.outputs[0].consumed_by.rule.name == "C"
     assert rule_c_node.inputs[0].produced_by.rule.name == "B"
 
-def test_with_sample_file():
+def test_with_sample_file(tmpdir, monkeypatch, capsys):
     """Test with a sample conseq file"""
     # Create a temporary conseq file
     with tempfile.NamedTemporaryFile(suffix=".conseq", delete=False) as f:
@@ -96,10 +97,33 @@ rule step3:
         filename = f.name
     
     try:
-        # This is just a placeholder - in a real test we would use the command
-        # But for unit testing, we'd need to mock the command execution
-        # Here we're just verifying the file was created correctly
-        assert os.path.exists(filename)
+        # Import the analyze function
+        from conseq.static_analysis.analyze import analyze
+        
+        # Call the analyze function with our test file
+        result = analyze(filename, str(tmpdir))
+        
+        # Check the return code
+        assert result == 0
+        
+        # Capture the printed output
+        captured = capsys.readouterr()
+        
+        # Verify the output contains expected information
+        assert f"DAG Analysis for {filename}:" in captured.out
+        assert "Total rules: 3" in captured.out
+        assert "Root rules (no inputs): 1" in captured.out
+        
+        # Check for specific rule dependencies
+        assert "Rule: step1" in captured.out
+        assert "Rule: step2" in captured.out
+        assert "Rule: step3" in captured.out
+        
+        # Verify the connections between rules
+        assert "From rule 'step1'" in captured.out
+        assert "From rule 'step2'" in captured.out
+        assert "To rule 'step2'" in captured.out
+        assert "To rule 'step3'" in captured.out
     finally:
         # Clean up
         os.unlink(filename)
