@@ -61,13 +61,18 @@ class ConseqArgumentParser:
             "analyze", help="Analyze a conseq file and print its dependency graph",
         )
         parser.add_argument("file", metavar="FILE", help="the conseq file to analyze")
+        parser.add_argument(
+            "--dot", 
+            metavar="DOTFILE",
+            help="Write the dependency graph to a Graphviz DOT file"
+        )
         parser.set_defaults(func=self._analyze_cmd)
 
     def _analyze_cmd(self, args):
         """Command handler for the analyze command"""
         from ..static_analysis.analyze import analyze
 
-        analyze(args.file, args.dir)
+        analyze(args.file, args.dir, args.dot)
 
     def _setup_subparsers(self):
         """Set up all subparsers for the different commands"""
