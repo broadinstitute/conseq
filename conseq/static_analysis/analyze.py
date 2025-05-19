@@ -24,11 +24,11 @@ def analyze(file: str, dir: str, dot_output: Optional[str] = None):
 
     # Collect all add-if-missing statements
     add_if_missing_artifacts = []
-    for rule in rules:
-        if hasattr(rule, 'objs') and rule.objs:
-            for obj in rule.objs:
-                if isinstance(obj, AddIfMissingStatement):
-                    add_if_missing_artifacts.append(obj.json_obj)
+    for obj in rules.objs:
+#        if isinstance(obj, AddIfMissingStatement):
+            add_if_missing_artifacts.append(obj)
+
+    breakpoint()
 
     # Convert conseq rules to static analysis model rules
     model_rules = []
