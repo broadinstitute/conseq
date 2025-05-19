@@ -8,6 +8,7 @@ from conseq.cli.commands import (
     version_cmd, localize_cmd, downstream_cmd, stage_cmd,
     parse_define, parse_rule_filters, parse_label
 )
+from conseq.static_analysis.model import createDAG
 
 class ConseqArgumentParser:
     """Handles setting up the command-line argument parser for conseq"""
@@ -38,6 +39,100 @@ class ConseqArgumentParser:
         )
         self.parser.set_defaults(func=None)
     
+    def _add_analyze(self, sub):
+        """Add the analyze command to the parser"""
+        parser = sub.add_parser(
+            "analyze",
+            help="Analyze a conseq file and print its dependency graph",
+        )
+        parser.add_argument(
+            "file", metavar="FILE", help="the conseq file to analyze"
+        )
+        parser.set_defaults(func=self._analyze_cmd)
+
+    def _analyze_cmd(self, args):
+        """Command handler for the analyze command"""
+        from conseq.config import read_deps
+        from conseq.hashcache import HashCache
+        from conseq.template import create_jinja2_env
+        from conseq.static_analysis.model import Rule, Binding, Constraints, Pair, Artifact, OutputArtifact
+
+        # Create a temporary hashcache
+        hashcache = HashCache(os.path.join(args.dir, "hashcache"))
+        jinja2_env = create_jinja2_env()
+        
+        # Read the rules from the depfile
+        rules = read_deps(args.file, hashcache, jinja2_env)
+        
+        # Convert conseq rules to static analysis model rules
+        model_rules = []
+        for rule in rules:
+            # Convert inputs to bindings
+            bindings = []
+            for input_spec in rule.inputs:
+                constraints_props = []
+                for key, value in input_spec.json_obj.items():
+                    if isinstance(value, dict) or isinstance(value, list):
+                        # Skip complex objects for simplicity
+                        continue
+                    constraints_props.append(Pair(name=key, value=value))
+                
+                cardinality = "all" if input_spec.for_all else "one"
+                binding = Binding(
+                    variable=input_spec.variable,
+                    cardinality=cardinality,
+                    constraints=Constraints(properties=constraints_props)
+                )
+                bindings.append(binding)
+            
+            # Convert outputs to output artifacts
+            outputs = []
+            if rule.outputs:
+                for output in rule.outputs:
+                    props = []
+                    for key, value in output.items():
+                        if isinstance(value, dict) or isinstance(value, list):
+                            # Skip complex objects for simplicity
+                            continue
+                        props.append(Pair(name=key, value=value))
+                    
+                    # Assume "one" cardinality for outputs
+                    artifact = Artifact(properties=props)
+                    output_artifact = OutputArtifact(
+                        artifact=artifact,
+                        cardinality="one"
+                    )
+                    outputs.append(output_artifact)
+            
+            model_rule = Rule(
+                name=rule.name,
+                inputs=bindings,
+                outputs=outputs
+            )
+            model_rules.append(model_rule)
+        
+        # Create the DAG
+        dag = createDAG(model_rules)
+        
+        # Print the DAG
+        print(f"DAG Analysis for {args.file}:")
+        print(f"Total rules: {len(dag.rules)}")
+        print(f"Root rules (no inputs): {len(dag.roots)}")
+        
+        print("\nRule dependencies:")
+        for rule_node in dag.rules:
+            print(f"\nRule: {rule_node.rule.name}")
+            if rule_node.inputs:
+                print("  Inputs:")
+                for input_node in rule_node.inputs:
+                    print(f"    - From rule '{input_node.produced_by.rule.name}' via binding '{input_node.binding.variable}'")
+            if rule_node.outputs:
+                print("  Outputs:")
+                for output_node in rule_node.outputs:
+                    print(f"    - To rule '{output_node.consumed_by.rule.name}' via binding '{output_node.binding.variable}'")
+        
+        return 0
+
     def _setup_subparsers(self):
         """Set up all subparsers for the different commands"""
         sub = self.parser.add_subparsers()
@@ -57,6 +152,7 @@ class ConseqArgumentParser:
         self._add_report(sub)
         self._add_downstream(sub)
         self._add_stage(sub)
+        self._add_analyze(sub)
     
     def _add_list(self, sub):
         parser = sub.add_parser("list", help="List all objects, executions, etc")
