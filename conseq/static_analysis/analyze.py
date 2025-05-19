@@ -16,93 +16,105 @@ from .model import createDAG, DAG
 from typing import Optional, List, Set
 from conseq.parser import AddIfMissingStatement
 
-def analyze(file: str, dir: str, dot_output: Optional[str] = None):
-    jinja2_env = create_jinja2_env()
-    rules = read_rules(
-    state_dir=dir,
-    depfile=file,
-    config_file=None,
-    jinja2_env=jinja2_env)
+from ..parser import RememberExecutedStmt, Rule as ConseqRule
 
-    # Collect all add-if-missing statements
-    add_if_missing_artifacts = []
-    for obj in rules.objs:
-#        if isinstance(obj, AddIfMissingStatement):
-            add_if_missing_artifacts.append(obj)
 
-    breakpoint()
+def _convert_conseq_remember_exec_to_dag_rule(rem_exec: RememberExecutedStmt):
+    raise NotImplementedError()
 
-    # Convert conseq rules to static analysis model rules
-    model_rules = []
-    for rule in rules:
-        # Convert inputs to bindings
-        bindings = []
-        for input_spec in rule.inputs:
-            constraints_props = []
-            for key, value in input_spec.json_obj.items():
-                if not isinstance(value, str):
-                    continue
-                # if isinstance(value, dict) or isinstance(value, list):
-                #     # Skip complex objects for simplicity
-                #     continue
-                assert isinstance(key, str)
-                assert isinstance(value, str), f"value is {value}"
-                constraints_props.append(Pair(name=key, value=value))
 
-            cardinality = "all" if input_spec.for_all else "one"
-            binding = Binding(
-                variable=input_spec.variable,
-                cardinality=cardinality,
-                constraints=Constraints(properties=constraints_props),
-            )
-            bindings.append(binding)
+def _convert_conseq_rule_to_dag_rule(rule: ConseqRule):
+    # Convert inputs to bindings
+    bindings = []
+    for input_spec in rule.inputs:
+        constraints_props = []
+        for key, value in input_spec.json_obj.items():
+            if not isinstance(value, str):
+                continue
+            # if isinstance(value, dict) or isinstance(value, list):
+            #     # Skip complex objects for simplicity
+            #     continue
+            assert isinstance(key, str)
+            assert isinstance(value, str), f"value is {value}"
+            constraints_props.append(Pair(name=key, value=value))
 
-        # Convert outputs to output artifacts
-        outputs = []
-        if rule.outputs:
-            for output in rule.outputs:
-                props = []
-                for key, value in output.items():
-                    if isinstance(value, dict) or isinstance(value, list):
-                        # Skip complex objects for simplicity
-                        continue
-                    assert isinstance(key, str)
-                    assert isinstance(value, str)
-                    props.append(Pair(name=key, value=value))
+        cardinality = "all" if input_spec.for_all else "one"
+        binding = Binding(
+            variable=input_spec.variable,
+            cardinality=cardinality,
+            constraints=Constraints(properties=constraints_props),
+        )
+        bindings.append(binding)
 
-                # Assume "one" cardinality for outputs
-                artifact = Artifact(properties=props)
-                output_artifact = OutputArtifact(artifact=artifact, cardinality="one")
-                outputs.append(output_artifact)
-
-        model_rule = Rule(name=rule.name, inputs=bindings, outputs=outputs)
-        model_rules.append(model_rule)
-    
-    # Create a synthetic rule for add-if-missing artifacts if any exist
-    if add_if_missing_artifacts:
-        add_if_missing_outputs = []
-        for artifact_props in add_if_missing_artifacts:
+    # Convert outputs to output artifacts
+    outputs = []
+    if rule.outputs:
+        for output in rule.outputs:
             props = []
-            for key, value in artifact_props.items():
+            for key, value in output.items():
                 if isinstance(value, dict) or isinstance(value, list):
                     # Skip complex objects for simplicity
                     continue
-                if not isinstance(key, str) or not isinstance(value, str):
-                    continue
+                assert isinstance(key, str)
+                assert isinstance(value, str)
                 props.append(Pair(name=key, value=value))
-            
-            if props:  # Only add if we have valid properties
-                artifact = Artifact(properties=props)
-                output_artifact = OutputArtifact(artifact=artifact, cardinality="one")
-                add_if_missing_outputs.append(output_artifact)
-        
-        if add_if_missing_outputs:  # Only create the rule if we have outputs
-            add_if_missing_rule = Rule(
-                name="add-if-missing", 
-                inputs=[], 
-                outputs=add_if_missing_outputs
-            )
-            model_rules.append(add_if_missing_rule)
+
+            # Assume "one" cardinality for outputs
+            artifact = Artifact(properties=props)
+            output_artifact = OutputArtifact(artifact=artifact, cardinality="one")
+            outputs.append(output_artifact)
+
+    model_rule = Rule(name=rule.name, inputs=bindings, outputs=outputs)
+    return model_rule
+
+
+def _create_synthetic_add_if_missing_rule(rules):
+    # Collect all add-if-missing statements
+    add_if_missing_artifacts = []
+    for obj in rules.objs:
+        add_if_missing_artifacts.append(obj)
+
+    add_if_missing_outputs = []
+    for artifact_props in add_if_missing_artifacts:
+        props = []
+        for key, value in artifact_props.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                continue
+            props.append(Pair(name=key, value=value))
+
+        if props:  # Only add if we have valid properties
+            artifact = Artifact(properties=props)
+            output_artifact = OutputArtifact(artifact=artifact, cardinality="one")
+            add_if_missing_outputs.append(output_artifact)
+
+    add_if_missing_rule = Rule(
+        name="add-if-missing", inputs=[], outputs=add_if_missing_outputs
+    )
+    return add_if_missing_rule
+
+
+def analyze(
+    file: str, dir: str, dot_output: Optional[str] = None, static_analyis: bool = False
+):
+    jinja2_env = create_jinja2_env()
+    rules = read_rules(
+        state_dir=dir, depfile=file, config_file=None, jinja2_env=jinja2_env
+    )
+
+    model_rules = []
+
+    # Create a synthetic rule for add-if-missing artifacts if any exist
+    model_rules.append(_create_synthetic_add_if_missing_rule(rules))
+
+    if static_analyis:
+        # Convert conseq rules to static analysis model rules
+        for rule in rules:
+            model_rule = _convert_conseq_rule_to_dag_rule(rule)
+            model_rules.append(model_rule)
+    else:
+        for rem_exec in rules.remember_executed:
+            model_rule = _convert_conseq_remember_exec_to_dag_rule(rem_exec)
+            model_rules.append(model_rule)
 
     # Create the DAG
     dag = createDAG(model_rules)
@@ -116,6 +128,7 @@ def analyze(file: str, dir: str, dot_output: Optional[str] = None):
     if dot_output:
         writeDOT(dag, dot_output)
         print(f"DOT file written to: {dot_output}")
+        write_artifact_terminal_rules(dag, f"{dot_output}.txt")
 
     print("\nRule dependencies:")
     for rule_node in dag.rules:
@@ -136,6 +149,21 @@ def analyze(file: str, dir: str, dot_output: Optional[str] = None):
     return 0
 
 
+def write_artifact_terminal_rules(dag: DAG, filename: str):
+    add_if_missing_outputs = None
+    for rule in dag.rules:
+        if rule.rule == "add-if-missing":
+            add_if_missing_outputs = rule.outputs
+    assert add_if_missing_outputs
+
+    with open(filename, "wt") as fd:
+        for artifact_node in add_if_missing_outputs:
+            fd.write(f"{artifact_node}\n")
+            for terminal_node in get_terminal_children(dag, artifact_node):
+                fd.write(f"{terminal_node}\n")
+            fd.write("\n")
+
+
 def get_terminal_children(dag: DAG, artifact_node: ArtifactMatchNode) -> Set[RuleNode]:
     """
     Returns the set of downstream terminal rules reachable from the given artifact node.
@@ -151,33 +179,33 @@ def get_terminal_children(dag: DAG, artifact_node: ArtifactMatchNode) -> Set[Rul
     """
     terminal_rules = set()
     visited_rules = set()
-    
+
     def dfs(node):
         if node.consumed_by is None:
             # This artifact is not consumed by any rule
             return
-        
+
         rule = node.consumed_by
-        
+
         if rule in visited_rules:
             # Avoid cycles
             return
-        
+
         visited_rules.add(rule)
-        
+
         # Check if this rule is terminal (has no outputs or outputs not consumed)
         is_terminal = True
         for output in rule.outputs:
             if output.consumed_by is not None:
                 is_terminal = False
                 dfs(output)
-        
+
         if is_terminal:
             terminal_rules.add(rule)
-    
+
     # Start DFS from the given artifact node
     dfs(artifact_node)
-    
+
     return terminal_rules
 
 
@@ -189,36 +217,42 @@ def writeDOT(dag: DAG, filename: str):
         dag: The DAG object to visualize
         filename: Path to the output DOT file
     """
-    with open(filename, 'w') as f:
-        f.write('digraph conseq {\n')
-        f.write('  rankdir=LR;\n')  # Left to right layout
-        f.write('  node [shape=box, style=filled, fillcolor=lightblue];\n\n')
-        
+    with open(filename, "w") as f:
+        f.write("digraph conseq {\n")
+        f.write("  rankdir=LR;\n")  # Left to right layout
+        f.write("  node [shape=box, style=filled, fillcolor=lightblue];\n\n")
+
         # Write all nodes
         for rule_node in dag.rules:
             rule_name = rule_node.rule.name
             # Escape quotes in rule name if needed
             safe_name = rule_name.replace('"', '\\"')
             f.write(f'  "{safe_name}" [label="{safe_name}"];\n')
-        
-        f.write('\n')
-        
+
+        f.write("\n")
+
         # Write all edges
         for rule_node in dag.rules:
             source_name = rule_node.rule.name
             safe_source = source_name.replace('"', '\\"')
-            
+
             for output_node in rule_node.outputs:
                 if output_node.consumed_by:
                     target_name = output_node.consumed_by.rule.name
                     safe_target = target_name.replace('"', '\\"')
-                    
+
                     # Use the binding variable as the edge label if available
-                    edge_label = output_node.binding.variable if hasattr(output_node, 'binding') and output_node.binding else ""
+                    edge_label = (
+                        output_node.binding.variable
+                        if hasattr(output_node, "binding") and output_node.binding
+                        else ""
+                    )
                     if edge_label:
                         safe_edge_label = edge_label.replace('"', '\\"')
-                        f.write(f'  "{safe_source}" -> "{safe_target}" [label="{safe_edge_label}"];\n')
+                        f.write(
+                            f'  "{safe_source}" -> "{safe_target}" [label="{safe_edge_label}"];\n'
+                        )
                     else:
                         f.write(f'  "{safe_source}" -> "{safe_target}";\n')
-        
-        f.write('}\n')
+
+        f.write("}\n")
