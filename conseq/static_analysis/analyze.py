@@ -31,7 +31,7 @@ def _convert_conseq_remember_exec_to_dag_rule(rem_exec: RememberExecutedStmt):
     """
     # Convert inputs to bindings
     bindings = []
-    for var_name, input_value in rem_exec.inputs.items():
+    for var_name, input_value in rem_exec.inputs:
         # Handle both single objects and lists of objects
         if isinstance(input_value, list):
             # For lists, create a binding with "all" cardinality
@@ -41,7 +41,7 @@ def _convert_conseq_remember_exec_to_dag_rule(rem_exec: RememberExecutedStmt):
                     if not isinstance(value, str):
                         continue
                     constraints_props.append(Pair(name=key, value=value))
-                
+
                 binding = Binding(
                     variable=var_name,
                     cardinality="all",
@@ -55,14 +55,14 @@ def _convert_conseq_remember_exec_to_dag_rule(rem_exec: RememberExecutedStmt):
                 if not isinstance(value, str):
                     continue
                 constraints_props.append(Pair(name=key, value=value))
-            
+
             binding = Binding(
                 variable=var_name,
                 cardinality="one",
                 constraints=Constraints(properties=constraints_props),
             )
             bindings.append(binding)
-    
+
     # Convert outputs to output artifacts
     outputs = []
     for output in rem_exec.outputs:
@@ -74,12 +74,12 @@ def _convert_conseq_remember_exec_to_dag_rule(rem_exec: RememberExecutedStmt):
             if not isinstance(key, str) or not isinstance(value, str):
                 continue
             props.append(Pair(name=key, value=value))
-        
+
         if props:  # Only add if we have valid properties
             artifact = Artifact(properties=props)
             output_artifact = OutputArtifact(artifact=artifact, cardinality="one")
             outputs.append(output_artifact)
-    
+
     # Create a rule with the transform name
     rule_name = f"remember-executed:{rem_exec.transform}"
     model_rule = Rule(name=rule_name, inputs=bindings, outputs=outputs)
@@ -215,15 +215,15 @@ def analyze(
 def write_artifact_terminal_rules(dag: DAG, filename: str):
     add_if_missing_outputs = None
     for rule in dag.rules:
-        if rule.rule == "add-if-missing":
+        if rule.rule.name == "add-if-missing":
             add_if_missing_outputs = rule.outputs
     assert add_if_missing_outputs
 
     with open(filename, "wt") as fd:
         for artifact_node in add_if_missing_outputs:
-            fd.write(f"{artifact_node}\n")
+            fd.write(f"{artifact_node.artifact.artifact.properties}\n")
             for terminal_node in get_terminal_children(dag, artifact_node):
-                fd.write(f"{terminal_node}\n")
+                fd.write(f"{terminal_node.rule.name}\n")
             fd.write("\n")
 
 
@@ -250,11 +250,11 @@ def get_terminal_children(dag: DAG, artifact_node: ArtifactMatchNode) -> Set[Rul
 
         rule = node.consumed_by
 
-        if rule in visited_rules:
+        if id(rule) in visited_rules:
             # Avoid cycles
             return
 
-        visited_rules.add(rule)
+        visited_rules.add(id(rule))
 
         # Check if this rule is terminal (has no outputs or outputs not consumed)
         is_terminal = True
@@ -264,7 +264,7 @@ def get_terminal_children(dag: DAG, artifact_node: ArtifactMatchNode) -> Set[Rul
                 dfs(output)
 
         if is_terminal:
-            terminal_rules.add(rule)
+            terminal_rules.add(id(rule))
 
     # Start DFS from the given artifact node
     dfs(artifact_node)
