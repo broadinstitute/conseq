@@ -9,3 +9,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [0.0.1] - 2023-03-02
 
 - Initial release
+
+## [0.0.2] - 2023-08-04
+
+- Fixed higlighting for keywords: add-artifact, exec-profile

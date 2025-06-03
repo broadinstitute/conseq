@@ -509,11 +509,6 @@ $ conseq report html
 The above command will create a directory named "html" and you can
 open `html/index.html` to browse the report.
 
-## Generate artifacts and rules diagram
-
-- `conseq altdot release_3_vbox.conseq > dag.dot`
-- Open dag.dot in Graphviz (or execute `dot dag.dot -Tpng -o dag.png`)
-
 ## Cleaning up space from past runs
 
 Whenever rules or artifacts manually added via `add-if-missing` change,
@@ -636,7 +631,6 @@ executor-template dsub {
     --status '*' --full && \
     gsutil cat {{ config.STAGING_URL }}/logs/{{ parameters.UUID }}/{{ JOB_ID }}.log"""
 }
-```
 
 executor-template sparkles {
 "type": "async-delegate",
@@ -694,23 +688,22 @@ supports TextMate grammars. So far we've got it worked with Visual Studio Code
 and PyCharm.
 
 ## Visual Studio Code installation
-
-- Copy the `./conseq/extensions/conseq-lang` directory into `~/.vscode/extensions`
-- Restart VS Code
-- Enjoy!
+`cd` into the conseq directory and run this command:
+```
+code --install-extension extensions/conseq-lang/conseq-lang.vsix
+```
 
 ## PyCharm installation
 
 Use these instructions to import the `./conseq/extensions/conseq-lang` directory:
 https://www.jetbrains.com/help/pycharm/tutorial-using-textmate-bundles.html#importing-bundles
 
-TODO:
-exec profile for sparkles
-type defs
+# TODO
+- exec profile for sparkles
+- type defs
   - validate these on job completion
   - make sure these have a description
   - make sure report shows description
-Add descriptions to rules.
+- Add descriptions to rules.
 
 Alternative grammar?
-```

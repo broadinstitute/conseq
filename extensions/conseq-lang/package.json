@@ -2,7 +2,7 @@
   "name": "conseq-lang",
   "displayName": "Conseq Lang",
   "description": "Syntax highlighting for conseq lang",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "engines": {
     "vscode": "^1.65.0"
   },
