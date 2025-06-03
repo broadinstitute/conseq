@@ -67,7 +67,9 @@ class PidProcStub:
 
 def is_valid_value(v):
     if isinstance(v, dict):
-        return len(v) == 1 and (("$filename" in v) or ("$value" in v))
+        return len(v) == 1 and (
+            ("$filename" in v) or ("$value" in v) or ("$file_url" in v)
+        )
     return isinstance(v, str)
 
 
