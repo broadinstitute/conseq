@@ -4,7 +4,7 @@ import jinja2
 
 from conseq import depexec
 from conseq import parser
-from conseq.parser import Semantics
+from conseq.parser.semantics import Semantics
 from conseq.parser import depfile
 from conseq.parser import TypeDefStmt
 
