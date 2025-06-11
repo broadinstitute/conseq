@@ -65,12 +65,66 @@ class FatalUserError(Exception):
     pass
 
 
-def make_output_check(output_expectations):
-    def is_outputs_good(outputs):
-        if output_expectations is None or len(output_expectations) == 0:
+from collections import defaultdict
+
+
+def make_output_check(rule: Rule):
+    def is_outputs_good(outputs: List[Dict]):
+        if rule.resolved_output_types is None:
             return True
-        print(output_expectations)
-        return False
+
+        # index by type name
+        type_by_name = {x.type_def.name: x for x in rule.resolved_output_types}
+
+        # count number of outputs per type for verifing cardinality checks
+        per_type_count = defaultdict(lambda: 0)
+        for output in outputs:
+            per_type_count[output["type"]] += 1
+
+        okay = True
+
+        # check cardinalities
+        for output_type in rule.resolved_output_types:
+            output_count = per_type_count[output_type.type_def.name]
+            if output_count > output_type.cardinality.min:
+                print(
+                    "Warning: rule {rule.name} created {output_count} outputs with type {output_type.type_def.name} but expected at least {output_type.cardinality.min}"
+                )
+                okay = False
+            if (
+                output_type.cardinality.max is not None
+                and output_count < output_type.cardinality.max
+            ):
+                print(
+                    "Warning: rule {rule.name} created {output_count} outputs with type {output_type.type_def.name} but expected at most {output_type.cardinality.max}"
+                )
+                okay = False
+
+        for output in outputs:
+            output_type = output["type"]
+            type_def = type_by_name.get(output_type)
+            if type_def is None:
+                print(
+                    f"Warning: rule {rule.name} created output with type {output_type} but that was not included in the output_types section of the rule"
+                )
+                continue
+
+            expected_fields = set(type_def.type_def.fields)
+            present_fields = set(output.keys())
+            missing_fields = expected_fields.difference(present_fields)
+            extra_fields = present_fields.difference(expected_fields)
+            if len(missing_fields) > 0:
+                print(
+                    f"Warning: output with type {output_type} from {rule.name} was missing properties: {', '.join(missing_fields)}"
+                )
+                okay = False
+            if len(extra_fields) > 0:
+                print(
+                    f"Warning: output with type {output_type} from {rule.name} had extra properties: {', '.join(extra_fields)}"
+                )
+                okay = False
+
+        return okay
 
     return is_outputs_good
 
@@ -81,7 +135,7 @@ def to_template(jinja2_env: Environment, rule: Rule, config: PropsType) -> Templ
         queries,
         predicates,
         rule.name,
-        output_matches_expectation=make_output_check(rule.output_expectations),
+        output_matches_expectation=make_output_check(rule),
     )
 
 

@@ -10,6 +10,12 @@ import dataclasses
 
 
 @dataclass
+class Cardinality:
+    min: int
+    max: Optional[int]
+
+
+@dataclass
 class QueryVariable:
     name: str
 
@@ -26,6 +32,12 @@ class TypeDefStmt:
     name: str
     description: Optional[str]
     fields: List[str]
+
+
+@dataclass
+class ResolvedOutputType:
+    type_def: TypeDefStmt
+    cardinality: Cardinality
 
 
 @dataclass
@@ -122,6 +134,8 @@ class Rule:
         self.lineno: Optional[int] = None
         self.inputs = []
         self.outputs: Optional[Any] = None
+        self.output_types: Optional[List[OutputType]] = None
+        self.resolved_output_types: Optional[List[ResolvedOutputType]] = None
         self.run_stmts: List[RunStmt] = []
         self.executor = "default"
         self.executor_parameters = {}
@@ -174,6 +188,12 @@ def unquote(s):
     raise Exception("{} does not look like a valid string".format(s))
 
 
+@dataclass
+class OutputType:
+    type: str
+    cardinality: Cardinality
+
+
 class Semantics(object):
     def __init__(self, filename):
         self.filename = filename
@@ -181,6 +201,34 @@ class Semantics(object):
     def rule_parameters(self, ast):
         # print("rule_parameters", ast)
         return tuple(ast)
+
+    def cardinality_suffix(self, ast):
+        if ast[0] == "+":
+            return Cardinality(1, None)
+        elif ast[0] == "*":
+            return Cardinality(0, None)
+        elif ast[0] == "?":
+            return Cardinality(0, 1)
+        elif ast[0] == "[" and ast[2] == "]":
+            return Cardinality(ast[1], ast[1])
+        else:
+            raise Exception(f"Unknown Cardinality: {ast}")
+
+    def number(self, ast):
+        return int(ast[0])
+
+    def output_type(self, ast):
+        if len(ast) == 1:
+            return OutputType(ast[0], Cardinality(1, 1))
+        else:
+            return OutputType(ast[0], ast[1])
+
+    def output_types(self, ast):
+        ots = [ast[0]]
+        rest = ast[1]
+        for x in rest:
+            ots.append(x[1])
+        return ots
 
     def run_statement(self, ast):
         exec_profile = "default"
@@ -263,26 +311,6 @@ class Semantics(object):
         assert isinstance(ast, six.string_types)
         return QueryVariable(ast)
 
-    def type_definition_component(self, ast):
-        if ast[0] == "fields":
-            return TypeDefFields(ast[2])
-        else:
-            assert ast[0] == "description"
-            return TypeDefDescription(ast[2])
-
-    def type_definition(self, ast):
-        fields = []
-        description = None
-        components = [ast[0]]
-        components.extend(ast[1])
-        for component in components:
-            if isinstance(component, TypeDefFields):
-                fields = component.fields
-            else:
-                assert isinstance(component, TypeDefDescription)
-                description = component.description
-        return TypeDefinition(fields=fields, description=description)
-
     def rule(self, ast):
         # raise Exception()
         # print("rule", repr(ast))
@@ -297,6 +325,8 @@ class Semantics(object):
                 rule.inputs = statement[2]
             elif statement[0] == "outputs":
                 rule.outputs = statement[2]
+            elif statement[0] == "output_types":
+                rule.output_types = statement[3]
             elif statement[0] == "options":
                 # print("----> options", statement)
                 options = [statement[2]]
@@ -355,7 +385,7 @@ class Semantics(object):
         return specs
 
     def type_def_stmt(self, ast):
-        return TypeDefStmt(ast[1], ast[3].description, ast[3].fields)
+        return TypeDefStmt(ast[1], None, ast[3])
 
     def var_stmt(self, ast):
         return LetStatement(ast[1], ast[3])

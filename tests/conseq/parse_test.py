@@ -363,35 +363,11 @@ def test_construct_cache_key(tmpdir):
 def test_type_def_no_fields():
     statements = parser.parse_str(
         """
-        type sample:
-          description: "desc" 
+        type sample (name)
     """
     )
     assert len(statements) == 1
-    assert statements[0] == TypeDefStmt("sample", "desc", [])
-
-
-def test_type_def_no_desc():
-    statements = parser.parse_str(
-        """
-        type sample:
-          fields: x
-    """
-    )
-    assert len(statements) == 1
-    assert statements[0] == TypeDefStmt("sample", None, ["x"])
-
-
-def test_type_def_full():
-    statements = parser.parse_str(
-        """
-        type sample:
-          description: "both"
-          fields: x, y,z
-    """
-    )
-    assert len(statements) == 1
-    assert statements[0] == TypeDefStmt("sample", "both", ["x", "y", "z"])
+    assert statements[0] == TypeDefStmt("sample", None, ["name"])
 
 
 def test_parse_rule_with_description():
@@ -436,3 +412,68 @@ def test_parse_rule_with_executor_params():
     assert isinstance(r, parser.Rule)
     assert r.executor == "executor_name"
     assert r.executor_parameters == {"param1": "1", "param2": "2"}
+
+
+def test_parse_rule_with_output_type():
+    example = """
+    rule A:
+        output_types: ( a )
+        run "echo hello"
+    """
+    decs = parser.parse_str(example)
+    assert len(decs) == 1
+
+    r = decs[0]
+    assert isinstance(r, parser.Rule)
+    assert len(r.output_types) == 1
+    assert r.output_types[0].type == "a"
+    assert r.output_types[0].cardinality.min == 1
+    assert r.output_types[0].cardinality.max == 1
+
+
+def test_parse_rule_with_cardinality_output_types():
+    example = """
+    rule A:
+        output_types: ( a?, b*, c+, d[3] )
+        run "echo hello"
+    """
+    decs = parser.parse_str(example)
+    assert len(decs) == 1
+
+    r = decs[0]
+    assert isinstance(r, parser.Rule)
+    assert len(r.output_types) == 4
+    a, b, c, d = r.output_types
+    assert a.type == "a"
+    assert a.cardinality.min == 0
+    assert a.cardinality.max == 1
+    assert b.type == "b"
+    assert b.cardinality.min == 0
+    assert b.cardinality.max is None
+    assert c.type == "c"
+    assert c.cardinality.min == 1
+    assert c.cardinality.max is None
+    assert d.type == "d"
+    assert d.cardinality.min == 3
+    assert d.cardinality.max == 3
+
+
+def test_parse_rule_with_output_types():
+    example = """
+    rule A:
+        output_types: ( a, b )
+        run "echo hello"
+    """
+    decs = parser.parse_str(example)
+    assert len(decs) == 1
+
+    r = decs[0]
+    assert isinstance(r, parser.Rule)
+    assert len(r.output_types) == 2
+    a, b = r.output_types
+    assert a.type == "a"
+    assert a.cardinality.min == 1
+    assert a.cardinality.max == 1
+    assert b.type == "b"
+    assert b.cardinality.min == 1
+    assert b.cardinality.max == 1
