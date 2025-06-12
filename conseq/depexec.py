@@ -7,7 +7,7 @@ import logging
 import textwrap
 import time
 from typing import Any, Callable, Dict, List, Tuple, Union, Optional
-
+import sys
 import six
 from .helper import Remote
 from jinja2.environment import Environment
@@ -88,7 +88,8 @@ def make_output_check(rule: Rule):
             output_count = per_type_count[output_type.type_def.name]
             if output_count > output_type.cardinality.min:
                 print(
-                    "Warning: rule {rule.name} created {output_count} outputs with type {output_type.type_def.name} but expected at least {output_type.cardinality.min}"
+                    "Warning: rule {rule.name} created {output_count} outputs with type {output_type.type_def.name} but expected at least {output_type.cardinality.min}",
+                    flush=True,
                 )
                 okay = False
             if (
@@ -96,7 +97,8 @@ def make_output_check(rule: Rule):
                 and output_count < output_type.cardinality.max
             ):
                 print(
-                    "Warning: rule {rule.name} created {output_count} outputs with type {output_type.type_def.name} but expected at most {output_type.cardinality.max}"
+                    "Warning: rule {rule.name} created {output_count} outputs with type {output_type.type_def.name} but expected at most {output_type.cardinality.max}",
+                    flush=True,
                 )
                 okay = False
 
@@ -115,12 +117,14 @@ def make_output_check(rule: Rule):
             extra_fields = present_fields.difference(expected_fields)
             if len(missing_fields) > 0:
                 print(
-                    f"Warning: output with type {output_type} from {rule.name} was missing properties: {', '.join(missing_fields)}"
+                    f"Warning: output with type {output_type} from {rule.name} was missing properties: {', '.join(missing_fields)}",
+                    flush=True,
                 )
                 okay = False
             if len(extra_fields) > 0:
                 print(
-                    f"Warning: output with type {output_type} from {rule.name} had extra properties: {', '.join(extra_fields)}"
+                    f"Warning: output with type {output_type} from {rule.name} had extra properties: {', '.join(extra_fields)}",
+                    flush=True,
                 )
                 okay = False
 
@@ -1117,10 +1121,12 @@ def reconcile_db(
     if len(missing_objs) > 0:
         if print_missing_objs:
             print(
-                "The following objects were not specified in the conseq file or were the result of a rule which has changed:"
+                "The following objects were not specified in the conseq file or were the result of a rule which has changed:",
+                flush=True,
             )
             for obj in missing_objs:
                 print("   {}".format(obj))
+            sys.stdout.flush()
             if force is None:
                 force = ui.ask_y_n("do you wish to remove them?")
 
@@ -1296,7 +1302,7 @@ def main(
             properties_to_add=properties_to_add,
         )
     except FatalUserError as e:
-        print("Error: {}".format(e))
+        print("Error: {}".format(e), flush=True)
         return -1
 
     return ret
