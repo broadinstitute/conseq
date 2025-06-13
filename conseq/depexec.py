@@ -37,7 +37,7 @@ import uuid
 
 from conseq.parser import QueryVariable
 from conseq.parser import Rule, RunStmt, TypeDefStmt
-from conseq.template import MissingTemplateVar, render_template
+from conseq.template import render_template
 from conseq.util import indent_str
 from conseq.xref import Resolver
 import re
