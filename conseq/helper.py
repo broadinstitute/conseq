@@ -7,8 +7,6 @@ import re
 import subprocess
 from typing import Dict, List, Optional, Tuple
 
-from boto.s3.connection import S3Connection
-from boto.s3.key import Key
 from google.cloud import storage
 
 
@@ -105,52 +103,6 @@ class GSStorageConnection(StorageConnection):
             blob.metadata = {"sha256": sha256}
 
 
-class S3StorageConnection(StorageConnection):
-    def __init__(self):
-        self.c = S3Connection()
-
-    def exists(self, bucket_name: str, key: str) -> bool:
-        return self.c.get_bucket(bucket_name, validate=False).get_key(key) is not None
-
-    def list_keys_with_prefix(self, bucket_name: str, path: str) -> List[str]:
-        bucket = self.c.get_bucket(bucket_name, validate=False)
-        return [x.key for x in bucket.list(prefix=path)]
-
-    def get_contents_as_string(self, bucket_name: str, path: str) -> bytes:
-        return (
-            self.c.get_bucket(bucket_name, validate=False)
-            .get_key(path, validate=False)
-            .get_contents_as_string()
-        )
-
-    def get_contents_to_filename(self, bucket_name: str, path: str, dest_path: str):
-        self.c.get_bucket(bucket_name, validate=False).get_key(
-            path, validate=False
-        ).get_contents_to_filename(dest_path)
-
-    def get_sha256(self, bucket_name: str, path: str) -> Optional[str]:
-        return (
-            self.c.get_bucket(bucket_name, validate=False)
-            .get_key(path)
-            .get_metadata("sha256")
-        )
-
-    def get_generation_id(self, bucket_name: str, path: str) -> str:
-        return self.c.get_bucket(bucket_name, validate=False).get_key(path).etag
-
-    def set_contents_from_string(self, bucket_name: str, path: str, text: str):
-        k = self.c.get_bucket(bucket_name, validate=False).get_key(path, validate=False)
-        k.set_contents_from_string(text)
-
-    def set_contents_from_filename(
-        self, filename: str, bucket_name: str, path: str, sha256=None
-    ):
-        k = self.c.get_bucket(bucket_name, validate=False).get_key(path, validate=False)
-        k.set_contents_from_filename(filename)
-        if sha256:
-            k.set_metadata("sha256", sha256)
-
-
 class LazyConstructorDict:
     def __init__(self, constructor_dict):
         self.constructor_dict = constructor_dict
@@ -164,9 +116,7 @@ class LazyConstructorDict:
 
 def new_remote(remote_url, local_dir):
     return Remote(
-        remote_url,
-        local_dir,
-        LazyConstructorDict({"s3": S3StorageConnection, "gs": GSStorageConnection}),
+        remote_url, local_dir, LazyConstructorDict({"gs": GSStorageConnection}),
     )
 
 

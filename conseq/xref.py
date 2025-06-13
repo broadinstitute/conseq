@@ -8,11 +8,9 @@ from typing import Dict, Union
 from google.cloud import storage
 from .types import PropsType
 
-from boto.s3.connection import S3Connection
 from six.moves.urllib import request
 from six.moves.urllib.parse import urlparse
 
-from conseq.patched_resumable_download_handler import ResumableDownloadHandler
 
 log = logging.getLogger(__name__)
 
@@ -22,33 +20,6 @@ def http_fetch(url, dest):
         fd = request.urlopen(url)
         for chunk in iter(lambda: fd.read(10000), b""):
             fdo.write(chunk)
-
-
-def s3_fetch(
-    bucket_name: str, path: str, destination_filename: str, config: PropsType
-) -> None:
-    c = S3Connection()
-    bucket = c.get_bucket(bucket_name)
-    k = bucket.get_key(path)
-    res_download_handler = ResumableDownloadHandler(num_retries=5)
-
-    last = [time.time()]
-
-    def report_progress(bytes_done, total_expected):
-        now = time.time()
-        elapsed = last[0] - now
-        if elapsed > 10:
-            log.info(
-                "Downloaded {}/{} ({})".format(
-                    bytes_done, total_expected, 100 * bytes_done / total_expected
-                )
-            )
-
-    k.get_contents_to_filename(
-        destination_filename,
-        res_download_handler=res_download_handler,
-        cb=report_progress,
-    )
 
 
 def gs_fetch(bucket_name: str, path: str, destination_filename: str) -> None:
@@ -76,8 +47,6 @@ class Pull:
         parts = urlparse(url)
         if parts.scheme == "ssh":
             raise Exception("ssh no longer supported")
-        elif parts.scheme in ["s3"]:
-            s3_fetch(parts.netloc, parts.path, dest_path, self.config)
         elif parts.scheme in ["gs"]:
             gs_fetch(parts.netloc, parts.path, dest_path)
         elif parts.scheme in ["http", "https"]:
