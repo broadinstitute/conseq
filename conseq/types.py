@@ -22,6 +22,8 @@ class BoundInput:
 PropValue = TypeVar("PropValue", bound=Union[str, Dict[str, str]])
 
 PropsType = Dict[str, PropValue]
+Artifact = PropsType
+ConfigType = PropsType
 
 
 class Obj:

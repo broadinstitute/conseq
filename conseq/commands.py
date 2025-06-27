@@ -10,10 +10,10 @@ from conseq import helper
 from conseq import xref
 from conseq.config import read_rules
 from conseq.dep import Obj, PUBLIC_SPACE
-from conseq.depexec import (
+from conseq.execution.template_utils import (
     convert_input_spec_to_queries,
-    remove_obj_and_children,
 )
+from conseq.execution.reconcilation import remove_obj_and_children
 from conseq.util import indent_str
 import re
 from conseq.template import create_jinja2_env

@@ -7,6 +7,7 @@ from conseq import parser
 from conseq.parser.semantics import Semantics
 from conseq.parser import depfile
 from conseq.parser import TypeDefStmt
+from conseq.execution.template_utils import to_template
 
 pair_of_rules = """
 # ignore this comment
@@ -57,7 +58,7 @@ def test_parse_constrained_query():
     assert isinstance(a.json_obj["value"], parser.QueryVariable)
     assert isinstance(b.json_obj["value"], parser.QueryVariable)
 
-    template = depexec.to_template(jinja2_env, rule, {})
+    template = to_template(jinja2_env, rule, {})
     assert template.transform == "a"
     assert len(template.foreach_queries) == 2
     assert len(template.forall_queries) == 0

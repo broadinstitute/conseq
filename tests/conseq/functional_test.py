@@ -385,9 +385,9 @@ def test_publish(tmpdir, monkeypatch):
         assert location == "manifest-bongo.json"
         publish_called[0] = True
 
-    import conseq.depexec
+    import conseq.execution.main_loop
 
-    monkeypatch.setattr(conseq.depexec, "publish_manifest", mock_publish_manifest)
+    monkeypatch.setattr(conseq.execution.main_loop, "publish_manifest", mock_publish_manifest)
     import conseq.helper
 
     _mock_new_remote = create_autospec(conseq.helper.new_remote)

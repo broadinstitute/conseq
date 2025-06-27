@@ -30,14 +30,7 @@ DISABLE_AUTO_CREATE_RULES = False
 from .types import RE_STATUS_FAILED, STATUS_STARTED, STATUS_FAILED, STATUS_COMPLETED
 from .model.objects import  PUBLIC_SPACE
 from .dao.execution import RuleSet, ExecutionLog
-
-
-
 from sqlite3 import Connection
-
-
-
-
 from .query import ForAll, ForEach, PropsMatch
 
 class Template:

@@ -2,9 +2,9 @@ import os
 
 from conseq import dep
 from conseq import depexec
-from conseq.depexec import reconcile_db
 from conseq.template import create_jinja2_env
-
+from conseq.execution.reconcilation import reconcile_db
+from conseq.execution.scheduler import get_satisfiable_jobs
 
 class MockRule:
     def __init__(self, executor, resources):
@@ -30,12 +30,12 @@ def test_serial_execution():
 
     pending_jobs = [MockJob("1", "t1"), MockJob("2", "t1")]
     executing = []
-    jobs = depexec.get_satisfiable_jobs(rules, resources_per_client, pending_jobs, [])
+    jobs = get_satisfiable_jobs(rules, resources_per_client, pending_jobs, [])
     assert len(jobs) == 1
 
     pending_jobs = [MockJob("2", "t1")]
     executing = [MockJob("1", "t1")]
-    jobs = depexec.get_satisfiable_jobs(
+    jobs = get_satisfiable_jobs(
         rules, resources_per_client, pending_jobs, executing
     )
     assert len(jobs) == 0
@@ -48,14 +48,14 @@ def test_parallel_execution():
 
     pending_jobs = [MockJob("1", "t1"), MockJob("2", "t2"), MockJob("3", "t1")]
     executing = []
-    jobs = depexec.get_satisfiable_jobs(
+    jobs = get_satisfiable_jobs(
         rules, resources_per_client, pending_jobs, executing
     )
     assert len(jobs) == 2
 
     pending_jobs = [MockJob("3", "t1")]
     executing = [MockJob("1", "t1"), MockJob("2", "t2")]
-    jobs = depexec.get_satisfiable_jobs(
+    jobs = get_satisfiable_jobs(
         rules, resources_per_client, pending_jobs, executing
     )
     assert len(jobs) == 0

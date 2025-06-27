@@ -12,7 +12,6 @@ class FatalUserError(Exception):
     """Raised when a fatal user error occurs that should stop execution."""
     pass
 
-
 class MissingTemplateVar(Exception):
     """Raised when a required template variable is missing."""
     
