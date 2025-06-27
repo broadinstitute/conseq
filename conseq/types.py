@@ -1,6 +1,16 @@
 from typing import Dict, Union, Sequence, Tuple, Optional, TypeVar
 from dataclasses import dataclass
 
+STATUS_STARTED = "started"
+STATUS_COMPLETED = "completed"
+STATUS_FAILED = "failed"
+
+RE_STATUS_PENDING = "pending"
+RE_STATUS_STARTED = "started"
+RE_STATUS_COMPLETE = "complete"
+RE_STATUS_FAILED = "failed"
+RE_STATUS_DEFERRED = "deferred"
+
 
 @dataclass
 class BoundInput:

@@ -119,11 +119,12 @@ def test_rule_reconcile(tmpdir, monkeypatch):
         return fn
 
     # record the number of times these functions have been called
+    from conseq.dao import signals
     monkeypatch.setattr(
-        dep, "signal_add_obj", increment_counter_callback("new_artifacts")
+        signals, "signal_add_obj", increment_counter_callback("new_artifacts")
     )
     monkeypatch.setattr(
-        dep, "signal_remove_obj", increment_counter_callback("del_artifacts")
+        signals, "signal_remove_obj", increment_counter_callback("del_artifacts")
     )
 
     def run_with_config(config_str):

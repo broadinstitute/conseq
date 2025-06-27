@@ -18,8 +18,7 @@ google-cloud-storage = "^2.8.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.3.1"
-pyright-ratchet = {git = "https://github.com/pgm/pyright-ratchet.git"}
-
+pyright-ratchet = {git = "https://github.com/pgm/pyright-ratchet.git", tag="v0.3.1"}
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"

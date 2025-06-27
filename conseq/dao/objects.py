@@ -1,7 +1,25 @@
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Tuple
 import json
 from ..types import PropsType, BindingsDict, Obj
 from conseq.db import get_cursor, transaction
+from . import signals
+from ..model.objects import PUBLIC_SPACE
+
+def split_props_into_key_and_other(
+    props: PropsType,
+) -> Tuple[Dict[str, str], Dict[str, str]]:
+    key_props = {}
+    other_props = {}
+
+    for k, v in props.items():
+        if isinstance(v, dict) and len(v) == 1 and list(v.keys())[0].startswith("$"):
+            other_props[k] = list(v.values())[0]
+        elif k == "$hash":
+            other_props[k] = v
+        else:
+            key_props[k] = v
+
+    return key_props, other_props
 
 
 class ObjHistory:
@@ -69,7 +87,9 @@ class ObjSet:
         return Obj(id, space, timestamp, json.loads(_json))
 
     def remove(self, id):
-        signal_remove_obj(id)
+        from .execution import _delete_execution_by_id
+
+        signals.signal_remove_obj(id)
         obj = self.get(id)
         c = get_cursor()
         c.execute("DELETE FROM cur_obj WHERE id = ?", [id])
@@ -120,7 +140,7 @@ class ObjSet:
         )
         id = c.lastrowid
         assert isinstance(id, int)
-        signal_add_obj(id, space, props)
+        signals.signal_add_obj(id, space, props)
 
         obj = Obj(id, space, timestamp, props)
 

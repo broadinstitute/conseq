@@ -1,0 +1,1 @@
+PUBLIC_SPACE = "public"

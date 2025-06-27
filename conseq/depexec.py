@@ -13,7 +13,7 @@ from .helper import Remote
 from jinja2.environment import Environment
 import os
 
-from .dep import Execution
+from .dao.execution import Execution
 
 from conseq import debug_log
 from conseq import dep
@@ -22,7 +22,8 @@ from conseq import ui
 from conseq import xref
 from conseq.config import Rules
 from conseq.config import read_rules
-from conseq.dep import ForEach, Jobs, RuleExecution, Template
+from conseq.query import ForEach
+from conseq.dep import Jobs, Template
 from conseq.exec_client import (
     AsyncDelegateExecClient,
     DelegateExecClient,
@@ -34,7 +35,8 @@ from conseq.exec_client import (
     CACHE_KEY_FILENAME,
 )
 import uuid
-
+from .dao.execution import  RuleExecution
+from .exceptions import MissingTemplateVar
 from conseq.parser import QueryVariable
 from conseq.parser import Rule, RunStmt, TypeDefStmt
 from conseq.template import render_template
@@ -721,7 +723,7 @@ def main_loop(
             )
             job = None
             for job in ready_jobs:
-                assert isinstance(job, dep.RuleExecution)
+                assert isinstance(job, RuleExecution)
 
                 if maxstart is not None and start_count >= maxstart:
                     break

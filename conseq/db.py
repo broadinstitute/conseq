@@ -7,6 +7,7 @@ import sqlite3
 import threading
 from sqlite3 import Connection, Cursor
 from typing import Iterable, Iterator
+from sqlite3 import Connection, Cursor
 
 
 def prepare_db_connection(filename: str):
@@ -74,6 +75,7 @@ def prepare_db_connection(filename: str):
         db.execute(stmt)
 
     return db
+
 
 
 current_db_cursor_state = threading.local()
