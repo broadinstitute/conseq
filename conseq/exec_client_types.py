@@ -65,123 +65,37 @@ class ProcLike(Protocol):
         """
         ...
 
-
-class ClientExecution:
+class ClientExecution(Protocol):
     """Represents an active execution of a rule/command.
     
     Tracks the state and metadata of a running or completed execution,
     including the process, output files, and execution parameters.
     This class handles both local and remote executions.
-    
-    Attributes:
-        exec_xref: External reference identifier for the execution
     """
-    exec_xref: str
-
-    def __init__(
-        self,
-        transform: str,
-        id: int,
-        job_dir: str,
-        proc: ProcLike,
-        outputs: Optional[List[PropsType]],
-        captured_stdouts: Union[List[str], Tuple[str, str]],
-        desc_name: str,
-        executor_parameters: dict,
-        *,
-        watch_regex=None,
-    ) -> None:
-        """Initialize a client execution.
-        
-        Args:
-            transform: Name/identifier of the rule being executed
-            id: Unique execution ID
-            job_dir: Working directory for the execution
-            proc: Process object for the running command
-            outputs: Expected output artifacts (None if determined at runtime)
-            captured_stdouts: Paths to stdout/stderr log files
-            desc_name: Human-readable description of the execution
-            executor_parameters: Configuration parameters for the executor
-            watch_regex: Optional regex pattern to watch for in logs
-        """
-        self.transform = transform
-        self.id = id
-        self.proc = proc
-        self.job_dir = job_dir
-        self.outputs = outputs
-        self.captured_stdouts = captured_stdouts
-        self.desc_name = desc_name
-        self.log_grep_state = {}
-        self.watch_regex = watch_regex
-        self.executor_parameters = executor_parameters
-        assert job_dir != None
-
-    def _resolve_filenames(self, props):
-        """Resolve relative filenames to absolute paths within the job directory.
-        
-        Converts artifact properties containing relative filenames to absolute paths,
-        ensuring the files actually exist before publishing results.
-        
-        Args:
-            props: Dictionary of artifact properties
-            
-        Returns:
-            Copy of props with resolved absolute filenames
-            
-        Raises:
-            Exception: If a referenced file does not exist
-        """
-        props_copy = {}
-        for k, v in props.items():
-            if isinstance(v, dict) and "$filename" in v:
-                full_filename = os.path.join(self.job_dir, v["$filename"])
-                if not os.path.exists(full_filename):
-                    raise Exception(
-                        "Attempted to publish results which referenced file that did not exist: {}".format(
-                            full_filename
-                        )
-                    )
-                v = {"$filename": full_filename}
-            props_copy[k] = v
-        return props_copy
 
     def get_state_label(self) -> str:
         """Get a human-readable label describing the execution state.
-        
+
         Returns:
             String label indicating the type/state of execution
         """
-        return "local-run"
+        ...
 
     def get_external_id(self) -> str:
         """Generate a serializable external reference for this execution.
-        
+
         Creates a JSON string containing all the information needed to
         reattach to or identify this execution later.
-        
+
         Returns:
             JSON string with execution metadata
         """
-        d = dict(
-            transform=self.transform,
-            id=self.id,
-            job_dir=self.job_dir,
-            pid=self.proc.pid,
-            outputs=self.outputs,
-            captured_stdouts=self.captured_stdouts,
-            desc_name=self.desc_name,
-            executor_parameters=self.executor_parameters,
-        )
-        return json.dumps(d)
+        ...
 
-    @property
-    def results_path(self):
-        """Path to the results.json file for this execution.
-        
-        Returns:
-            Absolute path to the results file in the job directory
-        """
-        return os.path.join(self.job_dir, "results.json")
+    # Path to the results.json file for this execution.
+    results_path : str
+
+
 
 class ExecClient:
     """Abstract base class for execution clients.
