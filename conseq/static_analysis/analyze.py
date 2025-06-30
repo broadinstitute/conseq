@@ -1,5 +1,8 @@
+import io
+import sys
+from dataclasses import dataclass
+
 from conseq.config import read_deps, read_rules
-from conseq.hashcache import HashCache
 from conseq.template import create_jinja2_env
 from conseq.static_analysis.model import (
     Rule,
@@ -9,12 +12,12 @@ from conseq.static_analysis.model import (
     Artifact,
     OutputArtifact,
     ArtifactMatchNode,
-    RuleNode,
+    RuleNode, UNKNOWN,
 )
-import os
-from .model import createDAG, DAG
-from typing import Optional, List, Set
+from .model import DAG, Unknown, Blockers
+from typing import Optional, List, Set, Union
 from conseq.parser import AddIfMissingStatement
+from ..exceptions import CycleDetected
 
 from ..parser import RememberExecutedStmt, Rule as ConseqRule
 
@@ -111,7 +114,7 @@ def _convert_conseq_rule_to_dag_rule(rule: ConseqRule):
 
     # Convert outputs to output artifacts
     outputs = []
-    if rule.outputs:
+    if rule.outputs is not None:
         for output in rule.outputs:
             props = []
             for key, value in output.items():
@@ -126,6 +129,16 @@ def _convert_conseq_rule_to_dag_rule(rule: ConseqRule):
             artifact = Artifact(properties=props)
             output_artifact = OutputArtifact(artifact=artifact, cardinality="one")
             outputs.append(output_artifact)
+    else:
+        assert rule.resolved_output_types is not None, f"Rule {rule.name} must either have an 'output' block or an 'output_types' block"
+        for output_type in rule.resolved_output_types:
+            props = [Pair(name="type", value=output_type.type_def.name)]
+            for field in output_type.type_def.fields:
+                props.append(Pair(name=field, value=UNKNOWN))
+            artifact = Artifact(properties=props)
+            output_artifact = OutputArtifact(artifact=artifact, cardinality="many")
+            outputs.append(output_artifact)
+
 
     model_rule = Rule(name=rule.name, inputs=bindings, outputs=outputs)
     return model_rule
@@ -155,10 +168,7 @@ def _create_synthetic_add_if_missing_rule(rules):
     )
     return add_if_missing_rule
 
-
-def analyze(
-    file: str, dir: str, dot_output: Optional[str] = None, static_analyis: bool = False
-):
+def create_dag_from_file(dir: str, file : str, static_analyis: bool):
     jinja2_env = create_jinja2_env()
     rules = read_rules(
         state_dir=dir, depfile=file, config_file=None, jinja2_env=jinja2_env
@@ -182,6 +192,13 @@ def analyze(
     # Create the DAG
     dag = createDAG(model_rules)
 
+    return dag
+
+def analyze(
+    file: str, dir: str, dot_output: Optional[str] = None, static_analyis: bool = False
+):
+    dag = create_dag_from_file(dir, file, static_analyis)
+
     # Print the DAG
     print(f"DAG Analysis for {file}:")
     print(f"Total rules: {len(dag.rules)}")
@@ -189,9 +206,12 @@ def analyze(
 
     # Write DOT file if requested
     if dot_output:
-        writeDOT(dag, dot_output)
+        blockers = compute_blockers(dag)
+        with open(dot_output, "w") as f:
+            _write_blockers_dot(blockers, f)
+        # writeDOT(dag, dot_output)
         print(f"DOT file written to: {dot_output}")
-        write_artifact_terminal_rules(dag, f"{dot_output}.txt")
+        # write_artifact_terminal_rules(dag, f"{dot_output}.txt")
 
     print("\nRule dependencies:")
     for rule_node in dag.rules:
@@ -271,6 +291,85 @@ def get_terminal_children(dag: DAG, artifact_node: ArtifactMatchNode) -> Set[Rul
 
     return terminal_rules
 
+def printDOT(dag: DAG):
+    _writeDOT(dag, sys.stdout)
+
+def _writeDOT(dag: DAG, f: io.TextIOBase):
+    f.write("digraph conseq {\n")
+    f.write("  rankdir=LR;\n")  # Left to right layout
+    f.write("  node [shape=box, style=filled, fillcolor=lightblue];\n\n")
+
+    # Write all nodes
+    for rule_node in dag.rules:
+        rule_name = rule_node.rule.name
+        # Escape quotes in rule name if needed
+        safe_name = rule_name.replace('"', '\\"')
+        f.write(f'  "{safe_name}" [label="{safe_name}"];\n')
+
+    f.write("\n")
+
+    # Write all edges
+    for rule_node in dag.rules:
+        source_name = rule_node.rule.name
+        safe_source = source_name.replace('"', '\\"')
+
+        for output_node in rule_node.outputs:
+            if output_node.consumed_by:
+                target_name = output_node.consumed_by.rule.name
+                safe_target = target_name.replace('"', '\\"')
+
+                # Use the binding variable as the edge label if available
+                edge_label = (
+                    output_node.binding.variable
+                    if hasattr(output_node, "binding") and output_node.binding
+                    else ""
+                )
+                if edge_label:
+                    safe_edge_label = edge_label.replace('"', '\\"')
+                    f.write(
+                        f'  "{safe_source}" -> "{safe_target}" [label="{safe_edge_label}"];\n'
+                    )
+                else:
+                    f.write(f'  "{safe_source}" -> "{safe_target}";\n')
+
+    f.write("}\n")
+
+def _write_blockers_dot(all_blockers: List[Blockers], f: io.TextIOBase):
+    f.write("digraph conseq {\n")
+    f.write("  rankdir=LR;\n")  # Left to right layout
+    f.write("  node [shape=box, style=filled, fillcolor=lightblue];\n\n")
+
+    def _to_safe_name(x):
+        return x.replace('"', '\\"')
+
+    # Write all nodes
+    for blockers in all_blockers:
+        rule_name = blockers.rule.name
+        # Escape quotes in rule name if needed
+        safe_name = _to_safe_name(rule_name)
+        f.write(f'  "{safe_name}" [label="{safe_name}"];\n')
+
+    f.write("\n")
+
+    # Write all edges
+    for blockers in all_blockers:
+        rule_name = blockers.rule.name
+        rule_node_name = _to_safe_name(rule_name)
+
+        seen = set()
+        for rule in blockers.start_blocked_by_uncompleted_rules:
+            f.write(
+                f'  "{_to_safe_name(rule.name)}" -> "{rule_node_name}" [label="all"];\n'
+            )
+            seen.add(rule.name)
+
+        for rule in blockers.completion_blocked_by_uncompleted_rules:
+            if rule.name not in seen:
+                f.write(
+                    f'  "{_to_safe_name(rule.name)}" -> "{rule_node_name}";\n'
+                )
+
+    f.write("}\n")
 
 def writeDOT(dag: DAG, filename: str):
     """
@@ -281,41 +380,152 @@ def writeDOT(dag: DAG, filename: str):
         filename: Path to the output DOT file
     """
     with open(filename, "w") as f:
-        f.write("digraph conseq {\n")
-        f.write("  rankdir=LR;\n")  # Left to right layout
-        f.write("  node [shape=box, style=filled, fillcolor=lightblue];\n\n")
+        _writeDOT(dag, f)
 
-        # Write all nodes
-        for rule_node in dag.rules:
-            rule_name = rule_node.rule.name
-            # Escape quotes in rule name if needed
-            safe_name = rule_name.replace('"', '\\"')
-            f.write(f'  "{safe_name}" [label="{safe_name}"];\n')
+def artifact_satisfies_constraints(
+        artifact: Artifact,
+        constraints: Constraints,
+        cache: dict[Union[Constraints, Artifact], set[tuple[str, Union[str, Unknown]]]],
+) -> bool:
+    """
+    Check if an artifact satisfies the given constraints.
 
-        f.write("\n")
+    Args:
+        artifact: Artifact with the artifact properties
+        constraints: Constraints object with properties to match against
 
-        # Write all edges
-        for rule_node in dag.rules:
-            source_name = rule_node.rule.name
-            safe_source = source_name.replace('"', '\\"')
+    Returns:
+        bool: True if the artifact satisfies all constraints, False otherwise
+    """
+    if constraints in cache:
+        required: set[tuple[str, Union[str, Unknown]]] = cache[constraints]
+    else:
+        required: set[tuple[str, Union[str, Unknown]]] = {
+            (pair.name, pair.value)
+            for pair in constraints.properties
+            if not isinstance(pair.value, Unknown)
+        }
+        cache[constraints] = required
 
-            for output_node in rule_node.outputs:
-                if output_node.consumed_by:
-                    target_name = output_node.consumed_by.rule.name
-                    safe_target = target_name.replace('"', '\\"')
+    if artifact in cache:
+        artifact_pairs = cache[artifact]
+    else:
+        artifact_pairs = {(pair.name, pair.value) for pair in artifact.properties}
+        cache[artifact] = artifact_pairs
 
-                    # Use the binding variable as the edge label if available
-                    edge_label = (
-                        output_node.binding.variable
-                        if hasattr(output_node, "binding") and output_node.binding
-                        else ""
-                    )
-                    if edge_label:
-                        safe_edge_label = edge_label.replace('"', '\\"')
-                        f.write(
-                            f'  "{safe_source}" -> "{safe_target}" [label="{safe_edge_label}"];\n'
-                        )
-                    else:
-                        f.write(f'  "{safe_source}" -> "{safe_target}";\n')
+    return required.issubset(artifact_pairs)
 
-        f.write("}\n")
+
+class IdentitySet:
+    def __init__(self):
+        self.d = IdentityDict()
+
+    def __contains__(self, value):
+        return value in self.d
+
+    def add(self, value):
+        self.d[value] = value
+
+    def values(self):
+        return self.d.values()
+
+class IdentityDict:
+    def __init__(self):
+        self.m = {}
+
+    def __contains__(self, value):
+        return id(value) in self.m
+
+    def __setitem__(self, key, value):
+        self.m[id(key)] = value
+
+    def __getitem__(self, key):
+        return self.m[id(key)]
+
+    def values(self):
+        return self.m.values()
+
+def walk_all_paths(rule_node: RuleNode, path : list[RuleNode]):
+    if rule_node in path:
+        raise CycleDetected(path)
+    for output in rule_node.outputs:
+        walk_all_paths(output.consumed_by, path + [rule_node])
+
+def assert_no_cycles(dag : DAG):
+    for rule_node in dag.roots:
+        walk_all_paths(rule_node, [])
+
+def createDAG(rules: list[Rule]) -> DAG:
+    # Create a mapping of property patterns to rule nodes
+    rule_nodes: dict[Rule, RuleNode] = IdentityDict()
+    cache = IdentityDict()
+
+    # First pass: create RuleNodes for all rules
+    for rule in rules:
+        rule_node = RuleNode(rule=rule, inputs=[], outputs=[])
+        rule_nodes[rule] = rule_node
+
+    def all_bindings():
+        for rule in rules:
+            for input in rule.inputs:
+                yield rule, input
+
+    def all_artifact_outputs():
+        for rule in rules:
+            for output in rule.outputs:
+                yield rule, output
+
+    # Second pass: For each constraint, find all matching input artifacts and set up bi-directional references
+    for binding_rule, binding in all_bindings():
+        for output_rule, artifact_output in all_artifact_outputs():
+            if artifact_satisfies_constraints(
+                    artifact_output.artifact, binding.constraints, cache
+            ):
+                # The output artifact matches the input constraints of a different rule. So link them up
+                match = ArtifactMatchNode(
+                    produced_by=rule_nodes[output_rule],
+                    binding=binding,
+                    artifact=artifact_output,
+                    consumed_by=rule_nodes[binding_rule],
+                )
+
+                match.produced_by.outputs.append(match)
+                match.consumed_by.inputs.append(match)
+
+    # Return the DAG with all rule nodes
+    dag =  DAG(rules=list(rule_nodes.values()))
+    assert_no_cycles(dag)
+    return dag
+
+
+
+def compute_blockers(dag: DAG) -> list[Blockers]:
+    # if a rule has an "all" input, then it needs to wait for all rules which _could_ produce such an artifact
+    # to complete before it can start. This determines the set of rules in `start_blocked_by_uncompleted_rules`
+
+    # Similarly a rule cannot be completed if an input _could_ be produced by a rule which is not complete yet
+    # This is what determines the set of rules in `start_blocked_by_uncompleted_rules`
+
+    blockers = []
+    for rule_node in dag.rules:
+        start_blocked_by_uncompleted_rules = IdentitySet()
+        completion_blocked_by_uncompleted_rules = IdentitySet()
+
+        for input in rule_node.inputs:
+            completion_blocked_by_uncompleted_rules.add(input.produced_by.rule)
+
+            # if we have a node which consumes "all" artifacts, we need to wait for the rules
+            # which could possibly create these artifacts to fully complete before we know
+            # we have all such artifacts.
+            if input.binding.cardinality == "all":
+                start_blocked_by_uncompleted_rules.add(input.produced_by.rule)
+
+        blockers.append(
+            Blockers(
+                rule=rule_node.rule,
+                start_blocked_by_uncompleted_rules=list(start_blocked_by_uncompleted_rules.values()),
+                completion_blocked_by_uncompleted_rules=list(completion_blocked_by_uncompleted_rules.values()),
+            )
+        )
+
+    return blockers

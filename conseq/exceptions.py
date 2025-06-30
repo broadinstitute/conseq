@@ -7,6 +7,8 @@ class MissingObj(Exception):
     """Raised when a required object cannot be found."""
     pass
 
+class CycleDetected(Exception):
+    pass
 
 class FatalUserError(Exception):
     """Raised when a fatal user error occurs that should stop execution."""

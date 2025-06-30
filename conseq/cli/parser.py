@@ -68,7 +68,7 @@ class ConseqArgumentParser:
         """Command handler for the analyze command"""
         from ..static_analysis.analyze import analyze
 
-        analyze(args.file, args.dir, args.dot)
+        analyze(args.file, args.dir, args.dot, True)
 
     def _setup_subparsers(self):
         """Set up all subparsers for the different commands"""

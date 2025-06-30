@@ -1,5 +1,3 @@
-import collections
-from dataclasses import dataclass
 import datetime
 import json
 import logging
@@ -7,9 +5,10 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 from subprocess import Popen
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Sequence
+from typing import Any, Callable, Dict, List, Tuple, Union, Sequence
+from typing import Optional
+from .types import BoundInput
 
 from conseq import debug_log
 from conseq import dep
@@ -20,25 +19,22 @@ from conseq.xref import Resolver
 from .types import PropsType
 import tempfile
 import signal
-from conseq.template import MissingTemplateVar, render_template
+from conseq.template import render_template
 from conseq.config import get_staging_url
 from .exec_client_types import  ExecClient, ExecResult, ClientExecution, ResolveState, ProcLike
-
-class TemplatePartial:
-    def __init__(self, jinja2_env, config, text: str) -> None:
-        self.text = text
-        # assert isinstance(config, dict)
-        self.config = config
-        self.jinja2_env = jinja2_env
-
-    def apply(self, **kwargs):
-        return render_template(self.jinja2_env, self.text, self.config, **kwargs)
-
 
 CACHE_KEY_FILENAME = "conseq-cache-key.json"
 
 log = logging.getLogger(__name__)
 
+class TemplatePartial:
+    def __init__(self, jinja2_env, config, text: str) -> None:
+        self.text = text
+        self.config = config
+        self.jinja2_env = jinja2_env
+
+    def apply(self, **kwargs):
+        return render_template(self.jinja2_env, self.text, self.config, **kwargs)
 
 class ClientExecutionBase:
     exec_xref: str
@@ -624,16 +620,6 @@ class ExternProc:
         subprocess.check_call(terminate_cmd, shell=True)
 
 
-# class ReportSuccessProcStub:
-#     def __init__(self):
-#         self.pid = 10000000
-#
-#     def poll(self):
-#         return 0
-
-from collections import namedtuple
-from typing import Optional
-from .types import BoundInput
 
 
 def bind_inputs(rule, inputs: Sequence[Tuple[str, any]]):
