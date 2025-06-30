@@ -250,14 +250,6 @@ class Jobs:
     def has_template(self, rule_name):
         return rule_name in self.rule_template_by_name
 
-    def limitStartToTemplates(self, rules_allowed):
-        with transaction(self.db):
-            last_existing_id = self.objects.get_last_id()
-            if last_existing_id is None:
-                last_existing_id = -1
-        filter = RuleAndDerivativesFilter(rules_allowed, last_existing_id)
-        self.rule_allowed = filter.rule_allowed
-
     def _object_removed(self, obj):
         for rule_id in self.rule_set.find_by_input(obj.id):
             self.rule_set.remove_rule(rule_id)

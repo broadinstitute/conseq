@@ -22,7 +22,7 @@ import tempfile
 import signal
 from conseq.template import MissingTemplateVar, render_template
 from conseq.config import get_staging_url
-
+from .exec_client_types import  ExecClient, ExecResult, ClientExecution, ResolveState
 
 class TemplatePartial:
     def __init__(self, jinja2_env, config, text: str) -> None:
@@ -169,183 +169,7 @@ def grep_logs(log_grep_state: Dict[str, int], output_files: List[str], pattern):
     return next_log_grep_state, filtered_lines
 
 
-@dataclass
-class ExecResult:
-    failure_msg: Optional[str]
-    outputs: Optional[List[Dict[str, Any]]]
-    cache_key: Optional[str] = None
 
-
-class ClientExecution:
-    exec_xref: str
-
-    def __init__(
-        self,
-        transform: str,
-        id: int,
-        job_dir: str,
-        proc: Union[PidProcStub, Popen],
-        outputs: Optional[List[PropsType]],
-        captured_stdouts: Union[List[str], Tuple[str, str]],
-        desc_name: str,
-        executor_parameters: dict,
-        *,
-        watch_regex=None,
-    ) -> None:
-        self.transform = transform
-        self.id = id
-        self.proc = proc
-        self.job_dir = job_dir
-        self.outputs = outputs
-        self.captured_stdouts = captured_stdouts
-        self.desc_name = desc_name
-        self.log_grep_state = {}
-        self.watch_regex = watch_regex
-        self.executor_parameters = executor_parameters
-        assert job_dir != None
-
-    def _resolve_filenames(self, props):
-        props_copy = {}
-        for k, v in props.items():
-            if isinstance(v, dict) and "$filename" in v:
-                full_filename = os.path.join(self.job_dir, v["$filename"])
-                if not os.path.exists(full_filename):
-                    raise Exception(
-                        "Attempted to publish results which referenced file that did not exist: {}".format(
-                            full_filename
-                        )
-                    )
-                v = {"$filename": full_filename}
-            props_copy[k] = v
-        return props_copy
-
-    def get_state_label(self) -> str:
-        return "local-run"
-
-    def get_external_id(self) -> str:
-        d = dict(
-            transform=self.transform,
-            id=self.id,
-            job_dir=self.job_dir,
-            pid=self.proc.pid,
-            outputs=self.outputs,
-            captured_stdouts=self.captured_stdouts,
-            desc_name=self.desc_name,
-            executor_parameters=self.executor_parameters,
-        )
-        return json.dumps(d)
-
-    def cancel(self):
-        log.warning("Killing %s (%s)", self.desc_name, repr(self.proc))
-        self.proc.terminate()
-
-    @property
-    def results_path(self):
-        return os.path.join(self.job_dir, "results.json")
-
-    def _log_failure(self, failure):
-        log.error("Task failed %s: %s", self.desc_name, failure)
-        _log_local_failure(self.captured_stdouts)
-
-    def get_completion(self) -> ExecResult:
-        result = self._get_completion()
-        if result.failure_msg is not None:
-            self._log_failure(result.failure_msg)
-        return result
-
-    def _get_completion(self) -> ExecResult:
-        # breakpoint()
-        if self.watch_regex is not None:
-            self.log_grep_state, log_output = grep_logs(
-                self.log_grep_state, self.captured_stdouts, self.watch_regex
-            )
-
-            for line in log_output:
-                print("{} output: {}".format(self.job_dir, line))
-
-        retcode = self.proc.poll()
-
-        if retcode == None:
-            return ExecResult(None, None)
-
-        if retcode != 0:
-            return ExecResult("shell command failed with {}".format(retcode), None)
-
-        retcode_file = os.path.join(self.job_dir, "retcode.txt")
-        try:
-            with open(retcode_file) as fd:
-                retcode = int(fd.read())
-                if retcode != 0:
-                    return ExecResult("failed with {}".format(retcode), None)
-        except FileNotFoundError:
-            return ExecResult("No retcode file {}".format(retcode_file), None)
-
-        if self.outputs != None:
-            results = {"outputs": self.outputs}
-        else:
-            if not os.path.exists(self.results_path):
-                return ExecResult(
-                    "rule {} completed successfully, but no results.json file written to working directory".format(
-                        self.transform
-                    ),
-                    None,
-                )
-
-            with open(self.results_path) as fd:
-                results = json.load(fd)
-                # quick verify that results is well formed
-                error = None
-                if not isinstance(results, dict):
-                    error = "results.json did not contain a valid object"
-                else:
-                    artifacts = results.get("outputs", None)
-                    if not isinstance(artifacts, list):
-                        error = "No outputs listed in artifacts"
-                    else:
-                        for artifact in artifacts:
-                            if not isinstance(artifact, dict):
-                                error = "artifacts must all be objects"
-                                break
-                            else:
-                                for k, v in artifact.items():
-                                    if not (isinstance(k, str) and is_valid_value(v)):
-                                        error = (
-                                            "artifact's key/values must both be strings"
-                                        )
-                                        break
-                                if error is not None:
-                                    break
-                if error:
-                    return ExecResult(error, None)
-
-        # breakpoint()
-        cache_key = None
-        cache_key_file = os.path.join(self.job_dir, CACHE_KEY_FILENAME)
-        if os.path.exists(cache_key_file):
-            with open(cache_key_file, "rt") as fd:
-                cache_key = fd.read()
-
-        log.info(
-            "Rule {} completed ({}). Results: {}".format(
-                self.transform, self.job_dir, results
-            )
-        )
-        outputs = [self._resolve_filenames(o) for o in results["outputs"]]
-
-        # print summary of output files with full paths
-        files_written = []
-        for output in outputs:
-            for value in output.values():
-                if isinstance(value, dict) and "$filename" in value:
-                    files_written.append(value["$filename"])
-        if len(files_written):
-            log.warning(
-                "Rule %s wrote the following files:\n%s",
-                self.transform,
-                "\n".join(["\t" + x for x in files_written]),
-            )
-
-        return ExecResult(None, outputs, cache_key=cache_key)
 
 
 class DelegateExecution(ClientExecution):
@@ -534,7 +358,7 @@ def local_exec_script(
     with open(os.path.join(job_dir, "description.txt"), "w") as fd:
         fd.write(desc_name)
 
-    return ClientExecution(
+    return LocalClientExecution(
         name,
         id,
         job_dir,
@@ -545,6 +369,10 @@ def local_exec_script(
         {},
         watch_regex=watch_regex,
     )
+
+class LocalClientExecution(ClientExecution):
+    def get_completion(self):
+        return get_completion(self)
 
 
 def fetch_urls(obj: PropsType, resolver: Resolver) -> Dict[str, str]:
@@ -621,16 +449,9 @@ def preprocess_xref_inputs(j: Jobs, resolver: Resolver, inputs: InputsType) -> b
     return xrefs_resolved[0]
 
 
-class ResolveState:
-    def add_script(self, script):
-        raise Exception("Cannot call on base class")
-
-
 class NullResolveState(ResolveState):
     def __init__(self, files_to_copy: List[Any]) -> None:
         self.files_to_copy = files_to_copy
-
-    #        print("self.files_to_copy", self.files_to_copy)
 
     def add_script(self, script):
         pass
@@ -711,30 +532,6 @@ def bind_inputs(rule, inputs: Sequence[Tuple[str, any]]):
     return [BoundInput(name, value, by_name[name].copy_to) for name, value in inputs]
 
 
-class ExecClient:
-    def reattach(self, external_ref):
-        raise NotImplementedError()
-
-    def preprocess_inputs(
-        self, resolver: Resolver, inputs: Tuple[BoundInput]
-    ) -> Tuple[Dict[str, Dict[str, str]], NullResolveState]:
-        raise NotImplementedError()
-
-    def exec_script(
-        self,
-        name: str,
-        id: int,
-        job_dir: str,
-        run_stmts: List[str],
-        outputs: Optional[List[Any]],
-        capture_output: bool,
-        prologue: str,
-        desc_name: str,
-        resolve_state: NullResolveState,
-        resources: Dict[str, float],
-        watch_regex,
-    ) -> ClientExecution:
-        raise NotImplementedError()
 
 
 class LocalExecClient(ExecClient):
@@ -828,6 +625,7 @@ class LocalExecClient(ExecClient):
             desc_name,
             watch_regex,
         )
+
 
 
 def drop_prefix(prefix, value):
@@ -1617,3 +1415,114 @@ def create_client(name, config, properties, jinja2_env):
         raise Exception(
             f"Unrecognized executor type: {type} (expected: 'local', 'delegate' or 'async-delegate')"
         )
+
+
+
+def cancel(exec_client: ExecClient):
+    log.warning("Killing %s (%s)", exec_client.desc_name, repr(exec_client.proc))
+    exec_client.proc.terminate()
+
+
+def _log_failure(exec_client:ExecClient, failure):
+    log.error("Task failed %s: %s", exec_client.desc_name, failure)
+    _log_local_failure(exec_client.captured_stdouts)
+
+def get_completion(exec_client: ClientExecution) -> ExecResult:
+    result = _get_completion(exec_client)
+    if result.failure_msg is not None:
+        _log_failure(exec_client, result.failure_msg)
+    return result
+
+def _get_completion(exec_client: ClientExecution) -> ExecResult:
+    # breakpoint()
+    if exec_client.watch_regex is not None:
+        exec_client.log_grep_state, log_output = grep_logs(
+            exec_client.log_grep_state, exec_client.captured_stdouts, exec_client.watch_regex
+        )
+
+        for line in log_output:
+            print("{} output: {}".format(exec_client.job_dir, line))
+
+    retcode = exec_client.proc.poll()
+
+    if retcode == None:
+        return ExecResult(None, None)
+
+    if retcode != 0:
+        return ExecResult("shell command failed with {}".format(retcode), None)
+
+    retcode_file = os.path.join(exec_client.job_dir, "retcode.txt")
+    try:
+        with open(retcode_file) as fd:
+            retcode = int(fd.read())
+            if retcode != 0:
+                return ExecResult("failed with {}".format(retcode), None)
+    except FileNotFoundError:
+        return ExecResult("No retcode file {}".format(retcode_file), None)
+
+    if exec_client.outputs != None:
+        results = {"outputs": exec_client.outputs}
+    else:
+        if not os.path.exists(exec_client.results_path):
+            return ExecResult(
+                "rule {} completed successfully, but no results.json file written to working directory".format(
+                    exec_client.transform
+                ),
+                None,
+            )
+
+        with open(exec_client.results_path) as fd:
+            results = json.load(fd)
+            # quick verify that results is well formed
+            error = None
+            if not isinstance(results, dict):
+                error = "results.json did not contain a valid object"
+            else:
+                artifacts = results.get("outputs", None)
+                if not isinstance(artifacts, list):
+                    error = "No outputs listed in artifacts"
+                else:
+                    for artifact in artifacts:
+                        if not isinstance(artifact, dict):
+                            error = "artifacts must all be objects"
+                            break
+                        else:
+                            for k, v in artifact.items():
+                                if not (isinstance(k, str) and is_valid_value(v)):
+                                    error = (
+                                        "artifact's key/values must both be strings"
+                                    )
+                                    break
+                            if error is not None:
+                                break
+            if error:
+                return ExecResult(error, None)
+
+    # breakpoint()
+    cache_key = None
+    cache_key_file = os.path.join(exec_client.job_dir, CACHE_KEY_FILENAME)
+    if os.path.exists(cache_key_file):
+        with open(cache_key_file, "rt") as fd:
+            cache_key = fd.read()
+
+    log.info(
+        "Rule {} completed ({}). Results: {}".format(
+            exec_client.transform, exec_client.job_dir, results
+        )
+    )
+    outputs = [exec_client._resolve_filenames(o) for o in results["outputs"]]
+
+    # print summary of output files with full paths
+    files_written = []
+    for output in outputs:
+        for value in output.values():
+            if isinstance(value, dict) and "$filename" in value:
+                files_written.append(value["$filename"])
+    if len(files_written):
+        log.warning(
+            "Rule %s wrote the following files:\n%s",
+            exec_client.transform,
+            "\n".join(["\t" + x for x in files_written]),
+        )
+
+    return ExecResult(None, outputs, cache_key=cache_key)

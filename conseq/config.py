@@ -11,19 +11,25 @@ from conseq.parser import Rule, TypeDefStmt
 import logging
 from typing import Dict
 
+from .exec_client_types import ExecClient
+from .parser import ResolvedOutputType
+from typing import Any, List
+from jinja2 import Environment
+
+
 log = logging.getLogger(__name__)
 
 
 class Rules:
     def __init__(self):
         self.rule_by_name: Dict[str, Rule] = {}
-        self.vars = {}
+        self.vars : Dict[str, str] = {}
         self.objs = []
         self.types: Dict[str, TypeDefStmt] = {}
-        self.exec_clients = {}
+        self.exec_clients : Dict[str, ExecClient] = {}
         self.remember_executed = []
         self.jinja2_env = create_jinja2_env()
-        self.override_names = set()
+        self.override_names : set[str] = set()
 
     def get_rule_specifications(self):
         result = {}
@@ -150,9 +156,6 @@ def _not_callable(x):
     raise Exception("internal error")
 
 
-from typing import Any, List
-from jinja2 import Environment
-
 
 class EvalContext:
     def __init__(self, rules: Rules, filename: str, hashcache, jinja2_env: Environment):
@@ -273,7 +276,7 @@ def _eval_rule(dec, rt, hashcache, root_dir, rules):
         }
         rules.add_if_missing(new_json_obj)
 
-        # mark this rule as dependant on this fileref
+        # mark this rule as dependent on this fileref
         new_query_obj = {"type": "$fileref", "name": filename}
         input = parser.InputSpec(
             "$fileref/{}".format(filename), new_query_obj, False, None
@@ -293,10 +296,12 @@ def _eval_if(if_statement, context: EvalContext):
         _eval_stmts(if_statement.when_false, context)
 
 
-from .parser import ResolvedOutputType
 
 
-def read_deps(filename, hashcache, jinja2_env, initial_vars={}) -> Rules:
+def read_deps(filename, hashcache, jinja2_env, initial_vars=None) -> Rules:
+    if initial_vars is None:
+        initial_vars = {}
+
     rules = Rules()
     for name, value in initial_vars.items():
         rules.set_var(name, value, is_override=True)
@@ -329,13 +334,16 @@ def read_rules(
     config_file: Optional[str],
     jinja2_env,
     *,
-    initial_config={},
+    initial_config=None,
 ) -> Rules:
+    if initial_config is None:
+        initial_config = {}
+
     hashcache = HashCache(os.path.join(state_dir, "hashcache"))
     _initial_config = _load_initial_config(state_dir, depfile, config_file)
     for name, value in initial_config.items():
         # if name in _initial_config:
-        log.warn(
+        log.warning(
             "Overriding %s with value %s (was %s)",
             name,
             value,
@@ -344,7 +352,6 @@ def read_rules(
         _initial_config[name] = value
     rules = read_deps(depfile, hashcache, jinja2_env, initial_vars=_initial_config)
     return rules
-
 
 def get_staging_url(config):
     if "STAGING_URL" in config:

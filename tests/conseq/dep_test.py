@@ -1,33 +1,6 @@
 from conseq import dep
 
 
-def test_limit_to_rule(tmpdir):
-    jobdb = str(tmpdir.join("db"))
-
-    j = dep.open_job_db(jobdb)
-
-    def is_template1(inputs, transform):
-        return transform == "template1"
-
-    j.limitStartToTemplates([is_template1])
-
-    # two templates which don't require any inputs.
-    template1 = dep.Template([], [], "template1")
-    template2 = dep.Template([], [], "template2")
-    # one template which requires an object.
-    template3 = dep.Template([dep.ForEach("contexts", dict(type="a"))], [], "template3")
-
-    j.add_template(template1)
-    j.add_template(template2)
-    j.add_template(template3)
-
-    # After adding those templates, we should have only created an execution for template1
-    assert len(j.get_pending()) == 1
-
-    # however if we add an object, template3 can also execute
-    j.add_obj("public", 1, dict(type="a"))
-    len(j.get_pending()) == 2
-
 
 def test_overwrite_obj(tmpdir):
     jobdb = str(tmpdir.join("db"))

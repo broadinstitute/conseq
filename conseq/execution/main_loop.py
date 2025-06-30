@@ -32,7 +32,6 @@ from ..timeline import TimelineLog
 from ..dao.execution import  RuleExecution
 
 from conseq.template import render_template
-from conseq.xref import Resolver
 import uuid
 from ..exceptions import MissingTemplateVar
 from . import  scheduler
@@ -57,14 +56,13 @@ class Lazy:
 def main_loop(
     jinja2_env: Environment,
     j: Jobs,
-    new_object_listener: Callable,
     rules: Rules,
     state_dir: str,
     executing: List[ClientExecution],
     capture_output: bool,
     req_confirm: bool,
     maxfail: int,
-    maxstart: None,
+    maxstart: Optional[int],
     use_cached_results: bool,
     properties_to_add,
 ):
@@ -241,7 +239,6 @@ def main_loop(
 
                 e = execute(
                     job.transform,
-                    resolver,
                     jinja2_env,
                     exec_id,
                     job_dir,
@@ -353,7 +350,6 @@ def main_loop(
 
 def execute(
     name: str,
-    resolver: Resolver,
     jinja2_env: Environment,
     id: int,
     job_dir: str,

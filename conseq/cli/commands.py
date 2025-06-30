@@ -70,80 +70,6 @@ def parse_label(label):
 
 InputMatchExpression = namedtuple("InputMatchExpression", "varname property value")
 
-# TODO: Add support for specifying filter on inputs as well
-# write documentation giving example of running rule on a single artifact
-# process_model_config
-# !process_model_config data:label=Avana
-def parse_rule_filters(
-    filename: str,
-) -> Callable[[Sequence[Tuple[str, "Obj"]], str], bool]:
-    # file is a list of rule name regexps to skip
-    # if prefixed with "!" it means override the skip and run it
-
-    # list of tuples in the form: (is_include, name)
-    rule_filters = []
-
-    # each filter consists of the following parts:
-    # 1. if prefixed with "!" it is an inclusion, not exclusion
-    # 2. up to the first whitespace, it's a regex for the rule name
-    # 3. (optional) a variable:property=value which can be used as an additional filter
-    filter_pattern = re.compile("(!?)(\\S+)(?:\\s+([^:]+):([^=]+)=(\\S+))?\\s*")
-
-    with open(filename, "rt") as fd:
-        for line in fd.readlines():
-            line = line.strip()
-            if line.startswith("#") or line == "":
-                continue
-
-            is_include = False
-
-            m = filter_pattern.match(line)
-            if m is None:
-                raise Exception(
-                    f"Could not parse line in filter file {filename}: {line}"
-                )
-
-            include_char, rule_name, var_name, prop_name, value = m.groups()
-
-            if include_char == "!":
-                is_include = True
-
-            if var_name is not None:
-                input_exp = InputMatchExpression(var_name, prop_name, value)
-            else:
-                input_exp = None
-
-            rule_filters.append((is_include, re.compile(rule_name), input_exp))
-
-    from conseq.dep import Obj
-
-    def inputs_match(
-        inputs: Sequence[Tuple[str, Obj]], input_exp: InputMatchExpression
-    ) -> bool:
-        for varname, artifact in inputs:
-            if input_exp.varname != varname:
-                continue
-
-            input_prop_value = artifact.get(input_exp.property)
-            if input_prop_value == input_exp.value:
-                return True
-
-        return False
-
-    def is_allowed_name(inputs, name):
-        allowed = True
-        for is_include, name_exp, input_exp in rule_filters:
-            if name_exp.match(name) and (
-                input_exp is None or inputs_match(inputs, input_exp)
-            ):
-                if is_include:
-                    allowed = True
-                else:
-                    allowed = False
-        return allowed
-
-    return is_allowed_name
-
 
 # Command handler functions
 
@@ -188,15 +114,9 @@ def run_cmd(args):
         overrides.update(args.overrides)
 
     if args.addlabel:
-        print("addlabel", args.addlabel)
         properties_to_add = [parse_label(x) for x in args.addlabel]
     else:
         properties_to_add = []
-
-    if args.rulefilter:
-        rule_filter = parse_rule_filters(args.rulefilter)
-    else:
-        rule_filter = None
 
     return depexec.main(
         args.file,
@@ -213,7 +133,6 @@ def run_cmd(args):
         reattach_existing=args.reattach_existing,
         remove_unknown_artifacts=args.remove_unknown_artifacts,
         properties_to_add=properties_to_add,
-        rule_filter=rule_filter,
     )
 
 

@@ -1,0 +1,13 @@
+Config settings are read like a conseq file but that's a bit of overkill. Maybe some settings should
+always be availible by reading from a config file so we don't always need a conseq file:
+ie: STAGING_URL
+
+
+Should there be an "unresolved" Rule and a "resolved" instance of Rule?
+
+Most important functionality to add: support for optional.
+
+Requires static analysis to determine which rules are downstream of other rules
+
+Also requires changes to main_loop
+

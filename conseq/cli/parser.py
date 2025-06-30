@@ -1,6 +1,5 @@
 import argparse
 import os
-from typing import Optional, List, Any
 
 from conseq.cli.commands import (
     list_cmd,
@@ -20,10 +19,7 @@ from conseq.cli.commands import (
     downstream_cmd,
     stage_cmd,
     parse_define,
-    parse_rule_filters,
-    parse_label,
 )
-from conseq.static_analysis.model import createDAG
 
 
 class ConseqArgumentParser:

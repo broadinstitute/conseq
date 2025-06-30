@@ -147,7 +147,6 @@ class Rule:
         self.publish_location = None
         self.cache_key_constructor = []
         self.uses_files = []
-        self.output_expectations = None
 
     def to_json(self):
         return json.dumps(

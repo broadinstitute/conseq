@@ -11,9 +11,6 @@ from conseq import ui
 from conseq.config import Rules
 from conseq.config import read_rules
 from conseq.dep import Jobs
-from conseq.exec_client import (
-    DelegateExecution,
-)
 from .exceptions import MissingTemplateVar
 from conseq.template import render_template
 from .execution import template_utils, reconcilation, main_loop
@@ -27,7 +24,7 @@ log = logging.getLogger(__name__)
 
 def reattach(
     j: Jobs, rules: Rules, pending_jobs: List[Execution]
-) -> List[DelegateExecution]:
+) -> List[exec_client.DelegateExecution]:
     executing = []
     for e in pending_jobs:
         if e.exec_xref != None:
@@ -42,9 +39,7 @@ def reattach(
     return executing
 
 def force_execution_of_rules(j, forced_targets):
-
     rule_names = []
-    limits = []
     for target in forced_targets:
         # handle syntax rulename:variable=value to limit to only executions where an input had that value
         m = re.match("([^:]+):(.*)", target)
@@ -93,17 +88,11 @@ def force_execution_of_rules(j, forced_targets):
                         return False
                 return True
 
-            limits.append(only_rules_with_input)
 
         else:
             rule_name = target
-            limits.append(
-                lambda inputs, name, expected_rule_name=rule_name: name
-                == expected_rule_name
-            )
         rule_names.append(rule_name)
 
-    j.limitStartToTemplates(limits)
     for rule_name in rule_names:
         # TODO: would be better to only invalidate those that satisfied the constraint as well
         j.invalidate_rule_execution(rule_name)
@@ -148,12 +137,11 @@ def main(
     req_confirm: bool,
     config_file: str,
     maxfail: int = 1,
-    maxstart: None = None,
+    maxstart: Optional[int] = None,
     force_no_targets: bool = False,
     reattach_existing=None,
     remove_unknown_artifacts=None,
     properties_to_add=[],
-    rule_filter=None,
     use_cached_results: bool = True,
 ) -> int:
     assert max_concurrent_executions > 0
@@ -169,12 +157,6 @@ def main(
         forced_rule_names = force_execution_of_rules(j, forced_targets)
     else:
         forced_rule_names = []
-
-    if rule_filter:
-        assert len(forced_targets) == 0, "Cannot specify allowed rules and forced rules"
-        # because force_execution_of_rules() call limitStartToTemplates
-        # and one will clobber the state of the other
-        j.limitStartToTemplates([rule_filter])
 
     jinja2_env = create_jinja2_env()
     # pass in override_vars as the initial config so we can write conditions which reference those variables
@@ -249,15 +231,10 @@ def main(
         if not (j.has_template(rule_name)):
             raise Exception("No such rule: {}".format(rule_name))
 
-    def new_object_listener(obj):
-        timestamp = datetime.datetime.now().isoformat()
-        j.add_obj(timestamp, obj)
-
     try:
         ret = main_loop.main_loop(
             jinja2_env,
             j,
-            new_object_listener,
             rules,
             state_dir,
             executing,
