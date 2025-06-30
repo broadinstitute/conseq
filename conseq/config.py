@@ -246,6 +246,12 @@ def _eval_rule(dec, rt, hashcache, root_dir, rules):
             #     filename,
             # )
             ref_name = os.path.relpath(filename, root_dir)
+            # if not os.path.exists(filename):
+            #     print(f"HACK! Creating {filename}")
+            #     os.makedirs(os.path.dirname(filename), exist_ok=True)
+            #     with open(filename, "w") as f:
+            #         pass
+                    
             sha256 = hashcache.sha256(filename)
             new_json_obj = {
                 "type": "$fileref",
