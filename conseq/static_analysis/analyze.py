@@ -1,8 +1,8 @@
 import io
 import sys
-from dataclasses import dataclass
+import re
 
-from conseq.config import read_deps, read_rules
+from conseq.config import read_rules
 from conseq.template import create_jinja2_env
 from conseq.static_analysis.model import (
     Rule,
@@ -16,7 +16,7 @@ from conseq.static_analysis.model import (
 )
 from .model import DAG, Unknown, Blockers
 from typing import Optional, List, Set, Union
-from conseq.parser import AddIfMissingStatement
+from conseq.parser import RegEx
 from ..exceptions import CycleDetected
 
 from ..parser import RememberExecutedStmt, Rule as ConseqRule
@@ -85,23 +85,28 @@ def _convert_conseq_remember_exec_to_dag_rule(rem_exec: RememberExecutedStmt):
 
     # Create a rule with the transform name
     rule_name = f"remember-executed:{rem_exec.transform}"
-    model_rule = Rule(name=rule_name, inputs=bindings, outputs=outputs)
+
+    # hack: is_publish_rule being defaulted to False, but we can't really tell
+    model_rule = Rule(name=rule_name, inputs=bindings, outputs=outputs, is_publish_rule=False)
     return model_rule
 
 
 def _convert_conseq_rule_to_dag_rule(rule: ConseqRule):
     # Convert inputs to bindings
     bindings = []
+
     for input_spec in rule.inputs:
         constraints_props = []
         for key, value in input_spec.json_obj.items():
-            if not isinstance(value, str):
+            if not (isinstance(value, str) or isinstance(value, RegEx)):
+                if key == "type":
+                    print(f"warning: {rule.name} had input with type={value} and so could not be included as a constraint")
                 continue
             # if isinstance(value, dict) or isinstance(value, list):
             #     # Skip complex objects for simplicity
             #     continue
             assert isinstance(key, str)
-            assert isinstance(value, str), f"value is {value}"
+            assert isinstance(value, str) or isinstance(value, RegEx), f"value is {value}"
             constraints_props.append(Pair(name=key, value=value))
 
         cardinality = "all" if input_spec.for_all else "one"
@@ -114,15 +119,21 @@ def _convert_conseq_rule_to_dag_rule(rule: ConseqRule):
 
     # Convert outputs to output artifacts
     outputs = []
-    if rule.outputs is not None:
+    if rule.is_publish_rule:
+        assert rule.outputs is None
+        assert rule.output_types is None
+    elif rule.outputs is not None:
         for output in rule.outputs:
             props = []
             for key, value in output.items():
                 if isinstance(value, dict) or isinstance(value, list):
-                    # Skip complex objects for simplicity
-                    continue
-                assert isinstance(key, str)
-                assert isinstance(value, str)
+                    # Treat complex objects as unknown for simplicity
+                    value = UNKNOWN
+                else:
+                    assert isinstance(key, str)
+                    assert isinstance(value, str)
+                    if "{{" in value: # does it look like this isn't a fixed value?
+                        value = UNKNOWN
                 props.append(Pair(name=key, value=value))
 
             # Assume "one" cardinality for outputs
@@ -139,8 +150,8 @@ def _convert_conseq_rule_to_dag_rule(rule: ConseqRule):
             output_artifact = OutputArtifact(artifact=artifact, cardinality="many")
             outputs.append(output_artifact)
 
+    model_rule = Rule(name=rule.name, inputs=bindings, outputs=outputs, is_publish_rule=rule.is_publish_rule)
 
-    model_rule = Rule(name=rule.name, inputs=bindings, outputs=outputs)
     return model_rule
 
 
@@ -164,7 +175,7 @@ def _create_synthetic_add_if_missing_rule(rules):
             add_if_missing_outputs.append(output_artifact)
 
     add_if_missing_rule = Rule(
-        name="add-if-missing", inputs=[], outputs=add_if_missing_outputs
+        name="add-if-missing", inputs=[], outputs=add_if_missing_outputs, is_publish_rule=False
     )
     return add_if_missing_rule
 
@@ -304,7 +315,10 @@ def _writeDOT(dag: DAG, f: io.TextIOBase):
         rule_name = rule_node.rule.name
         # Escape quotes in rule name if needed
         safe_name = rule_name.replace('"', '\\"')
-        f.write(f'  "{safe_name}" [label="{safe_name}"];\n')
+        if rule_node.rule.is_publish_rule:
+            f.write(f'  "{safe_name}" [label="{safe_name}" fillcolor=lightred];\n')
+        else:
+            f.write(f'  "{safe_name}" [label="{safe_name}"];\n')
 
     f.write("\n")
 
@@ -337,7 +351,7 @@ def _writeDOT(dag: DAG, f: io.TextIOBase):
 def _write_blockers_dot(all_blockers: List[Blockers], f: io.TextIOBase):
     f.write("digraph conseq {\n")
     f.write("  rankdir=LR;\n")  # Left to right layout
-    f.write("  node [shape=box, style=filled, fillcolor=lightblue];\n\n")
+    f.write("  node [shape=box, style=filled, fillcolor=lightblue1];\n\n")
 
     def _to_safe_name(x):
         return x.replace('"', '\\"')
@@ -347,7 +361,10 @@ def _write_blockers_dot(all_blockers: List[Blockers], f: io.TextIOBase):
         rule_name = blockers.rule.name
         # Escape quotes in rule name if needed
         safe_name = _to_safe_name(rule_name)
-        f.write(f'  "{safe_name}" [label="{safe_name}"];\n')
+        if blockers.rule.is_publish_rule:
+            f.write(f'  "{safe_name}" [label="{safe_name}" fillcolor=lightblue3];\n')
+        else:
+            f.write(f'  "{safe_name}" [label="{safe_name}"];\n')
 
     f.write("\n")
 
@@ -359,7 +376,7 @@ def _write_blockers_dot(all_blockers: List[Blockers], f: io.TextIOBase):
         seen = set()
         for rule in blockers.start_blocked_by_uncompleted_rules:
             f.write(
-                f'  "{_to_safe_name(rule.name)}" -> "{rule_node_name}" [label="all"];\n'
+                f'  "{_to_safe_name(rule.name)}" -> "{rule_node_name}" [style="dotted"];\n'
             )
             seen.add(rule.name)
 
@@ -382,6 +399,8 @@ def writeDOT(dag: DAG, filename: str):
     with open(filename, "w") as f:
         _writeDOT(dag, f)
 
+
+
 def artifact_satisfies_constraints(
         artifact: Artifact,
         constraints: Constraints,
@@ -397,23 +416,31 @@ def artifact_satisfies_constraints(
     Returns:
         bool: True if the artifact satisfies all constraints, False otherwise
     """
-    if constraints in cache:
-        required: set[tuple[str, Union[str, Unknown]]] = cache[constraints]
-    else:
-        required: set[tuple[str, Union[str, Unknown]]] = {
-            (pair.name, pair.value)
-            for pair in constraints.properties
-            if not isinstance(pair.value, Unknown)
-        }
-        cache[constraints] = required
+    by_name = {p.name: p.value for p in artifact.properties}
 
-    if artifact in cache:
-        artifact_pairs = cache[artifact]
-    else:
-        artifact_pairs = {(pair.name, pair.value) for pair in artifact.properties}
-        cache[artifact] = artifact_pairs
+    for pair in constraints.properties:
+        if isinstance(pair.value, RegEx):
+            artifact_value = by_name[pair.name]
+            if artifact_value is UNKNOWN:
+                # possible so continue
+                continue
+            else:
+                assert isinstance(artifact_value,str)
+                if not re.match(pair.value.expression, artifact_value):
+                    return False
+        else:
+            assert isinstance(pair.value, str)
+            artifact_value = by_name[pair.name]
+            if artifact_value is UNKNOWN:
+                # possible so continue
+                continue
+            else:
+                assert isinstance(artifact_value,str)
+                if artifact_value != pair.value:
+                    return False
 
-    return required.issubset(artifact_pairs)
+    return True
+
 
 
 class IdentitySet:
@@ -447,7 +474,7 @@ class IdentityDict:
 
 def walk_all_paths(rule_node: RuleNode, path : list[RuleNode]):
     if rule_node in path:
-        raise CycleDetected(path)
+        raise CycleDetected([x.rule.name for x in path] + [rule_node.rule.name])
     for output in rule_node.outputs:
         walk_all_paths(output.consumed_by, path + [rule_node])
 
@@ -478,6 +505,12 @@ def createDAG(rules: list[Rule]) -> DAG:
     # Second pass: For each constraint, find all matching input artifacts and set up bi-directional references
     for binding_rule, binding in all_bindings():
         for output_rule, artifact_output in all_artifact_outputs():
+
+            # if binding_rule.name == "assemble_feature_matrix" and output_rule.name == "make_pred_biomarker_matrix":
+            #     breakpoint()
+            # if rule.name in ["assemble_feature_matrix", "make_pred_biomarker_matrix"]:
+            #     breakpoint()
+
             if artifact_satisfies_constraints(
                     artifact_output.artifact, binding.constraints, cache
             ):
@@ -508,6 +541,7 @@ def compute_blockers(dag: DAG) -> list[Blockers]:
 
     blockers = []
     for rule_node in dag.rules:
+
         start_blocked_by_uncompleted_rules = IdentitySet()
         completion_blocked_by_uncompleted_rules = IdentitySet()
 

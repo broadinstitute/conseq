@@ -1,18 +1,20 @@
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Union, Literal
-
+from conseq.parser.model import RegEx
 
 class Unknown:
-    pass
-
+    def __str__(self):
+        return "UNKNOWN"
+    def __repr__(self):
+        return self.__str__()
 
 UNKNOWN = Unknown()
-
 
 @dataclass
 class Pair:
     name: str
-    value: Union[str, Unknown]
+    value: Union[str, Unknown, RegEx]
 
 
 @dataclass
@@ -43,6 +45,7 @@ class Rule:
     name: str
     inputs: list[Binding]
     outputs: list[OutputArtifact]
+    is_publish_rule: bool
 
 
 @dataclass
@@ -59,14 +62,40 @@ class RuleNode:
     inputs: list[ArtifactMatchNode]
     outputs: list[ArtifactMatchNode]
 
+def _is_unsatisfiable(node :RuleNode) :
+    return False
+    # by_var_name = defaultdict(lambda: [])
+    # for input_node in node.inputs:
+    #     by_var_name[input_node.binding.variable].append(input_node)
+    #
+    # if len(node.rule.inputs) != len(node.inputs):
+    #     return True
+    # else:
+    #     return False
 
-@dataclass
 class DAG:
     rules: list[RuleNode]
+    unsatisfiable: list[RuleNode]
+    roots: list[RuleNode]
 
-    @property
-    def roots(self):
-        return [node for node in self.rules if len(node.inputs) == 0]
+    def __init__(self, rules: list[RuleNode]):
+        unsatisfiable = []
+        roots = []
+        rules_ = []
+
+        for node in rules:
+            if _is_unsatisfiable(node):
+                unsatisfiable.append(node)
+                continue
+            else:
+                if len(node.inputs) == 0:
+                    roots.append(node)
+            rules_.append(node)
+
+        self.unsatisfiable = unsatisfiable
+        self.roots = roots
+        self.rules = rules_
+
 
 @dataclass
 class Blockers:

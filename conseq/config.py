@@ -220,7 +220,7 @@ def _eval_stmts(statements: List[Any], context: EvalContext):
             dec.inputs = inputs
 
             dec.filename = context.filename
-            if dec.outputs is None and dec.output_types is None:
+            if not dec.is_publish_rule and  dec.outputs is None and dec.output_types is None:
                 print(
                     f"Warning: rule {dec.name} has neither an output section nor an output_types section"
                 )
