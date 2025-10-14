@@ -597,6 +597,9 @@ def get_type_check_failures(
         return failure_message
 
 
+RULES_TO_SKIP_FILENAME = "conseq-rules-to-skip"
+
+
 def main_loop(
     jinja2_env: Environment,
     j: Jobs,
@@ -611,6 +614,28 @@ def main_loop(
     use_cached_results: bool,
     properties_to_add,
 ):
+    rules_to_skip = []
+    rules_to_skip_filename = os.path.join(state_dir, RULES_TO_SKIP_FILENAME)
+
+    if os.path.exists(rules_to_skip_filename):
+        with open(rules_to_skip_filename, "rt") as f:
+            for line in f.readlines():
+                line = line.strip()
+                if line.startswith("#"):
+                    continue
+                if line == "":
+                    continue
+                rules_to_skip.append(line)
+
+        print(
+            f"Warning: found {rules_to_skip_filename} file. Will skip the following rules automatically:"
+        )
+        for rule in rules_to_skip:
+            print(f"  {rule}")
+        print(
+            f"Remove or edit the {rules_to_skip_filename} file if you want these rules to run!"
+        )
+
     from conseq.exec_client import create_publish_exec_client
 
     _client_for_publishing = Lazy(lambda: create_publish_exec_client(rules.get_vars()))
@@ -754,20 +779,43 @@ def main_loop(
                 )
                 debug_log.log_input_preprocess(job.id, job.inputs, inputs)
 
-                # if we're required confirmation from the user, do this before we continue
-                if req_confirm:
-                    answer = ui.confirm_execution(job.transform, format_inputs(inputs))
-                    if answer == "a":
-                        req_confirm = False
-                    elif answer == "q":
-                        abort = True
-                        break
-                    elif answer == "s":
-                        job_ids_to_ignore.add(job.id)
-                        continue
-                    elif answer == "S":
-                        skip_remaining = True
-                        break
+                if job.transform in rules_to_skip:
+                    print(
+                        f"Skipping {job.transform} because it was in {rules_to_skip_filename} file"
+                    )
+                    job_ids_to_ignore.add(job.id)
+                    continue
+                else:
+                    # if we're required confirmation from the user, do this before we continue
+                    if req_confirm:
+                        answer = ui.confirm_execution(
+                            job.transform, format_inputs(inputs)
+                        )
+                        if answer == "a":
+                            req_confirm = False
+                        elif answer == "q":
+                            abort = True
+                            break
+                        elif answer == "s":
+                            job_ids_to_ignore.add(job.id)
+                            continue
+                        elif answer == "S":
+                            skip_remaining = True
+                            break
+                        elif answer == "R":
+                            rules_to_skip.append(job.transform)
+                            add_prologue = not os.path.exists(rules_to_skip_filename)
+
+                            with open(rules_to_skip_filename, "at") as f:
+                                if add_prologue:
+                                    f.write(
+                                        "# This file contains the names of rules that a user requested be skipped forever during an interactive run (ie: run with --confirm)\n"
+                                    )
+                                    f.write(
+                                        "# The rules listed here will be skipped for all runs as long as they exist in this file\n"
+                                    )
+                                f.write(job.transform + "\n")
+                            break
 
                 if rule.is_publish_rule:
                     publish(jinja2_env, rule.publish_location, rules.get_vars(), inputs)
@@ -1088,6 +1136,10 @@ def reconcile_rule_specifications(j: Jobs, latest_rules: Dict[str, str]):
         if existing_rules[transform] != latest_rules[transform]:
             stale_rules.add(transform)
 
+    print("Stale rules:")
+    for transform in stale_rules:
+        print(transform)
+
     stale_object_ids = set()
     for transform in stale_rules:
         obj_ids = j.find_rule_output_ids(transform)
@@ -1114,6 +1166,10 @@ def reconcile_db(
         processed.append(obj)
 
     new_objs, missing_objs = reconcile_add_if_missing(j, processed)
+    print("Missing add-if-missing:")
+    for obj in missing_objs:
+        print(f"  {obj}")
+
     invalidated_objs = reconcile_rule_specifications(j, rule_specifications)
 
     missing_objs = set(invalidated_objs).union(missing_objs)

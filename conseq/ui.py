@@ -84,8 +84,8 @@ def user_says_we_should_stop(failure_count, executing):
 def confirm_execution(transform, formatted_inputs):
     while True:
         answer = input(
-            f"About to run {transform} on the following: {formatted_inputs}\nProceed to run {transform}? (y)es, (s)kip, (S)kip all, (a)lways or (q)uit: ".format()
+            f"About to run {transform} on the following: \n{formatted_inputs}\nProceed to run {transform}? (y)es, (s)kip, (S)kip all, (a)lways, (R)emember to always skip {transform}, or (q)uit: "
         )
-        if not (answer in ["y", "a", "q", "S", "s"]):
+        if not (answer in ["y", "a", "q", "S", "s", "R"]):
             print("Invalid input")
         return answer
