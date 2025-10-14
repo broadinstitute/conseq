@@ -62,9 +62,9 @@ class ConseqArgumentParser:
         )
         parser.add_argument("file", metavar="FILE", help="the conseq file to analyze")
         parser.add_argument(
-            "--dot", 
+            "--dot",
             metavar="DOTFILE",
-            help="Write the dependency graph to a Graphviz DOT file"
+            help="Write the dependency graph to a Graphviz DOT file",
         )
         parser.set_defaults(func=self._analyze_cmd)
 
@@ -110,6 +110,8 @@ class ConseqArgumentParser:
             help="List of columns to show (specify as a comma separated list)",
         )
         parser.add_argument("--space")
+        parser.add_argument("--format")
+        parser.add_argument("--out")
         parser.set_defaults(func=ls_cmd)
 
     def _add_gc(self, sub):

@@ -10,6 +10,7 @@ from conseq.types import Obj
 
 # Utility functions
 
+
 class RegExpMatch:
     def __init__(self, pattern):
         self.pattern = re.compile(pattern)
@@ -40,6 +41,7 @@ def parse_query(predicates):
 
 def get_config_file_path(args):
     import os
+
     config_file = os.path.expanduser(args.config)
     if not os.path.exists(config_file):
         config_file = None
@@ -147,6 +149,7 @@ def parse_rule_filters(
 
 # Command handler functions
 
+
 def list_cmd(args):
     commands.list_cmd(args.dir)
 
@@ -157,7 +160,15 @@ def ls_cmd(args):
     columns = None
     if args.columns:
         columns = args.columns.split(",")
-    commands.ls_cmd(args.dir, args.space, key_value_pairs, args.groupby, columns)
+    commands.ls_cmd(
+        args.dir,
+        args.space,
+        key_value_pairs,
+        args.groupby,
+        columns,
+        args.format,
+        args.out,
+    )
 
 
 def gc_cmd(args):
@@ -173,9 +184,7 @@ def forget_cmd(args):
 
 
 def rm_cmd(args):
-    commands.rm_cmd(
-        args.dir, args.dry_run, args.space, parse_query(args.predicates)
-    )
+    commands.rm_cmd(args.dir, args.dry_run, args.space, parse_query(args.predicates))
 
 
 def run_cmd(args):
@@ -246,6 +255,7 @@ def debugrun_cmd(args):
 
 def report_cmd(args):
     from conseq.report import generate_report_cmd
+
     generate_report_cmd(args.dir, args.dest)
 
 
@@ -256,11 +266,7 @@ def export_cmd(args):
         exclude_patterns = []
 
     commands.export_cmd(
-        args.dir,
-        args.file,
-        get_config_file_path(args),
-        args.dest,
-        exclude_patterns,
+        args.dir, args.file, get_config_file_path(args), args.dest, exclude_patterns,
     )
 
 
@@ -270,6 +276,7 @@ def history_cmd(args):
 
 def version_cmd(args):
     import conseq
+
     print(conseq.__version__)
 
 

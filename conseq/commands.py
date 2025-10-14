@@ -295,7 +295,7 @@ def downstream_cmd(state_dir, _space, predicates):
     # subset is list of key -> value pairs
 
 
-def ls_cmd(state_dir, _space, predicates, groupby, columns):
+def ls_cmd(state_dir, _space, predicates, groupby, columns, format, output_file):
     from tabulate import tabulate
     from conseq import depquery
 
@@ -346,17 +346,21 @@ def ls_cmd(state_dir, _space, predicates, groupby, columns):
             )
         )
 
-    if groupby == None:
-        print_table(subset, 0)
+    if format == "json":
+        with open(output_file, "wt") as fd:
+            json.dump(subset, fd, indent=2)
     else:
-        by_pred = collections.defaultdict(lambda: [])
-        for row in subset:
-            by_pred[row.get(groupby)].append(row)
+        if groupby == None:
+            print_table(subset, 0)
+        else:
+            by_pred = collections.defaultdict(lambda: [])
+            for row in subset:
+                by_pred[row.get(groupby)].append(row)
 
-        for group, rows in by_pred.items():
-            print("For {}={}:".format(groupby, group))
-            print_table(rows, 2)
-            print()
+            for group, rows in by_pred.items():
+                print("For {}={}:".format(groupby, group))
+                print_table(rows, 2)
+                print()
 
 
 def forget_cmd(state_dir, rule_name, is_pattern):
