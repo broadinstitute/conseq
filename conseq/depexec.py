@@ -9,6 +9,8 @@ import time
 from typing import Any, Callable, Dict, List, Tuple, Union, Optional
 
 import six
+
+from .execution_report import Failure
 from .helper import Remote
 from jinja2.environment import Environment
 import os
@@ -44,6 +46,7 @@ import re
 from .parser import RegEx
 from .timeline import TimelineLog
 from .types import PropsType
+from .execution_report import write_execution_report, Failure
 
 log = logging.getLogger(__name__)
 
@@ -395,8 +398,7 @@ class SummaryRec:
 
 
 def get_long_execution_summary(
-    executing: Union[List[Execution], List[DelegateExecution]],
-    pending: List[RuleExecution],
+    executing: List[ClientExecution], pending: List[RuleExecution],
 ) -> str:
     from tabulate import tabulate
 
@@ -555,6 +557,8 @@ def main_loop(
 ):
     from conseq.exec_client import create_publish_exec_client
 
+    execution_report_path = os.path.join(state_dir, "execution_report.html")
+
     _client_for_publishing = Lazy(lambda: create_publish_exec_client(rules.get_vars()))
 
     resources_per_client = dict(
@@ -617,7 +621,11 @@ def main_loop(
                 log.info(msg)
                 if len(pending_jobs) + len(executing) > 0:
                     long_summary = get_long_execution_summary(executing, pending_jobs)
-                    log.info("Summary of queue:\n%s\n", long_summary)
+                    log.info(f"Summary of queue:\n{long_summary}\n")
+
+                    write_execution_report(
+                        executing, pending_jobs, failures, execution_report_path
+                    )
 
             prev_msg = msg
             cannot_start_more = (
@@ -773,9 +781,10 @@ def main_loop(
                                 # j.gc()
                                 _failure = f"Rule {e.transform} ({e.job_dir} generated an output which already exists: {artifact}"
                                 _failures.append(_failure)
-                                log.error(_failure)
+                                log.error(str(_failure))
+
                         if len(_failures) > 0:
-                            failure = ", ".join(_failures)
+                            failure = ", ".join([str(x) for x in _failures])
 
                 if failure is None and completion is not None:
                     # check outputs have all the required fields (as defined by 'type')
@@ -783,7 +792,7 @@ def main_loop(
 
                 if failure is not None:
                     job_id = j.record_completed(timestamp, e.id, dep.STATUS_FAILED, {})
-                    failures.append((e.transform, e.job_dir))
+                    failures.append(Failure(e.transform, e.job_dir))
                     debug_log.log_completed(job_id, dep.STATUS_FAILED, completion)
                     assert job is not None
                     timings.log(job_id, job.transform, "fail")
