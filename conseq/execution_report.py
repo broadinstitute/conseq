@@ -7,6 +7,7 @@ from conseq.exec_client import ClientExecution
 from datetime import datetime
 
 from dataclasses import dataclass
+from conseq.types import Obj
 
 Failure = namedtuple("Failure", "transform job_dir")
 
@@ -61,7 +62,6 @@ def format_executing_table(executing: List[ClientExecution]):
     )
 
 
-from conseq.types import Obj
 
 
 def reformat_inputs(inputs: List[Tuple[str, Obj]]):
