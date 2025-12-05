@@ -10,10 +10,7 @@ from datetime import datetime
 from dataclasses import dataclass
 from conseq.types import Obj
 
-try:
-    from importlib.resources import files
-except ImportError:
-    from importlib_resources import files
+from importlib.resources import files
 
 Failure = namedtuple("Failure", "transform job_dir")
 
@@ -68,8 +65,6 @@ def format_executing_table(executing: List[ClientExecution]):
     )
 
 
-
-
 def reformat_inputs(inputs: List[Tuple[str, Obj]]):
     lines = []
 
@@ -110,19 +105,19 @@ def write_execution_report(
     dest_path: str,
 ):
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-    
+
     # Copy vanilla.css to the destination directory
     dest_dir = os.path.dirname(dest_path)
     css_dest_path = os.path.join(dest_dir, "vanilla.css")
-    
+
     # Locate vanilla.css in the package
     static_files = files("conseq").joinpath("static")
     css_source = static_files.joinpath("vanilla.css")
-    
+
     # Copy the CSS file
-    with open(css_source, 'rb') as src, open(css_dest_path, 'wb') as dst:
-        shutil.copyfileobj(src, dst)
-    
+    with open(css_dest_path, "wb") as dst:
+        dst.write(css_source.read_bytes())
+
     with open(dest_path, "wt") as fd:
         fd.write(
             f"""
