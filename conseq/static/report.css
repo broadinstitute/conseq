@@ -1,0 +1,33 @@
+html {
+  font-family: sans-serif;
+}
+
+body {
+  margin: 10px;
+}
+
+table.obj-table {
+  table-layout: fixed;
+}
+
+.obj-table td,
+.obj-table th {
+  width: 60px;
+  overflow: hidden;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
+.transient-value {
+  color: gray;
+}
+
+.filename-value {
+  color: rebeccapurple;
+}
+
+.file-url-value {
+  color: purple;
+}

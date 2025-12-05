@@ -11,6 +11,9 @@ from dataclasses import dataclass
 from conseq.types import Obj
 
 from importlib.resources import files
+import logging
+
+log = logging.getLogger(__name__)
 
 Failure = namedtuple("Failure", "transform job_dir")
 
@@ -69,16 +72,20 @@ def reformat_inputs(inputs: List[Tuple[str, Obj]]):
     lines = []
 
     def append_kv(v: Obj):
+        if not isinstance(v, Obj):
+            log.error(f"Expected instance of Obj, but got {type(v)}: {v}")
+            return "<invalid>"
+
         for prop, prop_value in v.props.items():
-            lines.append("     {}: {}\n".format(prop, repr(prop_value)))
+            lines.append(f"     {prop}: {prop_value}\n")
 
     for variable, obj in inputs:
-        if isinstance(obj, list):
+        if isinstance(obj, list) or isinstance(obj, tuple):
             for vi, ve in enumerate(obj):
-                lines.append("  {}[{}]:\n".format(variable, vi))
+                lines.append(f"  {variable}[{vi}]:\n")
                 append_kv(ve)
         else:
-            lines.append("  {}:\n".format(variable))
+            lines.append(f"  {variable}:\n")
             append_kv(obj)
 
     return "".join(lines)

@@ -3,6 +3,7 @@ import os
 from conseq.dep import open_job_db, Obj, PUBLIC_SPACE
 from collections import namedtuple, defaultdict
 import jinja2
+from importlib.resources import files
 
 
 def generate_report_cmd(state_dir, dest_dir):
@@ -145,6 +146,11 @@ def generate_report_cmd(state_dir, dest_dir):
         (name, summary.disk_usage) for name, summary in execs_by_name.items()
     ]
     rules_with_size.sort(key=lambda x: x[1], reverse=True)
+
+    static_files = files("conseq").joinpath("static")
+    report_css = static_files.joinpath("report.css").read_bytes()
+    with open(f"{dest_dir}/report.css", "wb") as fd:
+        fd.write(report_css)
 
     with open(f"{dest_dir}/index.html", "wt") as fd:
         sorted_objs_by_type = sorted(objs_by_type.items())
