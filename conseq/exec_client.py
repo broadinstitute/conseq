@@ -73,22 +73,23 @@ def is_valid_value(v):
     return isinstance(v, str)
 
 
-def _get_tail_file(filename, line_count=20):
+def _get_tail_file(filename, line_count=20, line_prefix=""):
     if not os.path.exists(filename):
         log.error("Cannot tail {} because no such file exists".format(filename))
         return
 
-    lines = []
     with open(filename, "rt") as fd:
         fd.seek(0, 2)
         file_len = fd.tell()
         # read at most, the last 100k of the file
         fd.seek(max(0, file_len - 100000), 0)
         lines = fd.read().split("\n")
-        for line in lines[-line_count:]:
-            lines.append(line + "\n")
 
-    return "".join(lines)
+        processed_lines = []
+        for line in lines[-line_count:]:
+            processed_lines.append(f"{line_prefix}{line}\n")
+
+    return "".join(processed_lines)
 
 
 def log_job_output(
@@ -98,9 +99,12 @@ def log_job_output(
         log_name = log_path
 
     if log_path is not None:
+        log_tail = _get_tail_file(log_path, line_prefix="   ")
+        if log_tail.strip() == "":
+            log_tail = f"  <Log file {repr(log_path)} is empty>"
+
         log.error(
-            "%s",
-            f"Dumping last {line_count} lines of {log_name} ({log_path}):\n{_get_tail_file(log_path)}",
+            f"Dumping last {line_count} lines of {log_name} ({log_path}):\n{log_tail}",
         )
 
 
