@@ -91,9 +91,13 @@ def test_simple_dag():
 def test_with_sample_file(tmpdir, monkeypatch, capsys):
     """Test with a sample conseq file"""
     # Create a temporary conseq file
-    with tempfile.NamedTemporaryFile(suffix=".conseq", delete=False) as f:
+
+    conseq_file = str(tmpdir.join("sample.conseq"))
+    work_dir = str(tmpdir.join("work"))
+
+    with open(conseq_file, "wt") as f:
         f.write(
-            b"""
+            """
 rule step1:
     outputs: {"type": "step1_output", "value": "data1"}
     run "echo 'Step 1'"
@@ -109,36 +113,30 @@ rule step3:
     run "echo 'Step 3'"
 """
         )
-        filename = f.name
+    # Import the analyze function
+    from conseq.static_analysis.analyze import analyze
 
-    try:
-        # Import the analyze function
-        from conseq.static_analysis.analyze import analyze
+    # Call the analyze function with our test file
+    result = analyze(conseq_file, work_dir, static_analyis=True)
 
-        # Call the analyze function with our test file
-        result = analyze(filename, str(tmpdir))
+    # Check the return code
+    assert result == 0
 
-        # Check the return code
-        assert result == 0
+    # Capture the printed output
+    captured = capsys.readouterr()
 
-        # Capture the printed output
-        captured = capsys.readouterr()
+    # Verify the output contains expected information
+    assert f"DAG Analysis for {conseq_file}:" in captured.out
+    assert "Total rules: 4" in captured.out
+    assert "Root rules (no inputs): 2" in captured.out
 
-        # Verify the output contains expected information
-        assert f"DAG Analysis for {filename}:" in captured.out
-        assert "Total rules: 3" in captured.out
-        assert "Root rules (no inputs): 1" in captured.out
+    # Check for specific rule dependencies
+    assert "Rule: step1" in captured.out
+    assert "Rule: step2" in captured.out
+    assert "Rule: step3" in captured.out
 
-        # Check for specific rule dependencies
-        assert "Rule: step1" in captured.out
-        assert "Rule: step2" in captured.out
-        assert "Rule: step3" in captured.out
-
-        # Verify the connections between rules
-        assert "From rule 'step1'" in captured.out
-        assert "From rule 'step2'" in captured.out
-        assert "To rule 'step2'" in captured.out
-        assert "To rule 'step3'" in captured.out
-    finally:
-        # Clean up
-        os.unlink(filename)
+    # Verify the connections between rules
+    assert "From rule 'step1'" in captured.out
+    assert "From rule 'step2'" in captured.out
+    assert "To rule 'step2'" in captured.out
+    assert "To rule 'step3'" in captured.out
