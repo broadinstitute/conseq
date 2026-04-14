@@ -1,7 +1,6 @@
 import json
 import re
 from collections import namedtuple
-import six
 from typing import Dict, Optional, Any
 from dataclasses import dataclass
 from conseq.parser import depfile
@@ -260,7 +259,7 @@ class Semantics(object):
         return ast[2]
 
     def query_variable(self, ast):
-        assert isinstance(ast, six.string_types)
+        assert isinstance(ast, str)
         return QueryVariable(ast)
 
     def type_definition_component(self, ast):
@@ -283,14 +282,14 @@ class Semantics(object):
                 description = component.description
         return TypeDefinition(fields=fields, description=description)
 
-    def rule(self, ast):
+    def rule(self, ast, parseinfo=None):
         # raise Exception()
         # print("rule", repr(ast))
         rule_name = ast.name
         rule_parameters = ast.params
         runs = ast.stmts
         rule = Rule(rule_name)
-        rule.lineno = ast.parseinfo.line
+        rule.lineno = parseinfo.line if parseinfo is not None else None
         rule.filename = self.filename
         for statement in rule_parameters:
             if statement[0] == "inputs":
@@ -405,10 +404,10 @@ Statement = Union[LetStatement, IfStatement, IncludeStatement, TypeDefStmt, Rule
 
 
 def parse_str(text, filename=None):
-    parser = depfile.depfileParser(parseinfo=False)
+    parser = depfile.depfileParser()
     statements = parser.parse(
         text,
-        "all_declarations",
+        start="all_declarations",
         filename=filename,
         trace=False,
         nameguard=None,

@@ -114,7 +114,11 @@ def test_publish_rule(monkeypatch):
 def _parse_exp(text, nonterminal):
     parser = depfile.depfileParser(parseinfo=True)
     return parser.parse(
-        text, nonterminal, trace=False, nameguard=None, semantics=Semantics("<none>")
+        text,
+        start=nonterminal,
+        trace=False,
+        nameguard=None,
+        semantics=Semantics("<none>"),
     )
 
 

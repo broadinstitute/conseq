@@ -1,5 +1,5 @@
 @@grammar :: depfile
-@@eol_comments :: /#.*?$/
+@@eol_comments :: /(?m)#.*?$/
 
 # different flavors of strings
 triple_dbl_quoted_string = /"""(?:[^"]|"{1,2}(?!"))+"""/ ;
@@ -121,7 +121,7 @@ quotable_identifier = identifier | quoted_string ;
 
 type_def_stmt = "type" quotable_identifier ":" type_definition ;
 type_definition_component = "description" ":" quoted_string |
-                  "required" ":" identifier_list ;
+                  "fields" ":" identifier_list ;
 type_definition = type_definition_component { type_definition_component } 
                   ;
 identifier_list = quotable_identifier {"," quotable_identifier}* ;
