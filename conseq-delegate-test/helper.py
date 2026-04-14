@@ -7,8 +7,6 @@ import re
 import subprocess
 from typing import Dict, List, Optional, Tuple
 
-from boto.s3.connection import S3Connection
-from boto.s3.key import Key
 from google.cloud import storage
 
 
@@ -16,7 +14,7 @@ log = logging.getLogger(__name__)
 
 # banana
 def _parse_remote(path: str) -> Tuple[str, str, str]:
-    m = re.match("^(s3|gs)://([^/]+)/(.*)$", path)
+    m = re.match("^(gs)://([^/]+)/(.*)$", path)
     assert m != None, f"invalid remote path: {path}"
     storage_api = m.group(1)
     bucket_name = m.group(2)
@@ -105,56 +103,8 @@ class GSStorageConnection(StorageConnection):
             blob.metadata = {"sha256": sha256}
 
 
-class S3StorageConnection(StorageConnection):
-    def __init__(self, accesskey, secretaccesskey):
-        self.c = S3Connection(accesskey, secretaccesskey)
-
-    def exists(self, bucket_name: str, key: str) -> bool:
-        return self.c.get_bucket(bucket_name, validate=False).get_key(key) is not None
-
-    def list_keys_with_prefix(self, bucket_name: str, path: str) -> List[str]:
-        bucket = self.c.get_bucket(bucket_name, validate=False)
-        return [x.key for x in bucket.list(prefix=path)]
-
-    def get_contents_as_string(self, bucket_name: str, path: str) -> bytes:
-        return (
-            self.c.get_bucket(bucket_name, validate=False)
-            .get_key(path, validate=False)
-            .get_contents_as_string()
-        )
-
-    def get_contents_to_filename(self, bucket_name: str, path: str, dest_path: str):
-        self.c.get_bucket(bucket_name, validate=False).get_key(
-            path, validate=False
-        ).get_contents_to_filename(dest_path)
-
-    def get_sha256(self, bucket_name: str, path: str) -> Optional[str]:
-        return (
-            self.c.get_bucket(bucket_name, validate=False)
-            .get_key(path)
-            .get_metadata("sha256")
-        )
-
-    def get_generation_id(self, bucket_name: str, path: str) -> str:
-        return self.c.get_bucket(bucket_name, validate=False).get_key(path).etag
-
-    def set_contents_from_string(self, bucket_name: str, path: str, text: str):
-        k = self.c.get_bucket(bucket_name, validate=False).get_key(path, validate=False)
-        k.set_contents_from_string(text)
-
-    def set_contents_from_filename(
-        self, filename: str, bucket_name: str, path: str, sha256=None
-    ):
-        k = self.c.get_bucket(bucket_name, validate=False).get_key(path, validate=False)
-        k.set_contents_from_filename(filename)
-        if sha256:
-            k.set_metadata("sha256", sha256)
-
-
-def new_remote(remote_url, local_dir, accesskey, secretaccesskey):
-    sc = S3StorageConnection(accesskey, secretaccesskey)
-    gs = GSStorageConnection()
-    return Remote(remote_url, local_dir, {"s3": sc, "gs": gs})
+def new_remote(remote_url, local_dir):
+    return Remote(remote_url, local_dir, {"gs": GSStorageConnection()})
 
 
 class Remote:
@@ -171,7 +121,7 @@ class Remote:
         return self.connections[storage_api]
 
     def is_full_remote_path(self, path: str):
-        return path.startswith("s3:") or path.startswith("gs:")
+        return path.startswith("gs:")
 
     def exists(self, remote: str) -> bool:
         storage_api, bucket_name, remote_path = self._normalize_path(remote)
@@ -467,16 +417,6 @@ def pull(
         )
 
 
-def read_config(filename):
-    config = {}
-    with open(filename, "rt") as fd:
-        for line in fd.readlines():
-            m = re.match('\\s*(\\S+)\\s*=\\s*"([^"]+)"', line)
-            assert m != None
-            config[m.group(1)] = m.group(2)
-    return config
-
-
 def publish_results(results_json_file, remote, published_files_root, results_json_dest):
     if not os.path.exists(results_json_file):
         log.info(
@@ -525,18 +465,8 @@ def _parse_mapping_str(file_mapping):
 
 
 def exec_cmd(args, config):
-    remote = new_remote(
-        args.remote_url,
-        args.local_dir,
-        config["AWS_ACCESS_KEY_ID"],
-        config["AWS_SECRET_ACCESS_KEY"],
-    )
-    cas_remote = new_remote(
-        args.cas_remote_url,
-        args.local_dir,
-        config["AWS_ACCESS_KEY_ID"],
-        config["AWS_SECRET_ACCESS_KEY"],
-    )
+    remote = new_remote(args.remote_url, args.local_dir)
+    cas_remote = new_remote(args.cas_remote_url, args.local_dir)
 
     pull_map = []
     if args.download_pull_map is not None:
@@ -605,7 +535,6 @@ def exec_command_with_capture(
 
 def main(varg=None):
     parser = argparse.ArgumentParser("push or pull files from cloud storage")
-    parser.add_argument("--config", "-c", help="path to config file")
 
     subparsers = parser.add_subparsers()
 
@@ -636,12 +565,6 @@ def main(varg=None):
     log.info("helper.main parameters: %s", varg)
 
     args = parser.parse_args(varg)
-    config = {}
-    if args.config is not None:
-        config = read_config(args.config)
-    else:
-        config["AWS_ACCESS_KEY_ID"] = os.getenv("AWS_ACCESS_KEY_ID")
-        config["AWS_SECRET_ACCESS_KEY"] = os.getenv("AWS_SECRET_ACCESS_KEY")
 
     logging.basicConfig(level=logging.INFO)
 
@@ -650,7 +573,7 @@ def main(varg=None):
     if args.func is None:
         parser.print_help()
     else:
-        args.func(args, config)
+        args.func(args, {})
 
 
 if __name__ == "__main__":
