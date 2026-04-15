@@ -285,7 +285,10 @@ def _eval_if(if_statement, context: EvalContext):
     if condition_result:
         _eval_stmts(if_statement.when_true, context)
     else:
-        _eval_stmts(if_statement.when_false, context)
+        if isinstance(if_statement.when_false, parser.IfStatement):
+            _eval_if(if_statement.when_false, context)
+        else:
+            _eval_stmts(if_statement.when_false, context)
 
 
 def read_deps(filename, hashcache, jinja2_env, initial_vars={}) -> Rules:

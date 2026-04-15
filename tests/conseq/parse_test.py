@@ -245,6 +245,74 @@ def test_generic_eval(tmpdir):
     assert rules.vars["a"] == "1"
 
 
+def test_elif_taken(tmpdir):
+    rules = Rules()
+    statements = parser.parse_str(
+        """
+    if "'x' == 'y'":
+      let a='1'
+    elif "'x' == 'x'":
+      let a='2'
+    else:
+      let a='3'
+    endif
+    """
+    )
+    eval_stmts(rules, statements, tmpdir)
+    assert rules.vars["a"] == "2"
+
+
+def test_elif_not_taken(tmpdir):
+    rules = Rules()
+    statements = parser.parse_str(
+        """
+    if "'x' == 'y'":
+      let a='1'
+    elif "'x' == 'z'":
+      let a='2'
+    else:
+      let a='3'
+    endif
+    """
+    )
+    eval_stmts(rules, statements, tmpdir)
+    assert rules.vars["a"] == "3"
+
+
+def test_multiple_elif(tmpdir):
+    rules = Rules()
+    statements = parser.parse_str(
+        """
+    if "'x' == 'a'":
+      let a='1'
+    elif "'x' == 'b'":
+      let a='2'
+    elif "'x' == 'x'":
+      let a='3'
+    else:
+      let a='4'
+    endif
+    """
+    )
+    eval_stmts(rules, statements, tmpdir)
+    assert rules.vars["a"] == "3"
+
+
+def test_elif_no_else(tmpdir):
+    rules = Rules()
+    statements = parser.parse_str(
+        """
+    if "'x' == 'y'":
+      let a='1'
+    elif "'x' == 'z'":
+      let a='2'
+    endif
+    """
+    )
+    eval_stmts(rules, statements, tmpdir)
+    assert "a" not in rules.vars
+
+
 def test_file_ref(tmpdir):
     rules = Rules()
     # rules.set_var(name, value)

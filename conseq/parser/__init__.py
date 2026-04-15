@@ -371,7 +371,7 @@ class Semantics(object):
 
     def conditional(self, ast):
         else_clause = []
-        if ast.else_clause != None:
+        if ast.else_clause and ast.else_clause[0] == "else":
             else_clause = ast.else_clause[2]
         for i in reversed(range(len(ast.elif_clauses))):
             else_clause = IfStatement(
