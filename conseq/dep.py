@@ -1286,7 +1286,7 @@ class Jobs:
             all_objs = self.find_all_reachable_downstream_objs(root_obj_ids)
             for obj in all_objs:
                 log.warning("invaliding rule %s, rm object %s", transform, obj)
-                self.remove_objects([obj.id for obj in all_objs])
+            self.remove_objects([obj.id for obj in all_objs])
 
             for r in rules_to_remove:
                 if r.execution_id is not None:
