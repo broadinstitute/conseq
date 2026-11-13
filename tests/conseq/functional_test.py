@@ -1,7 +1,10 @@
 # from conseq import parser
 import os
 
+import pytest
+
 from conseq import dep, db
+from conseq.errors import ArtifactTypeMismatch
 from conseq import depexec
 from unittest.mock import create_autospec
 
@@ -43,7 +46,7 @@ def test_rule_with_no_inputs(tmpdir):
         tmpdir,
         """
     rule a:
-        outputs: {"finished": "true"}
+        outputs: {"type": "result", "finished": "true"}
     """,
     )
     assert len(j.find_objs("public", {})) == 1
@@ -66,7 +69,7 @@ def test_rerun_multiple_times(tmpdir):
         tmpdir,
         """
     rule a:
-        outputs: {"finished": "true", "mut":{"$value": "1"}}
+        outputs: {"type": "result", "finished": "true", "mut":{"$value": "1"}}
     """,
     )
     objs = j.find_objs("public", {})
@@ -78,7 +81,7 @@ def test_rerun_multiple_times(tmpdir):
         tmpdir,
         """
     rule b:
-        outputs: {"finished": "true", "mut":{"$value": "2"}}
+        outputs: {"type": "result", "finished": "true", "mut":{"$value": "2"}}
     """,
         assert_clean=False,
     )
@@ -91,7 +94,7 @@ def test_rerun_multiple_times(tmpdir):
         tmpdir,
         """
     rule b:
-        outputs: {"finished": "true", "mut":{"$value": "3"}}
+        outputs: {"type": "result", "finished": "true", "mut":{"$value": "3"}}
     """,
         targets=["b"],
         assert_clean=False,
@@ -116,7 +119,7 @@ def test_non_key_values(tmpdir):
         tmpdir,
         """
     rule a:
-        outputs: {"finished": "true", "other": {"$value": "apple"}}
+        outputs: {"type": "result", "finished": "true", "other": {"$value": "apple"}}
         run "bash" with "echo test"
     """,
     )
@@ -126,11 +129,11 @@ def test_non_key_values(tmpdir):
         tmpdir,
         """
     rule a:
-        outputs: {"finished": "true", "other": {"$value": "apple"}}
+        outputs: {"type": "result", "finished": "true", "other": {"$value": "apple"}}
         run "bash" with "echo test"
     rule b:
         inputs: in={"finished": "true"}
-        outputs: {"name": "result", "filename": {"$filename":"foo.txt"}}
+        outputs: {"type": "result", "name": "result", "filename": {"$filename":"foo.txt"}}
         run "bash" with "echo {{inputs.in.other}} > foo.txt"
     """,
         assert_clean=False,
@@ -154,7 +157,7 @@ def test_gc(tmpdir):
         tmpdir,
         """
     rule a:
-        outputs: {"finished": "true", "other": {"$value": "a"}}
+        outputs: {"type": "result", "finished": "true", "other": {"$value": "a"}}
     """,
     )
     print("objs", j.find_objs("public", {}))
@@ -164,7 +167,7 @@ def test_gc(tmpdir):
         tmpdir,
         """
     rule b:
-        outputs: {"finished": "true", "other": {"$value": "b"}}
+        outputs: {"type": "result", "finished": "true", "other": {"$value": "b"}}
     """,
         assert_clean=False,
     )
@@ -189,11 +192,32 @@ def test_rules_with_all_exec_once(tmpdir):
         outputs: {"type": "thing", "value": "b"}
     rule c:
         inputs: x=all {"type": "thing"}
-        outputs: {"done": "true"}
+        outputs: {"type": "result", "done": "true"}
     """,
     )
     assert len(j.find_objs("public", {})) == 3
     assert len(j.get_all_executions()) == 3
+
+
+@pytest.mark.xfail(
+    reason="Not implemented yet: a rule with an all input is never created when nothing matches",
+    strict=True,
+)
+def test_rule_with_all_input_executes_when_nothing_matches(tmpdir):
+    # There are no artifacts of type "x" at all, but a rule with an "all" input should still run,
+    # with the input bound to an empty list.
+    j = run_conseq(
+        tmpdir,
+        """
+    rule a:
+        inputs: x=all {"type": "x"}
+        outputs: {"type": "out", "count": "{{ inputs.x|length }}"}
+    """,
+    )
+    assert [e.transform for e in j.get_all_executions()] == ["a"]
+    outputs = j.find_objs("public", {"type": "out"})
+    assert len(outputs) == 1
+    assert outputs[0].props["count"] == "0"
 
 
 def test_rule_executes_once(tmpdir):
@@ -295,7 +319,7 @@ def test_fileref_copy_to(tmpdir):
         outputs: {}
         run "python" with {}
     """.format(
-            file_a, file_b, "{'done': 'true'}", script
+            file_a, file_b, "{'type': 'result', 'done': 'true'}", script
         ),
     )
 
@@ -349,7 +373,7 @@ def test_construct_cache_key(tmpdir, monkeypatch):
             echo '{"a": "val1", "b": "val2"}' > conseq-cache-key.json
         '''
         run 'bash' with '''
-        echo '{"outputs": [{"finished": "true"}]}' > results.json
+        echo '{"outputs": [{"type": "result", "finished": "true"}]}' > results.json
         '''
     """,
     )
@@ -370,7 +394,7 @@ def test_construct_cache_key(tmpdir, monkeypatch):
     # make sure it got the resulting artifact from the previous run
     artifacts = j.find_objs("public", {})
     assert len(artifacts) == 1
-    assert artifacts[0].props == {"finished": "true"}
+    assert artifacts[0].props == {"type": "result", "finished": "true"}
 
 
 def test_publish(tmpdir, monkeypatch):
@@ -405,7 +429,7 @@ def test_publish(tmpdir, monkeypatch):
     let AWS_SECRET_ACCESS_KEY="y"
     let S3_STAGING_URL="s3://buckey/root"
     rule a:
-        outputs: {"finished": "true", "name": "bongo", "file": {"$filename": "testfile"}, "url": {"$file_url": "s3://foo/key"}}
+        outputs: {"type": "result", "finished": "true", "name": "bongo", "file": {"$filename": "testfile"}, "url": {"$file_url": "s3://foo/key"}}
         run "bash" with "echo test > testfile"
     rule pub:
         inputs: in={"finished": "true"}
@@ -663,3 +687,167 @@ def test_commands(tmpdir):
     for command in commands:
         print("running: {}".format(command))
         main(command)
+
+
+def test_artifact_mismatches_output_types(tmpdir):
+    with pytest.raises(ArtifactTypeMismatch):
+        run_conseq(
+            tmpdir,
+            """
+            type thing ( value )
+
+            rule start:
+                output_types: (thing)
+                run "python" with \"\"\"
+                    import json
+                    with open("results.json", "wt") as fd:
+                        fd.write(json.dumps({"outputs": [{"type": "thing2"}]}))
+                \"\"\"
+            """,
+        )
+
+
+def test_artifact_matches_output_types(tmpdir):
+    j = run_conseq(
+        tmpdir,
+        """
+        type thing ( value )
+
+        rule start:
+            output_types: (thing)
+            run "python" with \"\"\"
+                import json
+                with open("results.json", "wt") as fd:
+                    fd.write(json.dumps({"outputs": [{"type": "thing", "value": "x"}]}))
+            \"\"\"
+        """,
+    )
+    objects = j.find_objs("public", {})
+    assert len(objects) == 1
+    assert objects[0].props["type"] == "thing"
+
+
+def test_output_missing_a_field_of_its_type_fails_the_execution(tmpdir):
+    # this is checked for any artifact with a defined type (whether or not the rule has
+    # output_types), and marks the execution as failed
+    j = run_conseq(
+        tmpdir,
+        """
+        type thing ( value )
+
+        rule start:
+            outputs: {"type": "thing"}
+            output_types: (thing)
+        """,
+    )
+    assert [e.status for e in j.get_all_executions()] == ["failed"]
+
+
+def test_output_types_cardinality(tmpdir):
+    # "many*" allows any number, including zero. "one" requires exactly one
+    j = run_conseq(
+        tmpdir,
+        """
+        type one ( value )
+        type many ( value )
+
+        rule start:
+            outputs: {"type": "one", "value": "1"}
+            output_types: (one, many*)
+        """,
+    )
+    assert len(j.find_objs("public", {})) == 1
+
+    with pytest.raises(ArtifactTypeMismatch):
+        run_conseq(
+            tmpdir.join("too-many"),
+            """
+            type one ( value )
+
+            rule start:
+                outputs: {"type": "one", "value": "1"}, {"type": "one", "value": "2"}
+                output_types: (one)
+            """,
+        )
+
+
+def test_undefined_type_in_output_types_is_an_error(tmpdir):
+    with pytest.raises(Exception, match="undefined"):
+        run_conseq(
+            tmpdir,
+            """
+            rule start:
+                outputs: {"type": "thing"}
+                output_types: (thing)
+            """,
+        )
+
+
+def test_failed_execution_is_not_reported_as_an_output_type_mismatch(tmpdir):
+    # a failed execution has no outputs, so it would always violate "exactly one". We want the
+    # failure itself reported, not a mismatch
+    j = run_conseq(
+        tmpdir,
+        """
+        type thing ( value )
+
+        rule start:
+            output_types: (thing)
+            run "bash" with "exit 1"
+        """,
+    )
+    assert [e.status for e in j.get_all_executions()] == ["failed"]
+
+
+def test_output_without_a_type_fails_the_execution(tmpdir):
+    j = run_conseq(
+        tmpdir,
+        """
+        rule start:
+            outputs: {"value": "x"}
+        """,
+    )
+    assert [e.status for e in j.get_all_executions()] == ["failed"]
+    assert j.find_objs("public", {}) == []
+
+
+def test_output_without_a_type_written_to_results_json_fails_the_execution(tmpdir):
+    j = run_conseq(
+        tmpdir,
+        """
+        rule start:
+            run 'bash' with '''
+            echo '{"outputs": [{"value": "x"}]}' > results.json
+            '''
+        """,
+    )
+    assert [e.status for e in j.get_all_executions()] == ["failed"]
+    assert j.find_objs("public", {}) == []
+
+
+def test_output_without_a_type_fails_even_when_the_rule_has_output_types(tmpdir):
+    # previously this raised a KeyError
+    j = run_conseq(
+        tmpdir,
+        """
+        type thing (value)
+
+        rule start:
+            outputs: {"value": "x"}
+            output_types: (thing)
+        """,
+    )
+    assert [e.status for e in j.get_all_executions()] == ["failed"]
+
+
+def test_one_output_without_a_type_fails_the_whole_execution(tmpdir):
+    j = run_conseq(
+        tmpdir,
+        """
+        rule start:
+            outputs: {"type": "ok", "value": "1"}, {"value": "2"}
+        """,
+    )
+    assert [e.status for e in j.get_all_executions()] == ["failed"]
+    # none of the outputs of a failed execution are published
+    assert j.find_objs("public", {}) == []

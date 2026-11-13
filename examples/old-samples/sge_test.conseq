@@ -6,7 +6,7 @@ let SGE_HELPER_PATH="python /home/unix/pmontgom/helper.py"
 
 rule a:
     options: sge
-    outputs: {"name":"a", "file":{"$filename": "rand"}}
+    outputs: {"type": "result", "name":"a", "file":{"$filename": "rand"}}
     run "Rscript" with """
         x <- runif(100)
         saveRDS(x, file="rand")
@@ -14,7 +14,7 @@ rule a:
 
 rule b:
     inputs: in={"name": "a"}
-    outputs: {"name":"final", "file":{"$filename": "final"}}
+    outputs: {"type": "result", "name":"final", "file":{"$filename": "final"}}
     run "Rscript" with """
         x <- readRDS({{ inputs.in.file|quoted }})
         x.mean <- mean(x)

@@ -6,11 +6,17 @@ import json
 import logging
 import textwrap
 import time
-from typing import Any, Callable, Dict, List, Tuple, Union, Optional
+from typing import Any, Callable, Dict, Iterable, List, Tuple, Union, Optional
 
 import six
 
 from .execution_report import Failure
+from .sequencer import (
+    create_sequencer,
+    RuleExecutionToStart,
+    RuleCompletion,
+    add_if_missing_rule,
+)
 from .helper import Remote
 from jinja2.environment import Environment
 import os
@@ -68,12 +74,61 @@ class FatalUserError(Exception):
     pass
 
 
-def make_output_check(output_expectations):
-    def is_outputs_good(outputs):
-        if output_expectations is None or len(output_expectations) == 0:
+def make_output_check(rule: Rule):
+    """Creates a function which checks whether the outputs of an execution of the rule agree with
+    the rule's `output_types`. (If the rule doesn't have any, everything is acceptable.)"""
+
+    def is_outputs_good(outputs: List[Dict]) -> bool:
+        if rule.resolved_output_types is None:
             return True
-        print(output_expectations)
-        return False
+
+        # index by type name
+        type_by_name = {x.type_def.name: x for x in rule.resolved_output_types}
+
+        # count number of outputs per type for verifying cardinality checks
+        per_type_count: Dict[str, int] = collections.defaultdict(lambda: 0)
+        for output in outputs:
+            per_type_count[output["type"]] += 1
+
+        okay = True
+
+        # check cardinalities
+        for output_type in rule.resolved_output_types:
+            output_count = per_type_count[output_type.type_def.name]
+            if output_count < output_type.cardinality.min:
+                log.warning(
+                    f"rule {rule.name} created {output_count} outputs with type {output_type.type_def.name} but expected at least {output_type.cardinality.min}"
+                )
+                okay = False
+
+            if (
+                output_type.cardinality.max is not None
+                and output_count > output_type.cardinality.max
+            ):
+                log.warning(
+                    f"rule {rule.name} created {output_count} outputs with type {output_type.type_def.name} but expected at most {output_type.cardinality.max}"
+                )
+                okay = False
+
+        for output in outputs:
+            output_type_name = output["type"]
+            resolved = type_by_name.get(output_type_name)
+            if resolved is None:
+                log.warning(
+                    f"rule {rule.name} created output with type {output_type_name} but that was not included in the output_types section of the rule"
+                )
+                continue
+
+            missing_fields = set(resolved.type_def.fields).difference(output.keys())
+            if len(missing_fields) > 0:
+                log.warning(
+                    f"output with type {output_type_name} from {rule.name} was missing properties: {', '.join(sorted(missing_fields))}"
+                )
+                okay = False
+
+            # extra fields are fine
+
+        return okay
 
     return is_outputs_good
 
@@ -84,7 +139,7 @@ def to_template(jinja2_env: Environment, rule: Rule, config: PropsType) -> Templ
         queries,
         predicates,
         rule.name,
-        output_matches_expectation=make_output_check(rule.output_expectations),
+        output_matches_expectation=make_output_check(rule),
     )
 
 
@@ -519,7 +574,9 @@ def get_type_check_failures(
     for artifact in artifacts:
         type_name = artifact.get("type")
         if type_name is None:
-            log.warning(f"Output artifact {artifact} is missing type field.")
+            failures.append(
+                f"Output artifact {artifact} is missing the required property: type"
+            )
             continue
         type_def = type_defs_by_name.get(type_name)
 
@@ -581,6 +638,57 @@ def main_loop(
     for type_def in j.get_type_defs():
         type_defs_by_name[type_def.name] = type_def
 
+    # The sequencer decides when rules get evaluated to create new rule executions
+    # (in particular, rules with "all" inputs wait until nothing else is running)
+    sequencer = create_sequencer(list(rules))
+    origins: Dict[int, RuleExecutionToStart] = {}
+
+    def get_next_executions(rule_name: str) -> List[RuleExecutionToStart]:
+        # only reports what would be new. Doesn't modify anything, because the
+        # sequencer may call this for rules whose executions it then doesn't use.
+        return [
+            RuleExecutionToStart(rule_name=transform, inputs=dict(inputs))
+            for transform, inputs in j.find_new_rule_executions(rule_name)
+        ]
+
+    def notify_sequencer(origin: RuleExecutionToStart, success: bool) -> None:
+        to_start = sequencer.next(
+            RuleCompletion(origin, success, []), get_next_executions
+        )
+        # create pending rule executions in the db for those the sequencer says to start,
+        # which is where the loop below picks them up.
+        for execution in to_start:
+            rule_exec = j.create_rule_execution(
+                execution.rule_name, tuple(execution.inputs.items())
+            )
+            execution.rule_execution_id = rule_exec.id
+            origins[rule_exec.id] = execution
+
+    def rule_execution_finished(rule_execution_id: Any, success: bool) -> None:
+        origin = origins.pop(rule_execution_id, None)
+        if origin is None:
+            log.warning(
+                "Sequencer was not tracking rule execution %s", rule_execution_id
+            )
+            return
+        notify_sequencer(origin, success)
+
+    # executions reattached from a previous invocation are already in progress
+    for e in executing:
+        reattached = j.get_rule_execution_by_execution_id(e.id)
+        if reattached is None:
+            continue
+        origin = RuleExecutionToStart(
+            rule_name=reattached.transform,
+            inputs=dict(reattached.inputs),
+            rule_execution_id=reattached.id,
+        )
+        origins[reattached.id] = origin
+        sequencer.in_progress.add(origin)
+
+    # create the initial set of rule executions
+    notify_sequencer(RuleExecutionToStart(add_if_missing_rule, {}), True)
+
     def get_pending():
         pending_jobs = j.get_pending()
         if skip_remaining:
@@ -632,12 +740,13 @@ def main_loop(
                 maxstart is not None and start_count >= maxstart
             ) or skip_remaining
             if len(executing) == 0 and (cannot_start_more or len(pending_jobs) == 0):
-                # now that we've completed everything, check for deferred jobs by marking them as ready.  If we have any, loop again
-                j.enable_deferred()
-                deferred_jobs = len(get_pending())
-                if deferred_jobs > 0 and not cannot_start_more:
-                    log.info("Marked deferred %d executions as ready", deferred_jobs)
-                    continue
+                # the sequencer evaluates the rules with "all" inputs once nothing else is
+                # in progress, so if we get here there's nothing left to do.
+                if not cannot_start_more and not sequencer.is_done():
+                    log.warning(
+                        "Nothing left to run, but sequencer still considers %d executions in progress",
+                        len(sequencer.in_progress),
+                    )
                 break
 
             did_useful_work = False
@@ -691,6 +800,9 @@ def main_loop(
                         "Resolved xrefs on rule, new version will be executed next pass"
                     )
                     timings.log(job.id, job.transform, "resolved_xrefs")
+                    # the rule execution was replaced because its input artifact changed.
+                    # Tell the sequencer so it re-evaluates the rules and creates the replacement
+                    rule_execution_finished(job.id, False)
                     continue
 
                 timings.log(job.id, job.transform, "preprocess_inputs")
@@ -714,6 +826,7 @@ def main_loop(
                         break
                     elif answer == "s":
                         job_ids_to_ignore.add(job.id)
+                        rule_execution_finished(job.id, False)
                         continue
                     elif answer == "S":
                         skip_remaining = True
@@ -791,11 +904,12 @@ def main_loop(
                     failure = get_type_check_failures(j, completion, type_defs_by_name)
 
                 if failure is not None:
-                    job_id = j.record_completed(timestamp, e.id, dep.STATUS_FAILED, {})
+                    job_id = j.record_completed(timestamp, e.id, dep.STATUS_FAILED, [])
                     failures.append(Failure(e.transform, e.job_dir))
                     debug_log.log_completed(job_id, dep.STATUS_FAILED, completion)
                     assert job is not None
                     timings.log(job_id, job.transform, "fail")
+                    rule_execution_finished(job_id, False)
                 elif completion is not None:
                     amended_outputs = _amend_outputs(completion, properties_to_add)
 
@@ -814,10 +928,9 @@ def main_loop(
                     success_count += 1
                     assert job is not None
                     timings.log(job_id, job.transform, "complete")
+                    rule_execution_finished(job_id, True)
 
                 did_useful_work = True
-
-            j.refresh_rules()
 
             if not did_useful_work:
                 time.sleep(0.5)
@@ -1051,7 +1164,7 @@ def reconcile_db(
     j: Jobs,
     rule_specifications: Dict[str, str],
     objs: List[PropsType],
-    type_defs: List[TypeDefStmt],
+    type_defs: Iterable[TypeDefStmt],
     force: Optional[bool] = None,
     print_missing_objs: bool = True,
 ) -> None:

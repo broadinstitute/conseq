@@ -18,14 +18,13 @@ from typing import (
     Sequence,
 )
 from .types import PropsType, BindingsDict, Obj
+from .errors import ArtifactTypeMismatch
 from conseq.db import get_cursor, transaction
 from conseq.timeit import timeblock
 from conseq.parser import TypeDefStmt
 import dataclasses
 
 log = logging.getLogger(__name__)
-
-DISABLE_AUTO_CREATE_RULES = False
 
 
 STATUS_STARTED = "started"
@@ -36,6 +35,7 @@ RE_STATUS_PENDING = "pending"
 RE_STATUS_STARTED = "started"
 RE_STATUS_COMPLETE = "complete"
 RE_STATUS_FAILED = "failed"
+# no longer assigned, but may exist in databases written by older versions
 RE_STATUS_DEFERRED = "deferred"
 
 PUBLIC_SPACE = "public"
@@ -111,7 +111,6 @@ class ObjSet:
     """
 
     def __init__(self) -> None:
-        self.add_listeners = []
         self.remove_listeners = []
         self.default_space = PUBLIC_SPACE
 
@@ -195,11 +194,6 @@ class ObjSet:
         id = c.lastrowid
         assert isinstance(id, int)
         signal_add_obj(id, space, props)
-
-        obj = Obj(id, space, timestamp, props)
-
-        for add_listener in self.add_listeners:
-            add_listener(obj)
 
         return id
 
@@ -404,32 +398,51 @@ class RuleSet:
             return None
         return rules[0]
 
-    def add_rule(self, space: str, inputs: Any, transform: str) -> int:
-        # first check to make sure rule isn't duplicated
+    def _lookup_existing(
+        self, inputs: Any, transform: str
+    ) -> Tuple[str, Optional[RuleExecution], bool]:
+        """Looks for an existing rule execution for these inputs. Does not modify anything.
+
+        Returns (key, existing rule execution or None, whether the existing one is equivalent
+        to the proposed one).
+        """
         key = self._mk_rule_natural_key(inputs, transform, False)
 
         existing_rules = self._find_rule_execs("key = ?", (key,))
-        if len(existing_rules) != 0:
-            existing_rule = existing_rules[0]
-            # now, "all" parameters get treated differently.  We allow all parameters to change a rule.  Compare
-            # this one and the existing rule with all parameters to see if we need to replace it.
+        if len(existing_rules) == 0:
+            return key, None, False
 
-            existing_key_with_all = self._mk_rule_natural_key(
-                existing_rule.inputs, existing_rule.transform, True
-            )
-            new_key_with_all = self._mk_rule_natural_key(inputs, transform, True)
+        existing_rule = existing_rules[0]
+        # now, "all" parameters get treated differently.  We allow all parameters to change a rule.  Compare
+        # this one and the existing rule with all parameters to see if we need to replace it.
+        existing_key_with_all = self._mk_rule_natural_key(
+            existing_rule.inputs, existing_rule.transform, True
+        )
+        new_key_with_all = self._mk_rule_natural_key(inputs, transform, True)
+        return key, existing_rule, existing_key_with_all == new_key_with_all
 
-            if existing_key_with_all == new_key_with_all:
-                return existing_rule.id
+    def add_rule(self, space: str, inputs: Any, transform: str) -> int:
+        rule_execution_id, _ = self.add_rule_and_report_new(space, inputs, transform)
+        return rule_execution_id
+
+    def add_rule_and_report_new(
+        self, space: str, inputs: Any, transform: str
+    ) -> Tuple[int, bool]:
+        """Adds a rule execution unless an equivalent one already exists.
+
+        Returns (rule execution id, True if a new row was created).
+        """
+        # first check to make sure rule isn't duplicated
+        key, existing_rule, is_equivalent = self._lookup_existing(inputs, transform)
+        if existing_rule is not None:
+            if is_equivalent:
+                return existing_rule.id, False
             else:
                 # key mismatches, meaning the all params must have changed.  Remove the existing and let the add
                 # continue
                 self.remove_rule(existing_rule.id)
 
         state = RE_STATUS_PENDING
-        for name, obj in inputs:
-            if not isinstance(obj, Obj):
-                state = RE_STATUS_DEFERRED
 
         c = get_cursor()
         c.execute(
@@ -457,7 +470,7 @@ class RuleSet:
         for add_rule_listener in self.add_rule_listeners:
             add_rule_listener(rule)
 
-        return rule_execution_id
+        return rule_execution_id, True
 
     def assert_db_sane(self):
         c = get_cursor()
@@ -499,13 +512,6 @@ class RuleSet:
 
     def get_pending(self) -> List[Any]:
         return self._find_rule_execs("state = ?", (RE_STATUS_PENDING,))
-
-    def enable_deferred(self) -> None:
-        c = get_cursor()
-        c.execute(
-            "UPDATE rule_execution SET state = ? WHERE state = ?",
-            (RE_STATUS_PENDING, RE_STATUS_DEFERRED),
-        )
 
     def started(self, rule_id, execution_id):
         c = get_cursor()
@@ -832,7 +838,7 @@ class Template:
         queries: Sequence[Union[ForEach, ForAll]],
         predicates: Sequence[Any],
         transform: str,
-        output_matches_expectation: Callable[[Any], bool] = lambda x: True,
+        output_matches_expectation: Callable[[List[Dict]], bool] = lambda x: True,
     ):
         self.foreach_queries = []
         self.forall_queries = []
@@ -846,38 +852,6 @@ class Template:
         self.predicates = predicates
         self.transform = transform
         self.output_matches_expectation = output_matches_expectation
-
-    def is_interested_in(self, obj):
-        assert isinstance(obj, Obj), "obj is of type {}".format(type(obj))
-        props = obj.props
-        assert isinstance(props, dict)
-
-        key_value_pairs = set()
-        for k, v in obj.props.items():
-            if isinstance(v, str):
-                key_value_pairs.add((k, v))
-
-        for q in self.foreach_queries + self.forall_queries:
-            matched = True
-            for k, v in q.const_constraints.items():
-                if isinstance(v, str):
-                    if (k, v) not in key_value_pairs:
-                        matched = False
-                        break
-                else:
-                    if k not in obj.props:
-                        matched = False
-                        break
-
-                    ov = obj.props[k]
-                    if isinstance(ov, dict):
-                        ov = list(ov.values())[0]
-                    if not v.match(ov):
-                        matched = False
-                        break
-            if matched:
-                return True
-        return False
 
     @property
     def name(self) -> str:
@@ -1032,13 +1006,10 @@ class Jobs:
             self.objects.initialize()
         object_history = ObjHistory()
         self.rule_set = RuleSet(object_history)
-        self.rule_templates = []
         self.rule_template_by_name = {}
-        self.add_new_obj_listener(self._object_added)
         self.objects.remove_listeners.append(self._object_removed)
         self.log = ExecutionLog(object_history)
         self.rule_allowed = lambda inputs, transform: True
-        self.pending_rules_to_evaluate = set()
 
     def has_template(self, rule_name):
         return rule_name in self.rule_template_by_name
@@ -1052,36 +1023,9 @@ class Jobs:
         self.rule_allowed = filter.rule_allowed
 
     def _object_removed(self, obj):
+        # rule executions which consumed the artifact are no longer valid
         for rule_id in self.rule_set.find_by_input(obj.id):
             self.rule_set.remove_rule(rule_id)
-
-        # forall might result in rules being recreated even without this input
-        new_rules = []
-        if not DISABLE_AUTO_CREATE_RULES:
-            for template in self.rule_templates:
-                if template.is_interested_in(obj):
-                    log.info("Need to refresh %s on next pass", template.transform)
-                    self.pending_rules_to_evaluate.add(template.transform)
-
-        for space, inputs, transform in new_rules:
-            self._add_rule(space, inputs, transform)
-
-    def _object_added(self, obj):
-        new_rules = []
-        if not DISABLE_AUTO_CREATE_RULES:
-            for template in self.rule_templates:
-                if template.is_interested_in(obj):
-                    self.pending_rules_to_evaluate.add(template.transform)
-
-        for space, inputs, transform in new_rules:
-            self._add_rule(space, inputs, transform)
-
-    def _add_rule(self, space: str, inputs: Any, transform: str) -> None:
-        if self.rule_allowed(inputs, transform):
-            self.rule_set.add_rule(space, inputs, transform)
-
-    def add_new_obj_listener(self, listener: Callable) -> None:
-        self.objects.add_listeners.append(listener)
 
     def transaction(self):
         return transaction(self.db)
@@ -1092,27 +1036,41 @@ class Jobs:
 
     def add_template(self, template: Template) -> None:
         with transaction(self.db):
-            self.rule_templates.append(template)
             self.rule_template_by_name[template.name] = template
 
-            new_rules = template.create_rules(self.objects)
-            for rule in new_rules:
-                self._add_rule(*rule)
-
-    def refresh_rules(self):
-        if len(self.pending_rules_to_evaluate) == 0:
-            return
-
+    def find_new_rule_executions(self, rule_name: str) -> List[Tuple[str, Any]]:
+        """Evaluates the rule against the current artifacts and returns (transform, inputs) for each
+        rule execution which doesn't exist yet. Does not modify the database. Pass the result to
+        create_rule_execution() to actually create them."""
         with transaction(self.db):
-            pending_rules_to_evaluate = self.pending_rules_to_evaluate
-            self.pending_rules_to_evaluate = set()
-            for template in self.rule_templates:
-                if template.transform not in pending_rules_to_evaluate:
+            template = self.rule_template_by_name[rule_name]
+            new_executions = []
+            for space, inputs, transform in template.create_rules(self.objects):
+                if not self.rule_allowed(inputs, transform):
                     continue
-                new_rules = template.create_rules(self.objects)
-                for rule in new_rules:
-                    self._add_rule(*rule)
-                    # log.info("Refreshed the following templates: %s, refresh_count=%s, added=%s", pending_rules_to_evaluate, refresh_count, add_executions)
+                _, _, is_equivalent_to_existing = self.rule_set._lookup_existing(
+                    inputs, transform
+                )
+                if not is_equivalent_to_existing:
+                    new_executions.append((transform, inputs))
+            return new_executions
+
+    def create_rule_execution(self, transform: str, inputs: Any) -> RuleExecution:
+        """Creates a pending rule execution (as identified by find_new_rule_executions())"""
+        with transaction(self.db):
+            rule_execution_id, created = self.rule_set.add_rule_and_report_new(
+                PUBLIC_SPACE, inputs, transform
+            )
+            assert created
+            rule_execution = self.rule_set.get(rule_execution_id)
+            assert rule_execution is not None
+            return rule_execution
+
+    def get_rule_execution_by_execution_id(
+        self, execution_id: int
+    ) -> Optional[RuleExecution]:
+        with transaction(self.db):
+            return self.rule_set.get_by_execution_id(execution_id)
 
     def get_existing_id(self, space, obj_props):
         # hardcoding default on space because "space" is no longer fully working. Really should get rid of it.
@@ -1206,10 +1164,6 @@ class Jobs:
         with transaction(self.db):
             return self.log.get_all()
 
-    def enable_deferred(self) -> None:
-        with transaction(self.db):
-            return self.rule_set.enable_deferred()
-
     def record_started(self, rule_id):
         assert isinstance(rule_id, int)
         with transaction(self.db):
@@ -1227,20 +1181,22 @@ class Jobs:
         self.log.record_completed(execution_id, new_status, interned_outputs)
         return self.rule_set.completed_execution(execution_id, new_status)
 
-    def record_completed(self, timestamp, execution_id, new_status, outputs):
+    def record_completed(
+        self, timestamp, execution_id, new_status, outputs: List[Dict[str, Any]]
+    ):
+        assert isinstance(outputs, list)
+
         with transaction(self.db):
             rule_exec = self.rule_set.get_by_execution_id(execution_id)
             if rule_exec is None:
                 log.warning("Could not find rule for execution id %s", execution_id)
-            else:
+            elif new_status == STATUS_COMPLETED:
+                # a failed execution doesn't have outputs, so only check the successful ones
                 rule_def = self.rule_template_by_name[rule_exec.transform]
-                for output in outputs:
-                    if not rule_def.output_matches_expectation(output):
-                        log.warning(
-                            'Output %s did not match any of the expected outputs on rule "%s"',
-                            output,
-                            rule_exec.transform,
-                        )
+                if not rule_def.output_matches_expectation(outputs):
+                    raise ArtifactTypeMismatch(
+                        f"Outputs {outputs} did not match output_types on rule {rule_exec.transform}"
+                    )
 
             interned_outputs = []
             for output in outputs:

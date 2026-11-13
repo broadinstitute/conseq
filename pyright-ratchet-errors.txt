@@ -5,7 +5,6 @@ __init__.py: error: Argument of type "Unknown | None" cannot be assigned to para
 __init__.py: error: Cannot assign to attribute "options" for class "Rule"
 __init__.py: error: Cannot assign to attribute "watch_regex" for class "Rule"
 __init__.py: error: Method "default" overrides class "JSONEncoder" in an incompatible manner
-commands.py: error: Argument of type "dict_values[Unknown, Unknown]" cannot be assigned to parameter "type_defs" of type "List[TypeDefStmt]" in function "reconcile_db"
 config.py: error: Argument of type "(x: Unknown) -> str" cannot be assigned to parameter "value" of type "(x: Unknown) -> NoReturn" in function "__setitem__"
 config.py: error: Argument of type "None" cannot be assigned to parameter "copy_to" of type "str" in function "__init__"
 config.py: error: Argument of type "Unknown | None" cannot be assigned to parameter "copy_to" of type "str" in function "__init__"
@@ -16,7 +15,6 @@ depexec.py: error: Argument of type "ClientExecution | ExecutionStub" cannot be 
 depexec.py: error: Argument of type "List[Artifact[Unknown]]" cannot be assigned to parameter "amended_outputs" of type "Dict[str, Any]" in function "_store_cached_result"
 depexec.py: error: Argument of type "List[ClientExecution]" cannot be assigned to parameter "executions" of type "List[Execution] | List[DelegateExecution]" in function "get_satisfiable_jobs"
 depexec.py: error: Argument of type "List[DelegateExecution]" cannot be assigned to parameter "executing" of type "List[ClientExecution]" in function "main_loop"
-depexec.py: error: Argument of type "dict_values[Unknown, Unknown]" cannot be assigned to parameter "type_defs" of type "List[TypeDefStmt]" in function "reconcile_db"
 depexec.py: error: Argument of type "int | Literal['norow']" cannot be assigned to parameter "job_id" of type "int | None" in function "log"
 depexec.py: error: Argument of type "str" cannot be assigned to parameter "script_body" of type "None" in function "expand_run"
 depexec.py: error: Cannot access attribute "get_external_id" for class "ExecutionStub"

@@ -1,8 +1,8 @@
 rule a:
-    outputs: {"name": "foo"}
+    outputs: {"type": "result", "name": "foo"}
     run "bash" with "echo hello"
 
 rule b:
     inputs: in={"name": "foo"}
-    outputs: {"name": "foo2"}
+    outputs: {"type": "result", "name": "foo2"}
     run "bash" with "echo bye"

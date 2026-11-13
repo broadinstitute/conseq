@@ -140,6 +140,10 @@ class depfileRules:
                 self.squoted_string(ctx)
 
     @tatsu.rule
+    def number(self, ctx: Ctx) -> Any:
+        ctx.pattern(r'[0-9]+')
+
+    @tatsu.rule
     def identifier(self, ctx: Ctx) -> Any:
         ctx.pattern(r'[A-Za-z]+[A-Za-z0-9_+-]*')
 
@@ -389,6 +393,13 @@ class depfileRules:
                     self.output_specs(ctx)
                 @α.option
                 def _(ctx: Ctx) -> Any:
+                    ctx.token('output_types')
+                    ctx.token(':')
+                    ctx.token('(')
+                    self.output_types(ctx)
+                    ctx.token(')')
+                @α.option
+                def _(ctx: Ctx) -> Any:
                     ctx.token('executor')
                     ctx.token(':')
                     self.identifier(ctx)
@@ -572,10 +583,20 @@ class depfileRules:
 
     @tatsu.rule
     def type_def_stmt(self, ctx: Ctx) -> Any:
-        ctx.token('type')
-        self.quotable_identifier(ctx)
-        ctx.token(':')
-        self.type_definition(ctx)
+        with ctx.choice() as α:
+            @α.option
+            def _(ctx: Ctx) -> Any:
+                ctx.token('type')
+                self.quotable_identifier(ctx)
+                ctx.token(':')
+                self.type_definition(ctx)
+            @α.option
+            def _(ctx: Ctx) -> Any:
+                ctx.token('type')
+                self.quotable_identifier(ctx)
+                ctx.token('(')
+                self.identifier_list(ctx)
+                ctx.token(')')
 
     @tatsu.rule
     def type_definition_component(self, ctx: Ctx) -> Any:
@@ -611,6 +632,56 @@ class depfileRules:
             def _(ctx: Ctx) -> Any:
                 ctx.token(',')
                 self.quotable_identifier(ctx)
+
+    @tatsu.rule
+    def cardinality_suffix(self, ctx: Ctx) -> Any:
+        with ctx.choice() as α:
+            @α.option
+            def _(ctx: Ctx) -> Any:
+                ctx.token('?')
+            @α.option
+            def _(ctx: Ctx) -> Any:
+                ctx.token('*')
+            @α.option
+            def _(ctx: Ctx) -> Any:
+                ctx.token('+')
+            @α.option
+            def _(ctx: Ctx) -> Any:
+                ctx.token('[')
+                self.number(ctx)
+                ctx.token(']')
+
+    @tatsu.rule
+    def output_type_name(self, ctx: Ctx) -> Any:
+        with ctx.choice() as α:
+            @α.option
+            def _(ctx: Ctx) -> Any:
+                ctx.pattern(r'[A-Za-z]+[A-Za-z0-9_-]*')
+            @α.option
+            def _(ctx: Ctx) -> Any:
+                self.quoted_string(ctx)
+
+    @tatsu.rule
+    def output_type(self, ctx: Ctx) -> Any:
+        with ctx.choice() as α:
+            @α.option
+            def _(ctx: Ctx) -> Any:
+                self.output_type_name(ctx)
+                self.cardinality_suffix(ctx)
+            @α.option
+            def _(ctx: Ctx) -> Any:
+                self.output_type_name(ctx)
+
+    @tatsu.rule
+    def output_types(self, ctx: Ctx) -> Any:
+        self.output_type(ctx)
+        with ctx.loopopt() as cl:
+            cl.expecting(',')
+
+            @cl.exp
+            def _(ctx: Ctx) -> Any:
+                ctx.token(',')
+                self.output_type(ctx)
 
     @tatsu.rule
     def declarations(self, ctx: Ctx) -> Any:

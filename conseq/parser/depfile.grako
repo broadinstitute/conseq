@@ -8,6 +8,7 @@ triple_squoted_string =    /'''(?:[^']|'{1,2}(?!'))+'''/ ;
 squoted_string = /'[^']*'/ ;
 quoted_string = triple_dbl_quoted_string | dbl_quoted_string | triple_squoted_string | squoted_string  ;
 
+number = /[0-9]+/ ;
 identifier = /[A-Za-z]+[A-Za-z0-9_+-]*/ ;
 
 # json grammar
@@ -83,6 +84,7 @@ file_list = quoted_string { "," quoted_string }*
 rule_parameters = ("inputs" ":" input_specs |
     "description" ":" quoted_string |
     "outputs" ":" output_specs |
+    "output_types" ":" "(" output_types ")" |
     "executor" ":" identifier json_obj |
     "executor" ":" identifier |
     "watch-regex" ":" quoted_string |
@@ -119,17 +121,34 @@ conditional = "if" condition:conditional_expr ":" true_body:declarations elif_cl
 
 quotable_identifier = identifier | quoted_string ;
 
-type_def_stmt = "type" quotable_identifier ":" type_definition ;
+# two forms of defining a type. Either
+#    type matrix-file:
+#      description: "..."
+#      fields: filename, label, size
+# or the shorter
+#    type matrix-file (filename, label, size)
+type_def_stmt = "type" quotable_identifier ":" type_definition
+    | "type" quotable_identifier "(" identifier_list ")"
+    ;
 type_definition_component = "description" ":" quoted_string |
                   "fields" ":" identifier_list ;
 type_definition = type_definition_component { type_definition_component } 
                   ;
 identifier_list = quotable_identifier {"," quotable_identifier}* ;
 
-# example (yaml like): 
-# type matrix-file:
-#   description: "xzxcvsdfasdf"
-#   fields: filename, label, size
+# The number of outputs of a type that a rule produces: ? is 0 or 1, * is any number, + is one or
+# more and [n] is exactly n. With no suffix it's exactly one.
+cardinality_suffix = "?" | "*" | "+" | "[" number "]" ;
+
+# Unlike "identifier", the name of a type in output_types can't contain a "+", because that would
+# make "x+" ambiguous. (A type with a "+" in its name can still be referenced by quoting it.)
+output_type_name = /[A-Za-z]+[A-Za-z0-9_-]*/ | quoted_string ;
+
+output_type = output_type_name cardinality_suffix
+    | output_type_name
+    ;
+
+output_types = output_type {"," output_type}* ;
 
 declarations = { rule | include_stmt | var_stmt | add_if_missing | exec_profile | remember_executed | conditional | eval_statement | type_def_stmt }+ ;
 
