@@ -12,7 +12,7 @@ import six
 
 from .execution_report import Failure
 from .sequencer import (
-    SimpleSequencer,
+    create_sequencer,
     RuleExecutionToStart,
     RuleCompletion,
     add_if_missing_rule,
@@ -589,7 +589,7 @@ def main_loop(
 
     # The sequencer decides when rules get evaluated to create new rule executions
     # (in particular, rules with "all" inputs wait until nothing else is running)
-    sequencer = SimpleSequencer(list(rules))
+    sequencer = create_sequencer(list(rules))
     origins: Dict[int, RuleExecutionToStart] = {}
 
     def get_next_executions(rule_name: str) -> List[RuleExecutionToStart]:

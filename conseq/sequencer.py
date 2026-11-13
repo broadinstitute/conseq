@@ -1,6 +1,10 @@
+import logging
+import os
 from typing import Callable, Optional
 from dataclasses import dataclass
 from .parser import Rule
+
+log = logging.getLogger(__name__)
 
 add_if_missing_rule = "__add_if_missing_rule__"
 
@@ -44,6 +48,9 @@ class Sequencer:
         event: RuleCompletion,
         get_next_executions: Callable[[str], list[RuleExecutionToStart]],
     ) -> list[RuleExecutionToStart]:
+        raise NotImplementedError()
+
+    def is_done(self) -> bool:
         raise NotImplementedError()
 
 
@@ -95,3 +102,49 @@ class SimpleSequencer(Sequencer):
 
     def is_done(self):
         return len(self.in_progress) == 0
+
+
+class BlockingSequencer(Sequencer):
+    """Not implemented yet.
+
+    The plan is to construct a DAG of the rules (see createDAG) and compute, for each rule, which
+    other rules block it from starting. A rule with an "all" input will wait until every rule which
+    could (transitively) produce its inputs has completed successfully, and then run, even if there
+    are no matching artifacts. That would replace SimpleSequencer's approach of deferring those
+    rules until nothing at all is in progress.
+    """
+
+    def __init__(self, rules: list[Rule]) -> None:
+        super().__init__(rules)
+
+    def next(
+        self,
+        event: RuleCompletion,
+        get_next_executions: Callable[[str], list[RuleExecutionToStart]],
+    ) -> list[RuleExecutionToStart]:
+        raise NotImplementedError("BlockingSequencer is not implemented yet")
+
+    def is_done(self):
+        raise NotImplementedError("BlockingSequencer is not implemented yet")
+
+
+SEQUENCER_ENV_VAR = "CONSEQ_SEQ"
+
+
+def create_sequencer(rules: list[Rule]) -> Sequencer:
+    """Creates the sequencer to use. SimpleSequencer unless CONSEQ_SEQ=blockers is set."""
+    choice = os.environ.get(SEQUENCER_ENV_VAR)
+    if choice == "blockers":
+        log.warning(
+            "%s=blockers is set. Using the experimental BlockingSequencer",
+            SEQUENCER_ENV_VAR,
+        )
+        return BlockingSequencer(rules)
+
+    if choice:
+        log.warning(
+            "Unrecognized value %r for %s, using the default sequencer",
+            choice,
+            SEQUENCER_ENV_VAR,
+        )
+    return SimpleSequencer(rules)
