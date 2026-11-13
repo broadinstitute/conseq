@@ -590,6 +590,33 @@ def test_forget(tmpdir):
     assert was_run("a2")
 
 
+def test_forget_rule_with_multiple_outputs(tmpdir):
+    # Regression test: forgetting a rule whose execution has several downstream
+    # objects used to fail with "Attempted to get object N, but did not exist"
+    # because remove_objects() was called once per object, inside a loop.
+    config = """
+        rule a1:
+            outputs: {"type":"a1", "name":"x"}, {"type":"a1", "name":"y"}, {"type":"a1", "name":"z"}
+    """
+    config_file = str(tmpdir.join("t.conseq"))
+    with open(config_file, "wt") as fd:
+        fd.write(config)
+
+    state_dir = str(tmpdir.join("state"))
+
+    from conseq.main import main
+
+    main(["--dir", state_dir, "run", config_file])
+    j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
+    assert len(j.find_objs("public", {"type": "a1"})) == 3
+
+    main(["--dir", state_dir, "forget", "a1"])
+
+    j = dep.open_job_db(os.path.join(state_dir, "db.sqlite3"))
+    assert len(j.find_objs("public", {"type": "a1"})) == 0
+    assert "a1" not in [x.transform for x in j.get_all_executions()]
+
+
 def test_debugrun(tmpdir):
     config = """
         add-if-missing {"type": "x", "value": "y"}
