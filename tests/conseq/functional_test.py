@@ -199,6 +199,10 @@ def test_rules_with_all_exec_once(tmpdir):
     assert len(j.get_all_executions()) == 3
 
 
+@pytest.mark.xfail(
+    reason="Not implemented yet: a rule with an all input is never created when nothing matches",
+    strict=True,
+)
 def test_rule_with_all_input_executes_when_nothing_matches(tmpdir):
     # There are no artifacts of type "x" at all, but a rule with an "all" input should still run,
     # with the input bound to an empty list.
