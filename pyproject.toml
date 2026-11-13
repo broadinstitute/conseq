@@ -18,6 +18,14 @@ google-cloud-storage = "^2.8.0"
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.3.1"
 pyright-ratchet = {git = "https://github.com/pgm/pyright-ratchet.git"}
+hypothesis = "^6.170.15"
+
+[tool.pytest.ini_options]
+markers = [
+    "fuzz: slow randomized scheduler tests (run with `pytest -m fuzz`, see doc/fuzz-testing.md)",
+]
+# the fuzz tests are excluded unless explicitly requested with -m fuzz
+addopts = "-m 'not fuzz'"
 
 [build-system]
 requires = ["poetry-core"]

@@ -688,7 +688,9 @@ supports TextMate grammars. So far we've got it worked with Visual Studio Code
 and PyCharm.
 
 ## Visual Studio Code installation
+
 `cd` into the conseq directory and run this command:
+
 ```
 code --install-extension extensions/conseq-lang/conseq-lang.vsix
 ```
@@ -698,7 +700,17 @@ code --install-extension extensions/conseq-lang/conseq-lang.vsix
 Use these instructions to import the `./conseq/extensions/conseq-lang` directory:
 https://www.jetbrains.com/help/pycharm/tutorial-using-textmate-bundles.html#importing-bundles
 
+## Running tests
+
+```
+poetry run pytest
+```
+
+There is also a set of randomized tests of the scheduler which are not run by default. See
+[doc/fuzz-testing.md](doc/fuzz-testing.md) for what they do and how to run them (`pytest -m fuzz`).
+
 # TODO
+
 - exec profile for sparkles
 - type defs
   - validate these on job completion

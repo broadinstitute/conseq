@@ -11,6 +11,7 @@ Conseq ("con-SIK") is a Python workflow tool: a `.conseq` file declares artifact
 - Install: `poetry install` (Python ^3.9; entry points `conseq` → `conseq.main:main`, `conseq-helper`)
 - Run all tests: `poetry run pytest`
 - Single test: `poetry run pytest tests/conseq/depexec_test.py::test_name`
+- Randomized scheduler tests are excluded from a plain `pytest`; run them with `poetry run pytest -m fuzz` (see `doc/fuzz-testing.md`)
 - Type check (CI uses a ratchet, errors may not increase): `poetry run pyright-ratchet run pyright` (baseline in `pyright-ratchet-errors.txt`)
 - Regenerate parser after editing `conseq/parser/depfile.grako`: `./compile_grammar.sh` (runs `tatsu` to produce `conseq/parser/depfile.py`; the generated file is checked in)
 - CLI: `conseq run file.conseq`, `conseq ls`, `conseq lsexec`, `conseq rm`, `conseq forget`, `conseq gc`, `conseq report`, `conseq export`, `conseq analyze`, etc. (subcommands defined in `conseq/cli/parser.py`, implemented in `conseq/cli/commands.py` / `conseq/commands.py`)
