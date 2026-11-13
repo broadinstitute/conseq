@@ -196,6 +196,23 @@ def test_rules_with_all_exec_once(tmpdir):
     assert len(j.get_all_executions()) == 3
 
 
+def test_rule_with_all_input_executes_when_nothing_matches(tmpdir):
+    # There are no artifacts of type "x" at all, but a rule with an "all" input should still run,
+    # with the input bound to an empty list.
+    j = run_conseq(
+        tmpdir,
+        """
+    rule a:
+        inputs: x=all {"type": "x"}
+        outputs: {"type": "out", "count": "{{ inputs.x|length }}"}
+    """,
+    )
+    assert [e.transform for e in j.get_all_executions()] == ["a"]
+    outputs = j.find_objs("public", {"type": "out"})
+    assert len(outputs) == 1
+    assert outputs[0].props["count"] == "0"
+
+
 def test_rule_executes_once(tmpdir):
     j = run_conseq(
         tmpdir,
