@@ -405,6 +405,20 @@ class RuleSet:
         return rules[0]
 
     def add_rule(self, space: str, inputs: Any, transform: str) -> int:
+        rule_execution_id, _ = self.add_rule_and_report_new(space, inputs, transform)
+        return rule_execution_id
+
+    def add_rule_and_report_new(
+        self, space: str, inputs: Any, transform: str, defer_for_all: bool = True
+    ) -> Tuple[int, bool]:
+        """Adds a rule execution unless an equivalent one already exists.
+
+        Returns (rule execution id, True if a new row was created).
+
+        If defer_for_all is False, rule executions with "all" inputs are created in the
+        pending state instead of deferred. (Used when something else, such as the Sequencer,
+        is responsible for deciding when "all" rules get evaluated.)
+        """
         # first check to make sure rule isn't duplicated
         key = self._mk_rule_natural_key(inputs, transform, False)
 
@@ -420,16 +434,17 @@ class RuleSet:
             new_key_with_all = self._mk_rule_natural_key(inputs, transform, True)
 
             if existing_key_with_all == new_key_with_all:
-                return existing_rule.id
+                return existing_rule.id, False
             else:
                 # key mismatches, meaning the all params must have changed.  Remove the existing and let the add
                 # continue
                 self.remove_rule(existing_rule.id)
 
         state = RE_STATUS_PENDING
-        for name, obj in inputs:
-            if not isinstance(obj, Obj):
-                state = RE_STATUS_DEFERRED
+        if defer_for_all:
+            for name, obj in inputs:
+                if not isinstance(obj, Obj):
+                    state = RE_STATUS_DEFERRED
 
         c = get_cursor()
         c.execute(
@@ -457,7 +472,7 @@ class RuleSet:
         for add_rule_listener in self.add_rule_listeners:
             add_rule_listener(rule)
 
-        return rule_execution_id
+        return rule_execution_id, True
 
     def assert_db_sane(self):
         c = get_cursor()
@@ -1039,6 +1054,9 @@ class Jobs:
         self.log = ExecutionLog(object_history)
         self.rule_allowed = lambda inputs, transform: True
         self.pending_rules_to_evaluate = set()
+        # If True, rule executions are created automatically as artifacts are added/removed.
+        # If False, the caller is responsible for calling create_new_rule_executions()
+        self.auto_create_rules = True
 
     def has_template(self, rule_name):
         return rule_name in self.rule_template_by_name
@@ -1057,7 +1075,7 @@ class Jobs:
 
         # forall might result in rules being recreated even without this input
         new_rules = []
-        if not DISABLE_AUTO_CREATE_RULES:
+        if self.auto_create_rules and not DISABLE_AUTO_CREATE_RULES:
             for template in self.rule_templates:
                 if template.is_interested_in(obj):
                     log.info("Need to refresh %s on next pass", template.transform)
@@ -1068,7 +1086,7 @@ class Jobs:
 
     def _object_added(self, obj):
         new_rules = []
-        if not DISABLE_AUTO_CREATE_RULES:
+        if self.auto_create_rules and not DISABLE_AUTO_CREATE_RULES:
             for template in self.rule_templates:
                 if template.is_interested_in(obj):
                     self.pending_rules_to_evaluate.add(template.transform)
@@ -1095,9 +1113,34 @@ class Jobs:
             self.rule_templates.append(template)
             self.rule_template_by_name[template.name] = template
 
-            new_rules = template.create_rules(self.objects)
-            for rule in new_rules:
-                self._add_rule(*rule)
+            if self.auto_create_rules:
+                new_rules = template.create_rules(self.objects)
+                for rule in new_rules:
+                    self._add_rule(*rule)
+
+    def create_new_rule_executions(self, rule_name: str) -> List[RuleExecution]:
+        """Evaluates the rule against the current artifacts and returns only the rule executions
+        which did not already exist. They are created in the pending state."""
+        with transaction(self.db):
+            template = self.rule_template_by_name[rule_name]
+            new_executions = []
+            for space, inputs, transform in template.create_rules(self.objects):
+                if not self.rule_allowed(inputs, transform):
+                    continue
+                rule_execution_id, created = self.rule_set.add_rule_and_report_new(
+                    space, inputs, transform, defer_for_all=False
+                )
+                if created:
+                    rule_execution = self.rule_set.get(rule_execution_id)
+                    assert rule_execution is not None
+                    new_executions.append(rule_execution)
+            return new_executions
+
+    def get_rule_execution_by_execution_id(
+        self, execution_id: int
+    ) -> Optional[RuleExecution]:
+        with transaction(self.db):
+            return self.rule_set.get_by_execution_id(execution_id)
 
     def refresh_rules(self):
         if len(self.pending_rules_to_evaluate) == 0:

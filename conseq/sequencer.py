@@ -1,14 +1,17 @@
-from typing import Callable
+from typing import Callable, Optional
 from dataclasses import dataclass
 from .parser import Rule
 
 add_if_missing_rule = "__add_if_missing_rule__"
 
 
-@dataclass
+# eq=False so instances hash and compare by identity. (`inputs` is a dict, which is
+# unhashable, and the sequencer tracks instances in a set.)
+@dataclass(eq=False)
 class RuleExecutionToStart:
     rule_name: str
     inputs: dict
+    rule_execution_id: Optional[int] = None
 
 
 @dataclass

@@ -11,6 +11,12 @@ from typing import Any, Callable, Dict, List, Tuple, Union, Optional
 import six
 
 from .execution_report import Failure
+from .sequencer import (
+    SimpleSequencer,
+    RuleExecutionToStart,
+    RuleCompletion,
+    add_if_missing_rule,
+)
 from .helper import Remote
 from jinja2.environment import Environment
 import os
@@ -581,6 +587,56 @@ def main_loop(
     for type_def in j.get_type_defs():
         type_defs_by_name[type_def.name] = type_def
 
+    # The sequencer decides when rules get evaluated to create new rule executions
+    # (in particular, rules with "all" inputs wait until nothing else is running)
+    assert (
+        not j.auto_create_rules
+    ), "main_loop requires Jobs.auto_create_rules to be False"
+    sequencer = SimpleSequencer(list(rules))
+    origins: Dict[int, RuleExecutionToStart] = {}
+
+    def get_next_executions(rule_name: str) -> List[RuleExecutionToStart]:
+        new_executions = []
+        for rule_exec in j.create_new_rule_executions(rule_name):
+            origin = RuleExecutionToStart(
+                rule_name=rule_exec.transform,
+                inputs=dict(rule_exec.inputs),
+                rule_execution_id=rule_exec.id,
+            )
+            origins[rule_exec.id] = origin
+            new_executions.append(origin)
+        return new_executions
+
+    def notify_sequencer(origin: RuleExecutionToStart, success: bool) -> None:
+        # the executions the sequencer returns have been created as pending rule
+        # executions in the db, which is where the loop below picks them up.
+        sequencer.next(RuleCompletion(origin, success, []), get_next_executions)
+
+    def rule_execution_finished(rule_execution_id: Any, success: bool) -> None:
+        origin = origins.pop(rule_execution_id, None)
+        if origin is None:
+            log.warning(
+                "Sequencer was not tracking rule execution %s", rule_execution_id
+            )
+            return
+        notify_sequencer(origin, success)
+
+    # executions reattached from a previous invocation are already in progress
+    for e in executing:
+        reattached = j.get_rule_execution_by_execution_id(e.id)
+        if reattached is None:
+            continue
+        origin = RuleExecutionToStart(
+            rule_name=reattached.transform,
+            inputs=dict(reattached.inputs),
+            rule_execution_id=reattached.id,
+        )
+        origins[reattached.id] = origin
+        sequencer.in_progress.add(origin)
+
+    # create the initial set of rule executions
+    notify_sequencer(RuleExecutionToStart(add_if_missing_rule, {}), True)
+
     def get_pending():
         pending_jobs = j.get_pending()
         if skip_remaining:
@@ -632,12 +688,13 @@ def main_loop(
                 maxstart is not None and start_count >= maxstart
             ) or skip_remaining
             if len(executing) == 0 and (cannot_start_more or len(pending_jobs) == 0):
-                # now that we've completed everything, check for deferred jobs by marking them as ready.  If we have any, loop again
-                j.enable_deferred()
-                deferred_jobs = len(get_pending())
-                if deferred_jobs > 0 and not cannot_start_more:
-                    log.info("Marked deferred %d executions as ready", deferred_jobs)
-                    continue
+                # the sequencer evaluates the rules with "all" inputs once nothing else is
+                # in progress, so if we get here there's nothing left to do.
+                if not cannot_start_more and not sequencer.is_done():
+                    log.warning(
+                        "Nothing left to run, but sequencer still considers %d executions in progress",
+                        len(sequencer.in_progress),
+                    )
                 break
 
             did_useful_work = False
@@ -691,6 +748,9 @@ def main_loop(
                         "Resolved xrefs on rule, new version will be executed next pass"
                     )
                     timings.log(job.id, job.transform, "resolved_xrefs")
+                    # the rule execution was replaced because its input artifact changed.
+                    # Tell the sequencer so it re-evaluates the rules and creates the replacement
+                    rule_execution_finished(job.id, False)
                     continue
 
                 timings.log(job.id, job.transform, "preprocess_inputs")
@@ -714,6 +774,7 @@ def main_loop(
                         break
                     elif answer == "s":
                         job_ids_to_ignore.add(job.id)
+                        rule_execution_finished(job.id, False)
                         continue
                     elif answer == "S":
                         skip_remaining = True
@@ -796,6 +857,7 @@ def main_loop(
                     debug_log.log_completed(job_id, dep.STATUS_FAILED, completion)
                     assert job is not None
                     timings.log(job_id, job.transform, "fail")
+                    rule_execution_finished(job_id, False)
                 elif completion is not None:
                     amended_outputs = _amend_outputs(completion, properties_to_add)
 
@@ -814,10 +876,9 @@ def main_loop(
                     success_count += 1
                     assert job is not None
                     timings.log(job_id, job.transform, "complete")
+                    rule_execution_finished(job_id, True)
 
                 did_useful_work = True
-
-            j.refresh_rules()
 
             if not did_useful_work:
                 time.sleep(0.5)
@@ -1145,6 +1206,8 @@ def main(
 
     db_path = os.path.join(state_dir, "db.sqlite3")
     j = dep.open_job_db(db_path)
+    # rule executions are created by the sequencer in main_loop, not as a side effect of adding artifacts
+    j.auto_create_rules = False
 
     # handle case where we explicitly state some templates to execute.  Make sure nothing else executes
     if len(forced_targets) > 0 or force_no_targets:
