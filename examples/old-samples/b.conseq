@@ -1,4 +1,4 @@
 rule c:
     inputs: in={"name": "foo"}
-    outputs: {"name": "foo3"}
+    outputs: {"type": "result", "name": "foo3"}
     run "bash" with "echo bye"

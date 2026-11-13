@@ -18,6 +18,7 @@ from typing import (
     Sequence,
 )
 from .types import PropsType, BindingsDict, Obj
+from .errors import ArtifactTypeMismatch
 from conseq.db import get_cursor, transaction
 from conseq.timeit import timeblock
 from conseq.parser import TypeDefStmt
@@ -837,7 +838,7 @@ class Template:
         queries: Sequence[Union[ForEach, ForAll]],
         predicates: Sequence[Any],
         transform: str,
-        output_matches_expectation: Callable[[Any], bool] = lambda x: True,
+        output_matches_expectation: Callable[[List[Dict]], bool] = lambda x: True,
     ):
         self.foreach_queries = []
         self.forall_queries = []
@@ -1180,20 +1181,22 @@ class Jobs:
         self.log.record_completed(execution_id, new_status, interned_outputs)
         return self.rule_set.completed_execution(execution_id, new_status)
 
-    def record_completed(self, timestamp, execution_id, new_status, outputs):
+    def record_completed(
+        self, timestamp, execution_id, new_status, outputs: List[Dict[str, Any]]
+    ):
+        assert isinstance(outputs, list)
+
         with transaction(self.db):
             rule_exec = self.rule_set.get_by_execution_id(execution_id)
             if rule_exec is None:
                 log.warning("Could not find rule for execution id %s", execution_id)
-            else:
+            elif new_status == STATUS_COMPLETED:
+                # a failed execution doesn't have outputs, so only check the successful ones
                 rule_def = self.rule_template_by_name[rule_exec.transform]
-                for output in outputs:
-                    if not rule_def.output_matches_expectation(output):
-                        log.warning(
-                            'Output %s did not match any of the expected outputs on rule "%s"',
-                            output,
-                            rule_exec.transform,
-                        )
+                if not rule_def.output_matches_expectation(outputs):
+                    raise ArtifactTypeMismatch(
+                        f"Outputs {outputs} did not match output_types on rule {rule_exec.transform}"
+                    )
 
             interned_outputs = []
             for output in outputs:

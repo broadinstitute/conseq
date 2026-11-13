@@ -9,13 +9,13 @@ exec-profile docker {
 }
 
 rule make_local:
-    outputs: {"name": "lowercase", "filename": {"$filename": "lower.txt"}}
+    outputs: {"type": "result", "name": "lowercase", "filename": {"$filename": "lower.txt"}}
     run "echo hello > lower.txt"
 
 rule example:
     executor: docker
     inputs: in={"name":"lowercase"}
-    outputs: {"name": "uppercase", "filename": {"$filename": "out.txt"}}
+    outputs: {"type": "result", "name": "uppercase", "filename": {"$filename": "out.txt"}}
     run "python" with """
         body = open("{{inputs.in.filename}}", "rt").read()
         with open("out.txt", "wt") as fd:

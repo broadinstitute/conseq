@@ -508,3 +508,69 @@ def test_parse_rule_with_executor_params():
     assert isinstance(r, parser.Rule)
     assert r.executor == "executor_name"
     assert r.executor_parameters == {"param1": "1", "param2": "2"}
+
+
+def test_type_def_short_form():
+    statements = parser.parse_str("type sample (name, size)")
+    assert statements == [TypeDefStmt("sample", None, ["name", "size"])]
+
+
+def test_parse_rule_with_output_types():
+    statements = parser.parse_str(
+        """
+        rule A:
+            output_types: ( a, thing )
+            run "echo hello"
+        """
+    )
+    r = statements[0]
+    assert [(x.type, x.cardinality.min, x.cardinality.max) for x in r.output_types] == [
+        ("a", 1, 1),
+        ("thing", 1, 1),
+    ]
+    assert r.outputs is None
+
+
+def test_parse_rule_with_cardinality_output_types():
+    statements = parser.parse_str(
+        """
+        rule A:
+            output_types: ( a?, b*, c+, d[3], e[12] )
+            run "echo hello"
+        """
+    )
+    r = statements[0]
+    assert [(x.type, x.cardinality.min, x.cardinality.max) for x in r.output_types] == [
+        ("a", 0, 1),
+        ("b", 0, None),
+        ("c", 1, None),
+        ("d", 3, 3),
+        ("e", 12, 12),
+    ]
+
+
+def test_parse_rule_with_quoted_output_type():
+    # a quoted type name can contain characters (like "+") which would otherwise be confused
+    # with a cardinality
+    statements = parser.parse_str(
+        """
+        rule A:
+            output_types: ( "a+b"*, "plain" )
+            run "echo hello"
+        """
+    )
+    r = statements[0]
+    assert [(x.type, x.cardinality.min, x.cardinality.max) for x in r.output_types] == [
+        ("a+b", 0, None),
+        ("plain", 1, 1),
+    ]
+
+
+def test_plus_is_still_allowed_in_identifiers():
+    statements = parser.parse_str(
+        """
+        rule a+b:
+            outputs: {"type": "x"}
+        """
+    )
+    assert statements[0].name == "a+b"

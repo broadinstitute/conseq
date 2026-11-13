@@ -28,6 +28,30 @@ class TypeDefStmt:
 
 
 @dataclass
+class Cardinality:
+    """The number of artifacts of a type which a rule produces. max is None if unbounded."""
+
+    min: int
+    max: Optional[int]
+
+
+@dataclass
+class OutputType:
+    """An entry in a rule's `output_types`, which refers to a type by name."""
+
+    type: str
+    cardinality: Cardinality
+
+
+@dataclass
+class ResolvedOutputType:
+    """An OutputType where the name of the type has been resolved to its definition"""
+
+    type_def: TypeDefStmt
+    cardinality: Cardinality
+
+
+@dataclass
 class TypeDefFields:
     fields: List[str]
 
@@ -131,7 +155,8 @@ class Rule:
         self.publish_location = None
         self.cache_key_constructor = []
         self.uses_files = []
-        self.output_expectations = None
+        self.output_types: Optional[List[OutputType]] = None
+        self.resolved_output_types: Optional[List[ResolvedOutputType]] = None
 
     def to_json(self):
         return json.dumps(
@@ -296,6 +321,8 @@ class Semantics(object):
                 rule.inputs = statement[2]
             elif statement[0] == "outputs":
                 rule.outputs = statement[2]
+            elif statement[0] == "output_types":
+                rule.output_types = statement[3]
             elif statement[0] == "options":
                 # print("----> options", statement)
                 options = [statement[2]]
@@ -354,7 +381,41 @@ class Semantics(object):
         return specs
 
     def type_def_stmt(self, ast):
-        return TypeDefStmt(ast[1], ast[3].description, ast[3].fields)
+        if ast[2] == ":":
+            # type name: description: "...", fields: a, b
+            return TypeDefStmt(ast[1], ast[3].description, ast[3].fields)
+        else:
+            # type name (a, b)
+            assert ast[2] == "("
+            return TypeDefStmt(ast[1], None, ast[3])
+
+    def number(self, ast):
+        return int(ast)
+
+    def cardinality_suffix(self, ast):
+        if ast == "+":
+            return Cardinality(1, None)
+        elif ast == "*":
+            return Cardinality(0, None)
+        elif ast == "?":
+            return Cardinality(0, 1)
+        elif ast[0] == "[" and ast[2] == "]":
+            return Cardinality(ast[1], ast[1])
+        else:
+            raise Exception(f"Unknown cardinality: {ast}")
+
+    def output_type(self, ast):
+        if isinstance(ast, str):
+            # no suffix, so exactly one
+            return OutputType(ast, Cardinality(1, 1))
+        else:
+            return OutputType(ast[0], ast[1])
+
+    def output_types(self, ast):
+        output_types = [ast[0]]
+        for x in ast[1]:
+            output_types.append(x[1])
+        return output_types
 
     def var_stmt(self, ast):
         return LetStatement(ast[1], ast[3])

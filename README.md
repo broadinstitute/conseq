@@ -249,6 +249,9 @@ For example to write an inline R script you could write:
 Most commonly we specify an "outputs:" section on the rule which lists the key/value pairs on the artifacts which
 should be published back to the repo upon successful completion.
 
+Every artifact published by a rule must have a `type` property. If an execution produces an artifact
+without one, the execution is marked as failed and none of its outputs are published.
+
 We can use "$filename" if we want to publish a path to a file that we've emitted.
 
 The reason filenames are handled differently from generic strings is for the following reasons:
@@ -270,6 +273,86 @@ rule simple:
 ```
 
 Alternatively, if the artifacts can't be determined ahead of time, we can have one of our run statements write a "results.json" file with the artifacts in it. Conseq will attempt to part that file and read the artifacts if the task completes successfully.
+
+### Types and output_types
+
+A rule can declare what kinds of artifacts it produces. This documents the rule, and conseq
+checks the artifacts the rule publishes against the declaration when the rule completes.
+
+#### Defining types
+
+A type is a name and the list of properties which artifacts of that type must have. Types are
+usually defined at the top of the conseq file:
+
+```
+type matrix_file (filename, label)
+```
+
+Equivalently, a type can be given a description:
+
+```
+type matrix_file:
+    description: "A matrix of values"
+    fields: filename, label
+```
+
+An artifact "has" a type when its `type` property is the name of the type. Any artifact with a defined
+type must have all of the type's fields when a rule publishes it. If it doesn't, that execution is
+marked as failed. (This applies whether or not the rule has an `output_types` section.)
+
+#### Declaring a rule's output types
+
+Use `output_types` in place of an "outputs" section, to list the types of artifacts the rule
+produces:
+
+```
+type matrix_file (filename, label)
+type report (filename)
+
+rule make_matrices:
+    inputs: data={"type": "raw"}
+    output_types: (matrix_file+, report)
+    run "python" with "..."
+```
+
+The artifacts themselves are still published as usual: by listing them in an "outputs" section
+(which can be used together with `output_types`) or, as in the example above, by the run statement
+writing a `results.json` file.
+
+Each type in the list can be followed by the number of artifacts of that type which the rule
+should produce:
+
+| Syntax      | Meaning                    |
+| ----------- | -------------------------- |
+| `report`    | exactly one                |
+| `report?`   | zero or one                |
+| `report*`   | any number, including zero |
+| `report+`   | one or more                |
+| `report[3]` | exactly three              |
+
+In the example above, `make_matrices` must produce at least one `matrix_file` and exactly one `report`.
+
+A type name which contains characters other than letters, digits, `_` and `-` can be quoted,
+for example `"my+type"*`.
+
+Every type listed in `output_types` must be defined with a `type` statement, otherwise conseq reports an
+error when it reads the file.
+
+#### What is checked
+
+When an execution completes successfully, conseq checks that:
+
+- the number of artifacts of each listed type is within the limits given. If not, the run stops with an
+  `ArtifactTypeMismatch` error.
+- each artifact has a `type` property. If not, the execution is marked as failed.
+- each artifact has all of the fields of its type. If not, the execution is marked as failed.
+
+Artifacts of a type which isn't listed in `output_types` cause a warning, but are otherwise accepted.
+Executions which fail aren't checked against the cardinalities, since they have no outputs.
+
+If a rule has neither an "outputs" nor an "output_types" section (and isn't a `publish` rule), conseq prints a warning
+when the file is read, because it has no way to know what the rule will produce. If a rule
+really does not produce any artifacts, write `outputs: none`.
 
 ### References to files
 

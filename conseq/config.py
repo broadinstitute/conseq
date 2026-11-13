@@ -1,13 +1,13 @@
 import os
 import textwrap
-from typing import Optional
+from typing import Dict, Optional
 
 from conseq import parser
 from conseq.hashcache import HashCache
 from conseq.template import LazyConfig
 from conseq.template import create_jinja2_env, render_template
 from conseq.template import expand_dict
-from conseq.parser import Rule
+from conseq.parser import ResolvedOutputType, Rule, TypeDefStmt
 import logging
 
 log = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ class Rules:
         self.rule_by_name = {}
         self.vars = {}
         self.objs = []
-        self.types = {}
+        self.types: Dict[str, TypeDefStmt] = {}
         self.exec_clients = {}
         self.remember_executed = []
         self.jinja2_env = create_jinja2_env()
@@ -216,6 +216,14 @@ def _eval_stmts(statements: List[Any], context: EvalContext):
             dec.inputs = inputs
 
             dec.filename = context.filename
+            if (
+                not dec.is_publish_rule
+                and dec.outputs is None
+                and dec.output_types is None
+            ):
+                log.warning(
+                    f"rule {dec.name} has neither an outputs section nor an output_types section"
+                )
             rules.set_rule(dec.name, dec)
 
 
@@ -299,7 +307,27 @@ def read_deps(filename, hashcache, jinja2_env, initial_vars={}) -> Rules:
     statements = parser.parse(filename)
     context = EvalContext(rules, filename, hashcache, jinja2_env)
     _eval_stmts(statements, context)
+    _resolve_output_types(rules)
     return rules
+
+
+def _resolve_output_types(rules: Rules) -> None:
+    """Look up the type definitions which each rule's `output_types` refer to"""
+    for rule in rules:
+        if rule.output_types is None:
+            continue
+
+        resolved_output_types = []
+        for output_type in rule.output_types:
+            type_def = rules.types.get(output_type.type)
+            if type_def is None:
+                raise Exception(
+                    f"Rule {rule.name} referenced {output_type.type} in output_types, but that type is undefined"
+                )
+            resolved_output_types.append(
+                ResolvedOutputType(type_def, output_type.cardinality)
+            )
+        rule.resolved_output_types = resolved_output_types
 
 
 def read_rules(

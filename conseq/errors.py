@@ -1,0 +1,2 @@
+class ArtifactTypeMismatch(Exception):
+    pass
