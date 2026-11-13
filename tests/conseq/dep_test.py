@@ -1,6 +1,15 @@
 from conseq import dep
 
 
+def create_executions_for_all_rules(j):
+    """Evaluate every rule against the current artifacts, returning the new rule executions"""
+    new_executions = []
+    for rule_name in list(j.rule_template_by_name.keys()):
+        for transform, inputs in j.find_new_rule_executions(rule_name):
+            new_executions.append(j.create_rule_execution(transform, inputs))
+    return new_executions
+
+
 def test_limit_to_rule(tmpdir):
     jobdb = str(tmpdir.join("db"))
 
@@ -21,12 +30,17 @@ def test_limit_to_rule(tmpdir):
     j.add_template(template2)
     j.add_template(template3)
 
-    # After adding those templates, we should have only created an execution for template1
+    # templates don't create anything until they're evaluated
+    assert len(j.get_pending()) == 0
+
+    # After evaluating those templates, we should have only created an execution for template1
+    create_executions_for_all_rules(j)
     assert len(j.get_pending()) == 1
 
     # however if we add an object, template3 can also execute
     j.add_obj("public", 1, dict(type="a"))
-    len(j.get_pending()) == 2
+    create_executions_for_all_rules(j)
+    assert len(j.get_pending()) == 2
 
 
 def test_overwrite_obj(tmpdir):
@@ -39,7 +53,7 @@ def test_overwrite_obj(tmpdir):
     id1 = j.add_obj("public", 1, {"A": "a", "mut": {"$value": "1"}})
     objs = j.find_objs("public", {"A": "a"})
     assert len(objs) == 1
-    j.refresh_rules()
+    create_executions_for_all_rules(j)
     assert len(j.get_pending()) == 1
     assert len(j.get_all_executions()) == 0
     rule_exec_id1 = j.get_pending()[0].id
@@ -48,7 +62,7 @@ def test_overwrite_obj(tmpdir):
     id2 = j.add_obj("public", 2, {"A": "a", "mut": {"$value": "2"}})
     objs = j.find_objs("public", {"A": "a"})
     assert len(objs) == 1
-    j.refresh_rules()
+    create_executions_for_all_rules(j)
     assert len(j.get_pending()) == 1
     # there should still only be a single rule, but it should be a new rule with the new input
     rule_exec_id2 = j.get_pending()[0].id
@@ -72,6 +86,45 @@ def test_overwrite_obj(tmpdir):
 # foreach avana_lib where avana_lib.type = "crispr_dataset" and avana_lib.library = "Avana" withall gecko_libs where gecko_libs.library = "Gecko"
 
 
+def test_only_new_executions_are_returned(tmpdir):
+    j = dep.open_job_db(str(tmpdir.join("db")))
+    j.add_template(
+        dep.Template([dep.ForEach("contexts", dict(type="contexts"))], [], "Make")
+    )
+
+    j.add_obj("public", 1, dict(type="contexts", name="a"))
+    new = j.find_new_rule_executions("Make")
+    assert len(new) == 1
+    # finding doesn't create anything, so it keeps reporting the same thing
+    assert len(j.get_pending()) == 0
+    assert len(j.find_new_rule_executions("Make")) == 1
+
+    j.create_rule_execution(*new[0])
+    assert len(j.get_pending()) == 1
+    # once created, it's no longer reported as new
+    assert len(j.find_new_rule_executions("Make")) == 0
+
+    j.add_obj("public", 1, dict(type="contexts", name="b"))
+    assert len(j.find_new_rule_executions("Make")) == 1
+
+
+def test_all_input_rules_are_pending(tmpdir):
+    j = dep.open_job_db(str(tmpdir.join("db")))
+    j.add_template(
+        dep.Template([dep.ForAll("things", dict(type="thing"))], [], "Merge")
+    )
+
+    j.add_obj("public", 1, dict(type="thing", name="a"))
+    j.add_obj("public", 1, dict(type="thing", name="b"))
+    new = j.find_new_rule_executions("Merge")
+    assert len(new) == 1
+    rule_exec = j.create_rule_execution(*new[0])
+    assert len(rule_exec.inputs) == 1
+    assert len(rule_exec.inputs[0][1]) == 2
+    assert rule_exec.state == dep.RE_STATUS_PENDING
+    assert len(j.get_pending()) == 1
+
+
 def test_foreach(tmpdir):
     jobdb = str(tmpdir.join("db"))
 
@@ -85,10 +138,10 @@ def test_foreach(tmpdir):
         j.add_template(t)
 
     j.add_obj("public", 1, dict(type="contexts", name="a"))
-    j.refresh_rules()
+    create_executions_for_all_rules(j)
     assert len(j.get_pending()) == 1
     j.add_obj("public", 1, dict(type="contexts", name="b"))
-    j.refresh_rules()
+    create_executions_for_all_rules(j)
     assert len(j.get_pending()) == 2
 
 
@@ -105,7 +158,7 @@ def test_input_changed(tmpdir):
         j.add_template(t)
 
     j.add_obj("public", 1, dict(type="contexts", name="a"))
-    j.refresh_rules()
+    create_executions_for_all_rules(j)
     pending = j.get_pending()
     assert len(pending) == 1
     exec_id = j.record_started(pending[0].id)
@@ -116,12 +169,12 @@ def test_input_changed(tmpdir):
         [dict(name="a", type="context"), dict(name="b", type="context")],
     )
 
-    j.refresh_rules()
+    create_executions_for_all_rules(j)
     pending = j.get_pending()
     assert len(pending) == 0
 
     j.add_obj("public", 2, dict(type="contexts", name="a"))
-    j.refresh_rules()
+    create_executions_for_all_rules(j)
     assert len(j.get_pending()) == 1
 
 
@@ -139,7 +192,7 @@ def test_completion(tmpdir):
         j.add_template(t)
 
     j.add_obj("public", 1, dict(type="contexts", name="a"))
-    j.refresh_rules()
+    create_executions_for_all_rules(j)
     pending = j.get_pending()
     assert len(pending) == 1
 
@@ -153,7 +206,7 @@ def test_completion(tmpdir):
         [dict(name="a", type="context"), dict(name="b", type="context")],
     )
 
-    j.refresh_rules()
+    create_executions_for_all_rules(j)
     assert len(j.get_pending()) == 2
     for p in j.get_pending():
         assert p.transform == "PerContext"
@@ -210,7 +263,7 @@ def test_stuff(tmpdir):
     j.add_obj("public", 1, dict(type="crispr_dataset", library="Avana"))
     j.add_obj("public", 1, dict(type="crispr_dataset", library="Gecko"))
 
-    j.refresh_rules()
+    create_executions_for_all_rules(j)
     for pending in j.get_pending():
         execute(pending.id, pending.transform, pending.inputs)
 

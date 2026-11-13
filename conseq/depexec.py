@@ -589,28 +589,29 @@ def main_loop(
 
     # The sequencer decides when rules get evaluated to create new rule executions
     # (in particular, rules with "all" inputs wait until nothing else is running)
-    assert (
-        not j.auto_create_rules
-    ), "main_loop requires Jobs.auto_create_rules to be False"
     sequencer = SimpleSequencer(list(rules))
     origins: Dict[int, RuleExecutionToStart] = {}
 
     def get_next_executions(rule_name: str) -> List[RuleExecutionToStart]:
-        new_executions = []
-        for rule_exec in j.create_new_rule_executions(rule_name):
-            origin = RuleExecutionToStart(
-                rule_name=rule_exec.transform,
-                inputs=dict(rule_exec.inputs),
-                rule_execution_id=rule_exec.id,
-            )
-            origins[rule_exec.id] = origin
-            new_executions.append(origin)
-        return new_executions
+        # only reports what would be new. Doesn't modify anything, because the
+        # sequencer may call this for rules whose executions it then doesn't use.
+        return [
+            RuleExecutionToStart(rule_name=transform, inputs=dict(inputs))
+            for transform, inputs in j.find_new_rule_executions(rule_name)
+        ]
 
     def notify_sequencer(origin: RuleExecutionToStart, success: bool) -> None:
-        # the executions the sequencer returns have been created as pending rule
-        # executions in the db, which is where the loop below picks them up.
-        sequencer.next(RuleCompletion(origin, success, []), get_next_executions)
+        to_start = sequencer.next(
+            RuleCompletion(origin, success, []), get_next_executions
+        )
+        # create pending rule executions in the db for those the sequencer says to start,
+        # which is where the loop below picks them up.
+        for execution in to_start:
+            rule_exec = j.create_rule_execution(
+                execution.rule_name, tuple(execution.inputs.items())
+            )
+            execution.rule_execution_id = rule_exec.id
+            origins[rule_exec.id] = execution
 
     def rule_execution_finished(rule_execution_id: Any, success: bool) -> None:
         origin = origins.pop(rule_execution_id, None)
@@ -1206,8 +1207,6 @@ def main(
 
     db_path = os.path.join(state_dir, "db.sqlite3")
     j = dep.open_job_db(db_path)
-    # rule executions are created by the sequencer in main_loop, not as a side effect of adding artifacts
-    j.auto_create_rules = False
 
     # handle case where we explicitly state some templates to execute.  Make sure nothing else executes
     if len(forced_targets) > 0 or force_no_targets:
