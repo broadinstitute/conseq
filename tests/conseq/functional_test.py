@@ -374,11 +374,11 @@ def test_regexp_query_expands_var(tmpdir):
     j = run_conseq(
         tmpdir,
         """
-    let samplevar="thing"
+    let samplevar="x"
     rule a:
-        outputs: {"type": "thing"}
+        outputs: {"type": "thing", "var": "x"}
     rule b:
-        inputs: in={"type" ~ "{{config.samplevar}}"}
+        inputs: in={"type": "thing", "var" ~ "{{config.samplevar}}"}
         outputs: {"type": "otherthing"}
     """,
     )

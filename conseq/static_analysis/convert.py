@@ -30,7 +30,8 @@ def _convert_input(input_spec) -> Binding:
         # else (a query variable shared with another input, a template which depends on the
         # config, a file reference) is left out, which means the input matches more artifacts.
         if isinstance(value, RegEx):
-            constraints.append(Pair(key, value))
+            if not _is_template(value.expression):
+                constraints.append(Pair(key, value))
         elif isinstance(value, str) and not _is_template(value):
             constraints.append(Pair(key, value))
 

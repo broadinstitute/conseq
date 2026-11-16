@@ -113,14 +113,16 @@ class BlockingSequencer(Sequencer):
     The rules are arranged in a graph (see createDAG) where there's an edge from a rule to each rule
     which consumes something it could produce. Then:
 
-      * rules without any "all" input are evaluated whenever anything completes, because each new
-        artifact simply results in new executions.
+      * rules without any "all" input are evaluated whenever a rule directly upstream of them
+        completes, because each new artifact simply results in new executions. (Only those rules
+        can have new work, so the rest aren't evaluated. Everything is evaluated at the start, and
+        when an execution is superseded.)
       * a rule with an "all" input is evaluated once all of the rules directly upstream of it have
         "settled". It's evaluated even if it has no matching artifacts, in which case the input is
         empty.
 
-    A rule is settled when all of the rules upstream of it are settled, it has been evaluated, and
-    none of its executions are in progress. (So being settled is transitive: all rules
+    A rule is settled when all of the rules upstream of it are settled, it has been evaluated since
+    the last time anything upstream of it completed, and none of its executions are in progress. (So being settled is transitive: all rules
     which could contribute to the rule's inputs, however indirectly, have finished.)
 
     A rule with an execution which failed never settles during this run, so everything which
@@ -148,7 +150,15 @@ class BlockingSequencer(Sequencer):
             )
             for name, blockers in blockers_by_name.items()
         }
+        # the rules which directly consume something each rule could produce
+        self.downstream: dict[str, list[str]] = {name: [] for name in self.upstream}
+        for name, upstream_names in self.upstream.items():
+            for upstream_name in upstream_names:
+                self.downstream.setdefault(upstream_name, []).append(name)
         self.order = self._topological_order(by_name.keys())
+        # rules which need to be evaluated, because something which could feed them has
+        # completed since they were last evaluated. Initially that's every rule.
+        self.dirty: set[str] = set(self.order)
         self.failed_rules: set[str] = set()
         # for tests and diagnostics: the rules which were settled as of the last call to next()
         self.settled: set[str] = set()
@@ -175,10 +185,20 @@ class BlockingSequencer(Sequencer):
         event: RuleCompletion,
         get_next_executions: Callable[[str], list[RuleExecutionToStart]],
     ) -> list[RuleExecutionToStart]:
-        if event.origin.rule_name != add_if_missing_rule:
+        completed_rule = event.origin.rule_name
+        if completed_rule == add_if_missing_rule or event.superseded:
+            # At the start (add-if-missing artifacts) anything could have new work. A
+            # superseded execution means an input artifact was rewritten, which can affect the
+            # rule itself and its siblings, so rather than be clever, re-evaluate everything.
+            self.dirty.update(self.order)
+        else:
+            # only the rules which consume what the completed rule produces can have new work
+            self.dirty.update(self.downstream.get(completed_rule, []))
+
+        if completed_rule != add_if_missing_rule:
             self.in_progress.remove(event.origin)
             if not event.success and not event.superseded:
-                self.failed_rules.add(event.origin.rule_name)
+                self.failed_rules.add(completed_rule)
 
         in_progress_count: dict[str, int] = {}
         for execution in self.in_progress:
@@ -194,12 +214,17 @@ class BlockingSequencer(Sequencer):
             upstream_settled = all(u in settled for u in self.upstream[name])
 
             if self.has_all_input[name] and not upstream_settled:
-                # it's too early to evaluate this rule
+                # it's too early to evaluate this rule. (It stays dirty, so it gets evaluated
+                # once its upstream settles.)
                 continue
 
-            executions = get_next_executions(name)
-            new_executions.extend(executions)
-            in_progress_count[name] = in_progress_count.get(name, 0) + len(executions)
+            if name in self.dirty:
+                self.dirty.discard(name)
+                executions = get_next_executions(name)
+                new_executions.extend(executions)
+                in_progress_count[name] = in_progress_count.get(name, 0) + len(
+                    executions
+                )
 
             if (
                 upstream_settled

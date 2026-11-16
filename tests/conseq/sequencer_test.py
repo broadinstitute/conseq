@@ -218,6 +218,71 @@ def test_rules_without_all_inputs_are_always_evaluated(tmpdir):
     assert {"a", "b"} <= set(h.evaluated)
 
 
+BRANCHES = """
+rule a:
+    outputs: {"type": "a"}
+rule b:
+    outputs: {"type": "b"}
+rule a2:
+    inputs: x={"type": "a"}
+    outputs: {"type": "a2"}
+rule b2:
+    inputs: x={"type": "b"}
+    outputs: {"type": "b2"}
+rule c:
+    inputs: xs=all {"type": "a2"}, ys=all {"type": "b2"}
+    outputs: {"type": "c"}
+"""
+
+
+def test_only_consumers_of_the_completed_rule_are_evaluated(tmpdir):
+    h = Harness(BlockingSequencer(load_rules(tmpdir, BRANCHES)))
+    h.offer("a")
+    h.offer("b")
+    assert sorted(h.start()) == ["a", "b"]
+    assert {"a", "b", "a2", "b2"} <= set(h.evaluated)
+
+    h.offer("a2")
+    assert h.finish("a") == ["a2"]
+    assert h.evaluated == ["a2"]
+
+    # a2 completing only affects c, which still has to wait for b's side
+    assert h.finish("a2") == []
+    assert h.evaluated == []
+
+    # b2 has no work, so everything upstream of c has settled and c is evaluated too
+    h.offer("c")
+    assert h.finish("b") == ["c"]
+    assert h.evaluated == ["b2", "c"]
+
+    # c completing has no consumers, so nothing is evaluated
+    assert h.finish("c") == []
+    assert h.evaluated == []
+    assert h.sequencer.is_done()
+
+
+def test_all_rule_is_evaluated_when_upstream_settles_without_a_direct_completion(
+    tmpdir,
+):
+    # c's direct upstream (b) never runs anything. c becomes eligible when a finishes, even
+    # though a doesn't feed c directly.
+    h = Harness(BlockingSequencer(load_rules(tmpdir, CHAIN)))
+    h.offer("a")
+    h.start()
+    h.offer("c")
+    assert h.finish("a") == ["c"]
+    assert h.evaluated == ["b", "c"]
+
+
+def test_superseded_execution_re_evaluates_everything(tmpdir):
+    h = Harness(BlockingSequencer(load_rules(tmpdir, BRANCHES)))
+    h.offer("a")
+    h.offer("b")
+    h.start()
+    h.finish("a", success=False, superseded=True)
+    assert {"a", "b", "a2", "b2"} <= set(h.evaluated)
+
+
 def test_cycle_is_an_error(tmpdir):
     rules = load_rules(
         tmpdir,
