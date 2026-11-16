@@ -14,4 +14,5 @@ endif
 
 
 rule a:
+    outputs: none
     run "test {{config.result}} == good"

@@ -119,6 +119,17 @@ def test_output_missing_a_regex_constrained_property_doesnt_match():
     assert edges(createDAG([a, b])) == []
 
 
+def test_open_output_might_have_a_constrained_property():
+    a = rule(
+        "A", [], [OutputArtifact(Artifact([Pair("type", "a")], open=True), "many")]
+    )
+    b = rule("B", [inp("x", type="a", library="Avana")], [])
+    c = rule("C", [inp("x", type="something-else", library="Avana")], [])
+
+    # "library" isn't listed on A's output, but could be present. The type is wrong for C though
+    assert edges(createDAG([a, b, c])) == [("A", "B")]
+
+
 def test_output_with_extra_properties_still_matches():
     a = rule("A", [], [out(type="a", extra="whatever")])
     b = rule("B", [inp("x", type="a")], [])
@@ -184,3 +195,34 @@ def test_long_chain_doesnt_hit_recursion_limit():
         rules.append(rule(f"r{i}", [inp("x", type=f"t{i - 1}")], [out(type=f"t{i}")]))
 
     assert len(createDAG(rules).rules) == 1200
+
+
+def test_cycle_message_says_it_is_possible_and_explains_why():
+    r = rule("R", [], [out(type="r")])
+    a = rule("A", [inp("x", type="r"), inp("y", type="b")], [out(type="a")])
+    b = rule("B", [inp("x", type="a")], [out(type="b")])
+
+    with pytest.raises(CycleDetected) as excinfo:
+        createDAG([r, a, b])
+
+    message = str(excinfo.value)
+    assert "Possible dependency cycle" in message
+    assert "R -> A -> B -> A" in message
+    assert excinfo.value.path == ["R", "A", "B", "A"]
+    # says why it might not be real, and what to do about it
+    assert "may not be a real one" in message
+    assert "template" in message
+    assert "CONSEQ_SEQ" in message
+
+
+def test_unreachable_message_says_it_is_possible_and_explains_why():
+    a = rule("A", [inp("x", type="b")], [out(type="a")])
+    b = rule("B", [inp("x", type="a")], [out(type="b")])
+
+    with pytest.raises(UnreachableRules) as excinfo:
+        createDAG([a, b])
+
+    message = str(excinfo.value)
+    assert "possible dependency cycle" in message
+    assert "A, B" in message
+    assert "may not be a real one" in message

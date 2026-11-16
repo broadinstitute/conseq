@@ -268,3 +268,100 @@ def test_stuff(tmpdir):
         execute(pending.id, pending.transform, pending.inputs)
 
     # assert False
+
+
+def _add_rule_with_empty_all_input(j, transform="merge"):
+    # "all" inputs are tuples. An input which matched nothing is the empty tuple
+    j.add_obj("public", 1, dict(type="single", name="s"))
+    single = j.find_objs("public", {"type": "single"})[0]
+    with j.transaction():
+        return j.rule_set.add_rule("public", (("one", single), ("many", ())), transform)
+
+
+def test_empty_all_input_is_stored_and_read_back(tmpdir):
+    j = dep.open_job_db(str(tmpdir.join("db")))
+    _add_rule_with_empty_all_input(j)
+
+    pending = j.get_pending()
+    assert len(pending) == 1
+    inputs = dict(pending[0].inputs)
+    assert inputs["many"] == ()
+    assert inputs["one"].props["name"] == "s"
+
+    # and it survives reopening the database
+    j2 = dep.open_job_db(str(tmpdir.join("db")))
+    assert dict(j2.get_pending()[0].inputs)["many"] == ()
+
+
+def test_empty_all_input_is_not_duplicated(tmpdir):
+    j = dep.open_job_db(str(tmpdir.join("db")))
+    first = _add_rule_with_empty_all_input(j)
+    single = j.find_objs("public", {"type": "single"})[0]
+
+    # the same inputs again should find the existing rule execution, not create another one
+    with j.transaction():
+        second, created = j.rule_set.add_rule_and_report_new(
+            "public", (("one", single), ("many", ())), "merge"
+        )
+    assert second == first
+    assert not created
+    assert len(j.get_pending()) == 1
+
+
+def test_empty_all_input_is_replaced_when_it_becomes_non_empty(tmpdir):
+    j = dep.open_job_db(str(tmpdir.join("db")))
+    first = _add_rule_with_empty_all_input(j)
+    single = j.find_objs("public", {"type": "single"})[0]
+    j.add_obj("public", 1, dict(type="thing", name="t"))
+    thing = j.find_objs("public", {"type": "thing"})[0]
+
+    with j.transaction():
+        second, created = j.rule_set.add_rule_and_report_new(
+            "public", (("one", single), ("many", (thing,))), "merge"
+        )
+    assert created
+    assert second != first
+    # the old one was replaced
+    assert [r.id for r in j.get_pending()] == [second]
+
+
+def test_execution_with_empty_all_input_is_recorded(tmpdir):
+    j = dep.open_job_db(str(tmpdir.join("db")))
+    rule_exec_id = _add_rule_with_empty_all_input(j)
+
+    execution_id = j.record_started(rule_exec_id)
+    started = j.get_started_executions()
+    assert [e.id for e in started] == [execution_id]
+    assert dict(started[0].inputs)["many"] == ()
+
+    j.add_template(dep.Template([], [], "merge"))
+    j.record_completed(
+        "t", execution_id, dep.STATUS_COMPLETED, [dict(type="out", name="o")]
+    )
+    execution = j.get_all_executions()[0]
+    assert dict(execution.inputs)["many"] == ()
+    assert len(execution.outputs) == 1
+
+
+def test_empty_all_input_doesnt_break_lineage_queries_or_sanity_checks(tmpdir):
+    j = dep.open_job_db(str(tmpdir.join("db")))
+    rule_exec_id = _add_rule_with_empty_all_input(j)
+    j.add_template(dep.Template([], [], "merge"))
+    execution_id = j.record_started(rule_exec_id)
+    j.record_completed(
+        "t", execution_id, dep.STATUS_COMPLETED, [dict(type="out", name="o")]
+    )
+    out = j.find_objs("public", {"type": "out"})[0]
+    single = j.find_objs("public", {"type": "single"})[0]
+
+    # upstream of the output is the "single" input only. (There's no object for the empty list)
+    with j.transaction():
+        upstream = j.log.find_all_reachable_objs([out.id])
+    assert upstream == {out.id, single.id}
+    assert None not in upstream
+
+    downstream = j.find_all_reachable_downstream_objs([single.id])
+    assert {o.id for o in downstream} == {single.id, out.id}
+
+    j.find_rule_output_ids("merge")  # runs assert_db_sane()
+    assert j.gc() == []

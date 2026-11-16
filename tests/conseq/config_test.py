@@ -1,5 +1,8 @@
 import logging
 
+import pytest
+
+from conseq.errors import MissingOutputDeclaration
 from conseq.hashcache import HashCache
 from conseq.main import main
 from conseq import config
@@ -48,38 +51,52 @@ def test_parsing_default_config_in_home_dir(tmpdir, monkeypatch):
     )
 
 
-def _rules_warned_about(tmpdir, caplog, conseq_text):
+def _read(tmpdir, conseq_text):
     path = str(tmpdir.join("t.conseq"))
     with open(path, "wt") as fd:
         fd.write(conseq_text)
 
-    with caplog.at_level(logging.WARNING, logger="conseq.config"):
-        config.read_deps(
-            path, HashCache(str(tmpdir.join("hashcache"))), create_jinja2_env()
+    return config.read_deps(
+        path, HashCache(str(tmpdir.join("hashcache"))), create_jinja2_env()
+    )
+
+
+def test_rule_with_no_outputs_or_output_types_is_an_error_with_blockers(
+    tmpdir, monkeypatch
+):
+    monkeypatch.setenv("CONSEQ_SEQ", "blockers")
+    with pytest.raises(MissingOutputDeclaration, match="rule a "):
+        _read(
+            tmpdir,
+            """
+            rule a:
+                run "echo" with "hello"
+            """,
         )
 
-    return [
-        r.getMessage() for r in caplog.records if "neither an outputs" in r.getMessage()
-    ]
+
+def test_rule_with_no_outputs_or_output_types_is_a_warning_by_default(
+    tmpdir, monkeypatch, caplog
+):
+    monkeypatch.delenv("CONSEQ_SEQ", raising=False)
+    with caplog.at_level(logging.WARNING, logger="conseq.config"):
+        rules = _read(
+            tmpdir,
+            """
+            rule a:
+                run "echo" with "hello"
+            """,
+        )
+    assert len(list(rules)) == 1
+    assert "rule a has neither" in caplog.text
 
 
-def test_warns_about_rule_with_no_outputs_or_output_types(tmpdir, caplog):
-    warnings = _rules_warned_about(
+@pytest.mark.parametrize("seq", [None, "blockers"])
+def test_rules_which_declare_their_outputs_are_accepted(tmpdir, monkeypatch, seq):
+    if seq:
+        monkeypatch.setenv("CONSEQ_SEQ", seq)
+    rules = _read(
         tmpdir,
-        caplog,
-        """
-        rule a:
-            run "echo" with "hello"
-        """,
-    )
-    assert len(warnings) == 1
-    assert "rule a " in warnings[0]
-
-
-def test_no_warning_for_rules_which_declare_their_outputs(tmpdir, caplog):
-    warnings = _rules_warned_about(
-        tmpdir,
-        caplog,
         """
         type thing (value)
 
@@ -94,17 +111,17 @@ def test_no_warning_for_rules_which_declare_their_outputs(tmpdir, caplog):
             outputs: none
         """,
     )
-    assert warnings == []
+    assert len(list(rules)) == 3
 
 
-def test_no_warning_for_publish_rules(tmpdir, caplog):
-    warnings = _rules_warned_about(
+def test_publish_rules_dont_need_to_declare_outputs(tmpdir, monkeypatch):
+    monkeypatch.setenv("CONSEQ_SEQ", "blockers")
+    rules = _read(
         tmpdir,
-        caplog,
         """
         rule publish_it:
             inputs: x={"type": "x"}
             publish: "gs://bucket/path"
         """,
     )
-    assert warnings == []
+    assert len(list(rules)) == 1

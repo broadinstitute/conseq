@@ -29,6 +29,13 @@ pytestmark = pytest.mark.fuzz
 MAX_EXPECTED_EXECUTIONS = 40
 
 # set FUZZ_EXAMPLES to run more (or fewer) generated cases
+@pytest.fixture(autouse=True)
+def use_blocking_sequencer(monkeypatch):
+    # the expected results assume the semantics of CONSEQ_SEQ=blockers: rules with an "all" input
+    # run once everything upstream has finished, even if nothing matched
+    monkeypatch.setenv("CONSEQ_SEQ", "blockers")
+
+
 fuzz_settings = settings(
     max_examples=int(os.environ.get("FUZZ_EXAMPLES", 50)),
     deadline=None,
@@ -37,7 +44,7 @@ fuzz_settings = settings(
 
 
 @st.composite
-def pipelines(draw, allow_chained_all=False, max_rules=7, max_level=3):
+def pipelines(draw, max_rules=7, max_level=3):
     # few levels but several rules per level, so there are often multiple independent producers of
     # the same type finishing in different orders
     initial_values = tuple(f"v{i}" for i in range(draw(st.integers(1, 3))))
@@ -45,24 +52,16 @@ def pipelines(draw, allow_chained_all=False, max_rules=7, max_level=3):
         draw(st.lists(st.integers(1, max_level), min_size=2, max_size=max_rules))
     )
 
-    # A type is "tainted" if it's produced by a rule which has an "all" input, or by a rule which
-    # consumes a tainted type. Rules with an "all" input which consume a tainted type are what we
-    # call "chained all". (Unless allow_chained_all is set, we avoid generating those)
-    tainted_levels = set()
     rules = []
     for index, level in enumerate(levels):
         inputs = []
         for i in range(draw(st.integers(0, 3))):
             in_level = draw(st.integers(0, level - 1))
             is_all = draw(st.sampled_from([False, True, True]))
-            if is_all and not allow_chained_all and in_level in tainted_levels:
-                is_all = False
             inputs.append(InputSpec(f"x{i}", in_level, is_all))
         rules.append(
             RuleSpec(f"r{index}", level, tuple(inputs), draw(st.integers(1, 2)))
         )
-        if any(i.is_all or i.level in tainted_levels for i in inputs):
-            tainted_levels.add(level)
 
     pipeline = Pipeline(initial_values, tuple(rules))
     # keep individual runs small
@@ -122,22 +121,51 @@ def test_completion_order_does_not_change_result(pipeline, data, slots, crash_at
     _run_and_compare(pipeline, data, slots, crash_at_tick)
 
 
-@pytest.mark.xfail(
-    reason="Known limitation: an 'all' input over artifacts produced by another rule with an 'all' input "
-    "gets evaluated before those artifacts exist",
-    raises=AssertionError,
-    strict=False,
-)
-# We expect this to fail, so there's no need to spend time shrinking the failure. It's
-# deterministic (and has more examples) so that it reliably finds the failure.
-@settings(
-    fuzz_settings,
-    max_examples=300,
-    derandomize=True,
-    phases=[Phase.explicit, Phase.reuse, Phase.generate],
-)
+@fuzz_settings
 @given(
-    pipeline=pipelines(allow_chained_all=True), data=st.data(), slots=st.integers(1, 4),
+    pipeline=pipelines(),
+    data=st.data(),
+    slots=st.integers(1, 4),
+    first_run_size=st.integers(1, 3),
 )
-def test_chained_all_rules(pipeline, data, slots):
-    _run_and_compare(pipeline, data, slots, crash_at_tick=None)
+def test_growing_the_inputs_between_runs_matches_a_fresh_run(
+    pipeline, data, slots, first_run_size
+):
+    """Run with some of the initial artifacts and some of the rules, add the rest, and run again. The
+    result should be the same as if all of them had been there from the start. (Executions of rules
+    with "all" inputs get replaced, and the outputs of the old ones must not be left behind.)"""
+    expected = expected_state(pipeline)
+    first_run_size = min(first_run_size, len(pipeline.initial_values))
+    rules_in_first_run = data.draw(
+        st.lists(
+            st.booleans(), min_size=len(pipeline.rules), max_size=len(pipeline.rules)
+        ),
+        label="rules in first run",
+    )
+    first = Pipeline(
+        pipeline.initial_values[:first_run_size],
+        tuple(r for r, keep in zip(pipeline.rules, rules_in_first_run) if keep),
+    )
+
+    def choose_releases(n_running):
+        return data.draw(
+            st.sets(st.sampled_from(range(n_running)), min_size=1), label="release"
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        conseq_path = os.path.join(tmp, "t.conseq")
+        state_dir = os.path.join(tmp, "state")
+
+        with open(conseq_path, "wt") as fd:
+            fd.write(render_conseq(first))
+        run_pipeline(conseq_path, state_dir, slots, choose_releases)
+
+        with open(conseq_path, "wt") as fd:
+            fd.write(render_conseq(pipeline))
+        run_pipeline(conseq_path, state_dir, slots, choose_releases)
+
+        actual = actual_state(state_dir)
+        assert actual.artifacts == expected.artifacts
+        assert {k: v for k, v in actual.executions_per_rule.items() if v} == {
+            k: v for k, v in expected.executions_per_rule.items() if v
+        }

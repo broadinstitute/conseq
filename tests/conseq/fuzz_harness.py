@@ -90,7 +90,7 @@ def expected_state(p: Pipeline) -> State:
     """What the pipeline should produce, regardless of the order things run in.
 
     Evaluates level by level, so every rule sees the complete set of artifacts from lower levels.
-    (This is the intended semantics of "all" inputs.)
+    (This is the intended semantics of "all" inputs, which is what runs with CONSEQ_SEQ=blockers.)
     """
     by_level: Dict[int, List[str]] = collections.defaultdict(list)
     for v in p.initial_values:
@@ -103,9 +103,7 @@ def expected_state(p: Pipeline) -> State:
     for rule in sorted(p.rules, key=lambda r: r.level):
         foreach_inputs = [i for i in rule.inputs if not i.is_all]
         all_inputs = [i for i in rule.inputs if i.is_all]
-        # a rule with an "all" input doesn't run if there are no matching artifacts
-        if any(len(by_level[i.level]) == 0 for i in all_inputs):
-            continue
+        # a rule with an "all" input still runs if there are no matching artifacts. The input is empty
 
         for combo in itertools.product(*[by_level[i.level] for i in foreach_inputs]):
             foreach_values = dict(zip([i.var for i in foreach_inputs], combo))

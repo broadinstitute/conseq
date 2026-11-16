@@ -256,8 +256,9 @@ def assertInputsValid(inputs: Iterable[Tuple[str, Union[Obj, Iterable[Obj]]]]) -
     for x in inputs:
         assert isinstance(x, tuple) and len(x) == 2
         name, value = x
+        # an "all" input is a tuple of objects, which is empty if nothing matched
         assert isinstance(value, Obj) or (
-            isinstance(value, tuple) and isinstance(value[0], Obj)
+            isinstance(value, tuple) and all(isinstance(v, Obj) for v in value)
         )
 
 
@@ -319,7 +320,10 @@ class RuleSet:
             objs_by_name = collections.defaultdict(lambda: [])
             for name, obj_id, is_list in c.fetchall():
                 is_list_by_name[name] = is_list
-                objs_by_name[name].append(obj_id)
+                # an "all" input which matched no artifacts is stored as a single row
+                # with a NULL obj_id, so that we remember that the input existed.
+                if obj_id is not None:
+                    objs_by_name[name].append(obj_id)
 
             inputs = []
             for name, is_list in is_list_by_name.items():
@@ -459,6 +463,13 @@ class RuleSet:
             else:
                 is_list = True
 
+            if len(objs) == 0:
+                # placeholder row, so that an input bound to an empty list can be read back
+                c.execute(
+                    "INSERT INTO rule_execution_input (rule_execution_id, name, obj_id, is_list) VALUES (?, ?, NULL, ?)",
+                    (rule_execution_id, name, is_list),
+                )
+
             for obj in objs:
                 self.objects.add(obj)
                 c.execute(
@@ -483,7 +494,7 @@ class RuleSet:
         )
         assert len(c.fetchall()) == 0
         c.execute(
-            "SELECT * from rule_execution_input rei where not exists (select 1 from cur_obj o where o.id = rei.obj_id)"
+            "SELECT * from rule_execution_input rei where rei.obj_id is not null and not exists (select 1 from cur_obj o where o.id = rei.obj_id)"
         )
         assert len(c.fetchall()) == 0
         c.execute(
@@ -608,6 +619,13 @@ class ExecutionLog:
             if isinstance(objs, Obj):
                 objs = [objs]
                 is_list = False
+            if len(objs) == 0:
+                # placeholder row, so that an input bound to an empty list can be read back
+                c.execute(
+                    "INSERT INTO execution_input (execution_id, name, obj_id, is_list) VALUES (?, ?, NULL, ?)",
+                    [exec_id, name, is_list],
+                )
+
             for obj in objs:
                 obj_id = self._make_copy_get_id(obj)
                 c.execute(
@@ -637,7 +655,10 @@ class ExecutionLog:
                 if name in var_is_list:
                     assert is_list
                 var_is_list[name] = is_list
-                inputs[name].append(self.obj_history.get(obj_id))
+                # a NULL obj_id is the placeholder for an "all" input with no artifacts
+                inputs.setdefault(name, [])
+                if obj_id is not None:
+                    inputs[name].append(self.obj_history.get(obj_id))
             in_name_values = []
             for name, values in inputs.items():
                 if var_is_list[name]:
@@ -751,7 +772,7 @@ class ExecutionLog:
             objs_reached.add(obj_id)
 
             c.execute(
-                "SELECT ei.obj_id FROM execution_output eo JOIN execution e ON eo.execution_id = e.id JOIN execution_input ei ON e.id = ei.execution_id WHERE eo.obj_id = ?",
+                "SELECT ei.obj_id FROM execution_output eo JOIN execution e ON eo.execution_id = e.id JOIN execution_input ei ON e.id = ei.execution_id WHERE eo.obj_id = ? AND ei.obj_id IS NOT NULL",
                 [obj_id],
             )
             input_obj_ids = [x[0] for x in c.fetchall()]
@@ -839,7 +860,12 @@ class Template:
         predicates: Sequence[Any],
         transform: str,
         output_matches_expectation: Callable[[List[Dict]], bool] = lambda x: True,
+        allow_empty_all: bool = False,
     ):
+        """
+        :param allow_empty_all: if True, a rule with an "all" input is created even if no artifacts
+           match, with the input bound to an empty tuple. By default such a rule isn't created.
+        """
         self.foreach_queries = []
         self.forall_queries = []
         for q in queries:
@@ -852,6 +878,7 @@ class Template:
         self.predicates = predicates
         self.transform = transform
         self.output_matches_expectation = output_matches_expectation
+        self.allow_empty_all = allow_empty_all
 
     @property
     def name(self) -> str:
@@ -938,7 +965,7 @@ class Template:
         bindings = dict(bindings)
         for q in self.forall_queries:
             objs = tuple(obj_set.find(space, q.const_constraints))
-            if len(objs) == 0:
+            if len(objs) == 0 and not self.allow_empty_all:
                 return None
             bindings[q.variable] = objs
         return bindings
