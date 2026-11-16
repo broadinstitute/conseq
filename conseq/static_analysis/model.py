@@ -24,6 +24,10 @@ class Pair:
 @dataclass
 class Artifact:
     properties: list[Pair]
+    # True if the artifact might have other properties besides the ones listed (for example because
+    # we only know the type of the artifact and its required fields). A constraint on a
+    # property which isn't listed might still be satisfied by an open artifact.
+    open: bool = False
 
 
 @dataclass

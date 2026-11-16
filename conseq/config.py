@@ -3,7 +3,9 @@ import textwrap
 from typing import Dict, Optional
 
 from conseq import parser
+from conseq.errors import MissingOutputDeclaration
 from conseq.hashcache import HashCache
+from conseq.sequencer import SEQUENCER_ENV_VAR, use_blocking_sequencer
 from conseq.template import LazyConfig
 from conseq.template import create_jinja2_env, render_template
 from conseq.template import expand_dict
@@ -221,9 +223,13 @@ def _eval_stmts(statements: List[Any], context: EvalContext):
                 and dec.outputs is None
                 and dec.output_types is None
             ):
-                log.warning(
-                    f"rule {dec.name} has neither an outputs section nor an output_types section"
-                )
+                message = f"rule {dec.name} has neither an outputs section nor an output_types section"
+                if use_blocking_sequencer():
+                    raise MissingOutputDeclaration(
+                        f"{message}. Every rule has to say what it produces when "
+                        f"{SEQUENCER_ENV_VAR}=blockers. Use `outputs: none` if it doesn't produce anything"
+                    )
+                log.warning(message)
             rules.set_rule(dec.name, dec)
 
 

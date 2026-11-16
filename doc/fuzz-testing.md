@@ -86,19 +86,27 @@ from lower levels. After the run (and after the restart, if there was a crash) t
   it stopped (this means an execution was lost track of),
 - running conseq again on the finished state creates no new executions.
 
-## Known failure: chained `all` rules
+## Which scheduler is tested
 
-An `all` input over artifacts which are produced by another rule that has an `all` input (directly
-or transitively) is not handled. The `SimpleSequencer` evaluates every deferred rule at the same
-moment, so the downstream rule can run before the artifacts it needs exist, and then run again
-when more arrive, leaving a stale output behind.
+The tests set `CONSEQ_SEQ=blockers` (see the `use_blocking_sequencer` fixture in `fuzz_test.py`), so
+they exercise the `BlockingSequencer`, and the expected results use its semantics:
 
-- `test_completion_order_does_not_change_result` does not generate these pipelines.
-- `test_chained_all_rules` does, and is marked `xfail` (non-strict). Because the failure is
-  expected, it doesn't shrink it, and it runs deterministically with more examples so that it
-  reliably finds the failure. If you fix the limitation it will start reporting XPASS; at that
-  point remove the `xfail` and fold it into the main test by removing the restriction in
-  `pipelines()`.
+- a rule with an `all` input runs once every rule which could contribute to its inputs, however
+  indirectly, has finished,
+- and it runs even if no artifacts matched, in which case the input is empty.
+
+The generated pipelines include both of these: `all` inputs over artifacts produced by other rules
+with `all` inputs (chains of `all` rules), and `all` inputs over types which nothing produces.
+
+The default `SimpleSequencer` isn't covered. It can't run chains of `all` rules correctly, which is
+what the `BlockingSequencer` was written to fix.
+
+## Growing the inputs between runs
+
+`test_growing_the_inputs_between_runs_matches_a_fresh_run` runs conseq on some of a pipeline's initial
+artifacts and some of its rules, adds the rest to the file, and runs again on the same database. The result must equal what a fresh
+run on all of them produces. This is what checks that when an `all` rule reruns on a longer list,
+the outputs of its old execution are removed rather than left behind.
 
 ## Reproducing a failure
 

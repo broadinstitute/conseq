@@ -350,9 +350,17 @@ When an execution completes successfully, conseq checks that:
 Artifacts of a type which isn't listed in `output_types` cause a warning, but are otherwise accepted.
 Executions which fail aren't checked against the cardinalities, since they have no outputs.
 
-If a rule has neither an "outputs" nor an "output_types" section (and isn't a `publish` rule), conseq prints a warning
-when the file is read, because it has no way to know what the rule will produce. If a rule
-really does not produce any artifacts, write `outputs: none`.
+Rules (other than `publish` rules) should have an "outputs" or an "output_types" section. If one doesn't, conseq
+prints a warning when it reads the file. If a rule really does not produce any artifacts, write `outputs: none`.
+
+When `CONSEQ_SEQ=blockers` is set in the environment, this is required rather than just recommended: conseq
+reports an error when it reads a file which has a rule without one. That setting also changes how rules with `all`
+inputs are scheduled. Conseq uses the declared outputs to work out which rules produce the artifacts that other rules
+consume, so that a rule with an `all` input waits for every rule which could contribute to its inputs, however
+indirectly, to finish. It also means that when new `add-if-missing` artifacts are added, or a new rule is added to the file, and they feed a rule
+with an `all` input (directly, or through other rules), conseq removes that rule's old outputs and everything derived from them
+before rerunning it, so no results computed from the shorter list are left behind. Like removing the outputs of a
+changed rule, this asks for confirmation unless `--remove-unknown-artifacts` is given.
 
 ### References to files
 
