@@ -324,6 +324,7 @@ def test_file_ref(tmpdir):
         f"""
     rule a:
         inputs: x=filename("{localfile}")
+        outputs: none
     """,
         filename=str(tmpdir.join("sample.conseq")),
     )
@@ -349,6 +350,7 @@ def test_file_ref_with_copy_to(tmpdir):
         f"""
     rule a:
         inputs: x=filename("{localfile}", copy_to="z")
+        outputs: none
     """,
         filename=str(tmpdir.join("sample.conseq")),
     )
@@ -372,6 +374,7 @@ def test_file_refs_with_vars(tmpdir):
         """
     rule a:
         inputs: x=filename("{{config.VARIABLE}}/xyz-{{config.NUMBER}}")
+        outputs: none
     """,
         filename=str(tmpdir.join("sample.conseq")),
     )
@@ -401,6 +404,7 @@ def test_relative_file_paths(tmpdir):
         f"""
     rule a:
         inputs: x=filename("{sample_rel_path}")
+        outputs: none
     """,
         filename=str(tmpdir.join("sample.conseq")),
     )

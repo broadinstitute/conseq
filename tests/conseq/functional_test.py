@@ -58,7 +58,10 @@ def test_no_results_failure(tmpdir):
     j = run_conseq(
         tmpdir,
         """
+    type thing (value)
+
     rule a:
+        output_types: (thing)
         run "bash" with "cat /dev/null"
     """,
     )
@@ -109,6 +112,7 @@ def test_nonzero_retcode(tmpdir):
         tmpdir,
         """
     rule a:
+        outputs: none
         run "bash non-existant-file"
     """,
     )
@@ -199,25 +203,135 @@ def test_rules_with_all_exec_once(tmpdir):
     assert len(j.get_all_executions()) == 3
 
 
-@pytest.mark.xfail(
-    reason="Not implemented yet: a rule with an all input is never created when nothing matches",
-    strict=True,
-)
-def test_rule_with_all_input_executes_when_nothing_matches(tmpdir):
-    # There are no artifacts of type "x" at all, but a rule with an "all" input should still run,
-    # with the input bound to an empty list.
-    j = run_conseq(
-        tmpdir,
-        """
+EMPTY_ALL_RULE = """
     rule a:
         inputs: x=all {"type": "x"}
         outputs: {"type": "out", "count": "{{ inputs.x|length }}"}
-    """,
-    )
+    """
+
+
+def test_rule_with_all_input_executes_when_nothing_matches(tmpdir, monkeypatch):
+    # There are no artifacts of type "x" at all, but a rule with an "all" input should still run,
+    # with the input bound to an empty list.
+    monkeypatch.setenv("CONSEQ_SEQ", "blockers")
+    j = run_conseq(tmpdir, EMPTY_ALL_RULE)
     assert [e.transform for e in j.get_all_executions()] == ["a"]
     outputs = j.find_objs("public", {"type": "out"})
     assert len(outputs) == 1
     assert outputs[0].props["count"] == "0"
+
+
+def test_rule_with_all_input_is_not_created_when_nothing_matches_by_default(
+    tmpdir, monkeypatch
+):
+    # without CONSEQ_SEQ=blockers, this behaves as it always did
+    monkeypatch.delenv("CONSEQ_SEQ", raising=False)
+    j = run_conseq(tmpdir, EMPTY_ALL_RULE)
+    assert j.get_all_executions() == []
+
+
+def test_empty_all_rule_doesnt_rerun(tmpdir, monkeypatch):
+    monkeypatch.setenv("CONSEQ_SEQ", "blockers")
+    run_conseq(tmpdir, EMPTY_ALL_RULE)
+    j = run_conseq(tmpdir, EMPTY_ALL_RULE, assert_clean=False)
+    assert [e.transform for e in j.get_all_executions()] == ["a"]
+
+
+def _count_of_b_artifacts(n):
+    adds = "\n".join('add-if-missing {"type": "b", "n": "%d"}' % i for i in range(n))
+    return (
+        adds
+        + """
+    rule c:
+        inputs: bs=all {"type": "b"}
+        outputs: {"type": "c", "count": "{{ inputs.bs|length }}"}
+    """
+    )
+
+
+def test_outputs_of_replaced_all_execution_are_removed(tmpdir, monkeypatch):
+    monkeypatch.setenv("CONSEQ_SEQ", "blockers")
+
+    # first run: c(all b(0)) -> c(count=1)
+    j = run_conseq(tmpdir, _count_of_b_artifacts(1))
+    assert [o.props["count"] for o in j.find_objs("public", {"type": "c"})] == ["1"]
+
+    # a second b is added. c reruns on both, producing c(count=2). The result should be the same as
+    # running on those two from scratch, so c(count=1) shouldn't still be there.
+    j = run_conseq(tmpdir, _count_of_b_artifacts(2), assert_clean=False)
+    assert sorted(o.props["count"] for o in j.find_objs("public", {"type": "c"})) == [
+        "2"
+    ]
+
+
+def test_all_execution_is_rerun_when_its_input_grows(tmpdir, monkeypatch):
+    monkeypatch.setenv("CONSEQ_SEQ", "blockers")
+    run_conseq(tmpdir, _count_of_b_artifacts(1))
+    j = run_conseq(tmpdir, _count_of_b_artifacts(2), assert_clean=False)
+
+    assert [e.transform for e in j.get_all_executions()] == ["c"]
+    assert "2" in [o.props["count"] for o in j.find_objs("public", {"type": "c"})]
+
+
+def test_all_rule_runs_once_after_everything_upstream_finishes(tmpdir, monkeypatch):
+    # a -> b -> c, where c consumes "all" of what b produces. c must run once, on both artifacts.
+    monkeypatch.setenv("CONSEQ_SEQ", "blockers")
+    j = run_conseq(
+        tmpdir,
+        """
+    rule a:
+        outputs: {"type": "a", "n": "1"}, {"type": "a", "n": "2"}
+    rule b:
+        inputs: in={"type": "a"}
+        outputs: {"type": "b", "n": "{{ inputs.in.n }}"}
+    rule c:
+        inputs: bs=all {"type": "b"}
+        outputs: {"type": "c", "count": "{{ inputs.bs|length }}"}
+    """,
+    )
+    executions = sorted(e.transform for e in j.get_all_executions())
+    assert executions == ["a", "b", "b", "c"]
+    assert [o.props["count"] for o in j.find_objs("public", {"type": "c"})] == ["2"]
+
+
+def test_chained_all_rules_run_in_order(tmpdir, monkeypatch):
+    # d takes all of x, c takes all of d's output. c must wait for d, and not run on nothing.
+    monkeypatch.setenv("CONSEQ_SEQ", "blockers")
+    j = run_conseq(
+        tmpdir,
+        """
+    rule x:
+        outputs: {"type": "x", "n": "1"}, {"type": "x", "n": "2"}
+    rule d:
+        inputs: xs=all {"type": "x"}
+        outputs: {"type": "d", "count": "{{ inputs.xs|length }}"}
+    rule c:
+        inputs: ds=all {"type": "d"}
+        outputs: {"type": "c", "count": "{{ inputs.ds|length }}"}
+    """,
+    )
+    assert sorted(e.transform for e in j.get_all_executions()) == ["c", "d", "x"]
+    assert [o.props["count"] for o in j.find_objs("public", {"type": "c"})] == ["1"]
+
+
+def test_all_rule_doesnt_run_if_an_upstream_rule_fails(tmpdir, monkeypatch):
+    monkeypatch.setenv("CONSEQ_SEQ", "blockers")
+    j = run_conseq(
+        tmpdir,
+        """
+    rule a:
+        outputs: {"type": "a"}
+    rule b:
+        inputs: in={"type": "a"}
+        outputs: {"type": "b"}
+        run "bash" with "exit 1"
+    rule c:
+        inputs: bs=all {"type": "b"}
+        outputs: {"type": "c"}
+    """,
+    )
+    status_by_rule = {e.transform: e.status for e in j.get_all_executions()}
+    assert status_by_rule == {"a": "completed", "b": "failed"}
 
 
 def test_rule_executes_once(tmpdir):
@@ -361,6 +475,8 @@ def test_construct_cache_key(tmpdir, monkeypatch):
     let AWS_SECRET_ACCESS_KEY="y"
     let S3_STAGING_URL="s3://buckey/root"
     let CLOUD_STORAGE_CACHE_ROOT="gs://banana/key"
+
+    type result (finished)
     """
 
     # run a job which saves the result in cache
@@ -369,6 +485,7 @@ def test_construct_cache_key(tmpdir, monkeypatch):
         prolog
         + """
     rule a:
+        output_types: (result)
         construct-cache-key-run "bash" with '''
             echo '{"a": "val1", "b": "val2"}' > conseq-cache-key.json
         '''
@@ -384,6 +501,7 @@ def test_construct_cache_key(tmpdir, monkeypatch):
         prolog
         + """        
     rule b:
+        output_types: (result)
         construct-cache-key-run "bash" with '''
             echo '{"b": "val2", "a": "val1"}' > conseq-cache-key.json
         '''
@@ -716,11 +834,7 @@ def test_commands(tmpdir):
         main(command)
 
 
-def test_artifact_mismatches_output_types(tmpdir):
-    with pytest.raises(ArtifactTypeMismatch):
-        run_conseq(
-            tmpdir,
-            """
+WRONG_TYPE_RULE = """
             type thing ( value )
 
             rule start:
@@ -730,8 +844,24 @@ def test_artifact_mismatches_output_types(tmpdir):
                     with open("results.json", "wt") as fd:
                         fd.write(json.dumps({"outputs": [{"type": "thing2"}]}))
                 \"\"\"
-            """,
-        )
+            """
+
+
+def test_artifact_mismatches_output_types(tmpdir, monkeypatch):
+    # by default, the wrong number of outputs of a type stops the run
+    monkeypatch.delenv("CONSEQ_SEQ", raising=False)
+    with pytest.raises(ArtifactTypeMismatch):
+        run_conseq(tmpdir, WRONG_TYPE_RULE)
+
+
+def test_artifact_of_unlisted_type_fails_the_execution_with_blockers(
+    tmpdir, monkeypatch
+):
+    # with blockers, an artifact whose type isn't listed fails that execution
+    monkeypatch.setenv("CONSEQ_SEQ", "blockers")
+    j = run_conseq(tmpdir, WRONG_TYPE_RULE)
+    assert [e.status for e in j.get_all_executions()] == ["failed"]
+    assert j.find_objs("public", {}) == []
 
 
 def test_artifact_matches_output_types(tmpdir):
@@ -842,7 +972,10 @@ def test_output_without_a_type_written_to_results_json_fails_the_execution(tmpdi
     j = run_conseq(
         tmpdir,
         """
+        type thing (value)
+
         rule start:
+            output_types: (thing)
             run 'bash' with '''
             echo '{"outputs": [{"value": "x"}]}' > results.json
             '''
@@ -878,3 +1011,191 @@ def test_one_output_without_a_type_fails_the_whole_execution(tmpdir):
     assert [e.status for e in j.get_all_executions()] == ["failed"]
     # none of the outputs of a failed execution are published
     assert j.find_objs("public", {}) == []
+
+
+UNDECLARED_TYPE_RULES = """
+    type y (n)
+
+    rule p:
+        output_types: (y*)
+        run 'bash' with \'\'\'
+        echo '{"outputs": [{"type": "x", "n": "1"}, {"type": "x", "n": "2"}]}' > results.json
+        \'\'\'
+
+    rule c:
+        inputs: xs=all {"type": "x"}
+        outputs: {"type": "c", "count": "{{ inputs.xs|length }}"}
+    """
+
+
+def test_output_with_a_type_not_in_output_types_fails_with_blockers(
+    tmpdir, monkeypatch
+):
+    # otherwise c, which consumes "x", wouldn't know that p produces it and could run too early
+    monkeypatch.setenv("CONSEQ_SEQ", "blockers")
+    j = run_conseq(tmpdir, UNDECLARED_TYPE_RULES)
+
+    # p fails and publishes nothing. Nothing which is declared to produce x exists, so c runs
+    # once, on an empty list. (Without the check it would run on [], and again on the 2 artifacts
+    # from p, leaving two outputs.)
+    status_by_rule = {e.transform: e.status for e in j.get_all_executions()}
+    assert status_by_rule == {"p": "failed", "c": "completed"}
+    assert j.find_objs("public", {"type": "x"}) == []
+    assert [o.props["count"] for o in j.find_objs("public", {"type": "c"})] == ["0"]
+
+
+def test_output_with_a_type_not_in_output_types_is_accepted_by_default(
+    tmpdir, monkeypatch
+):
+    # the way things always worked: this logs a warning but the artifacts are published
+    monkeypatch.delenv("CONSEQ_SEQ", raising=False)
+    j = run_conseq(tmpdir, UNDECLARED_TYPE_RULES)
+
+    assert len(j.find_objs("public", {"type": "x"})) == 2
+    assert {e.transform: e.status for e in j.get_all_executions()}["p"] == "completed"
+
+
+def test_rules_without_output_types_may_publish_any_type_with_blockers(
+    tmpdir, monkeypatch
+):
+    # only rules which use output_types are held to it. (A rule with a literal outputs section
+    # has exactly the outputs it lists, which the graph knows about)
+    monkeypatch.setenv("CONSEQ_SEQ", "blockers")
+    j = run_conseq(
+        tmpdir,
+        """
+        rule p:
+            outputs: {"type": "x", "n": "1"}
+        rule c:
+            inputs: xs=all {"type": "x"}
+            outputs: {"type": "c", "count": "{{ inputs.xs|length }}"}
+        """,
+    )
+    assert [o.props["count"] for o in j.find_objs("public", {"type": "c"})] == ["1"]
+
+
+def _a_feeds_b_feeds_c(n_a, extra=""):
+    adds = "\n".join('add-if-missing {"type": "a", "n": "%d"}' % i for i in range(n_a))
+    return (
+        adds
+        + """
+    rule b:
+        inputs: in={"type": "a"}
+        outputs: {"type": "b", "n": "{{ inputs.in.n }}"}
+    rule c:
+        inputs: bs=all {"type": "b"}
+        outputs: {"type": "c", "count": "{{ inputs.bs|length }}"}
+    rule d:
+        inputs: in={"type": "c"}
+        outputs: {"type": "d", "from": "{{ inputs.in.count }}"}
+    """
+        + extra
+    )
+
+
+def _values(j, type, prop):
+    return sorted(o.props[prop] for o in j.find_objs("public", {"type": type}))
+
+
+def test_new_artifact_upstream_of_an_all_rule_removes_its_old_outputs(
+    tmpdir, monkeypatch
+):
+    # a(0) -> b(0) -> c(all b) -> d. A new a feeds c through b, so c's old output is out of date
+    monkeypatch.setenv("CONSEQ_SEQ", "blockers")
+    j = run_conseq(tmpdir, _a_feeds_b_feeds_c(1))
+    assert _values(j, "c", "count") == ["1"]
+    assert _values(j, "d", "from") == ["1"]
+
+    j = run_conseq(tmpdir, _a_feeds_b_feeds_c(2), assert_clean=False)
+    assert _values(j, "b", "n") == ["0", "1"]
+    assert _values(j, "c", "count") == ["2"]
+    # d consumed the old c, so it was removed and rerun on the new one
+    assert _values(j, "d", "from") == ["2"]
+
+
+def test_state_after_new_artifacts_matches_a_fresh_run(tmpdir, monkeypatch):
+    monkeypatch.setenv("CONSEQ_SEQ", "blockers")
+    run_conseq(tmpdir.join("grown"), _a_feeds_b_feeds_c(1))
+    grown = run_conseq(tmpdir.join("grown"), _a_feeds_b_feeds_c(3), assert_clean=False)
+    fresh = run_conseq(tmpdir.join("fresh"), _a_feeds_b_feeds_c(3))
+
+    for type, prop in [("b", "n"), ("c", "count"), ("d", "from")]:
+        assert _values(grown, type, prop) == _values(fresh, type, prop)
+
+
+def test_unrelated_new_artifact_doesnt_invalidate_an_all_rule(tmpdir, monkeypatch):
+    monkeypatch.setenv("CONSEQ_SEQ", "blockers")
+    j = run_conseq(tmpdir, _a_feeds_b_feeds_c(1))
+    ids_before = sorted(e.id for e in j.get_all_executions())
+
+    # an artifact nothing consumes
+    j = run_conseq(
+        tmpdir,
+        _a_feeds_b_feeds_c(1, 'add-if-missing {"type": "unrelated"}'),
+        assert_clean=False,
+    )
+    assert sorted(e.id for e in j.get_all_executions()) == ids_before
+
+
+def test_new_artifact_which_only_feeds_a_foreach_rule_doesnt_invalidate_the_all_rule(
+    tmpdir, monkeypatch
+):
+    # e consumes "e-input" artifacts one at a time, and nothing which feeds c depends on them
+    monkeypatch.setenv("CONSEQ_SEQ", "blockers")
+    rules = (
+        _a_feeds_b_feeds_c(1)
+        + """
+    rule e:
+        inputs: in={"type": "e-input"}
+        outputs: {"type": "e", "n": "{{ inputs.in.n }}"}
+    """
+    )
+    j = run_conseq(tmpdir, rules)
+    c_id = [e.id for e in j.get_all_executions() if e.transform == "c"]
+
+    j = run_conseq(
+        tmpdir,
+        rules + 'add-if-missing {"type": "e-input", "n": "1"}',
+        assert_clean=False,
+    )
+    assert [e.id for e in j.get_all_executions() if e.transform == "c"] == c_id
+    assert _values(j, "e", "n") == ["1"]
+
+
+def test_old_outputs_are_not_removed_without_blockers(tmpdir, monkeypatch):
+    # This is how it has always worked, and it's why the old output is left behind. (It stays
+    # that way unless CONSEQ_SEQ=blockers is set)
+    monkeypatch.delenv("CONSEQ_SEQ", raising=False)
+    run_conseq(tmpdir, _a_feeds_b_feeds_c(1))
+    j = run_conseq(tmpdir, _a_feeds_b_feeds_c(2), assert_clean=False)
+    assert _values(j, "c", "count") == ["1", "2"]
+
+
+def test_new_rule_upstream_of_an_all_rule_removes_its_old_outputs(tmpdir, monkeypatch):
+    monkeypatch.setenv("CONSEQ_SEQ", "blockers")
+    base = """
+    add-if-missing {"type": "a", "n": "0"}
+    rule b:
+        inputs: in={"type": "a"}
+        outputs: {"type": "b", "n": "{{ inputs.in.n }}"}
+    rule c:
+        inputs: bs=all {"type": "b"}
+        outputs: {"type": "c", "count": "{{ inputs.bs|length }}"}
+    """
+    j = run_conseq(tmpdir, base)
+    assert _values(j, "c", "count") == ["1"]
+
+    # no new artifacts, but a new rule which produces more of what c consumes
+    new_rule = """
+    rule b2:
+        inputs: in={"type": "a"}
+        outputs: {"type": "b", "n": "from-b2"}
+    """
+    j = run_conseq(tmpdir, base + new_rule, assert_clean=False)
+    assert _values(j, "c", "count") == ["2"]
+
+
+def test_a_new_rule_on_an_empty_database_removes_nothing(tmpdir, monkeypatch):
+    monkeypatch.setenv("CONSEQ_SEQ", "blockers")
+    j = run_conseq(tmpdir, _a_feeds_b_feeds_c(2))
+    assert _values(j, "c", "count") == ["2"]

@@ -13,6 +13,7 @@ import six
 from .execution_report import Failure
 from .sequencer import (
     create_sequencer,
+    use_blocking_sequencer,
     RuleExecutionToStart,
     RuleCompletion,
     add_if_missing_rule,
@@ -140,6 +141,9 @@ def to_template(jinja2_env: Environment, rule: Rule, config: PropsType) -> Templ
         predicates,
         rule.name,
         output_matches_expectation=make_output_check(rule),
+        # running a rule on an empty "all" input is only safe if rules with "all" inputs wait for
+        # the rules which feed them, which is what the blocking sequencer does
+        allow_empty_all=use_blocking_sequencer(),
     )
 
 
@@ -568,9 +572,24 @@ def _amend_outputs(
 
 
 def get_type_check_failures(
-    j: Jobs, artifacts: List[Dict], type_defs_by_name: Dict[str, TypeDefStmt]
+    j: Jobs,
+    artifacts: List[Dict],
+    type_defs_by_name: Dict[str, TypeDefStmt],
+    rule: Optional[Rule] = None,
 ):
     failures = []
+
+    # With the blocking sequencer, rules with "all" inputs wait for the rules which declare that they
+    # produce artifacts they consume. An artifact of a type the rule didn't declare is invisible to
+    # that, so the rule's consumers could run too early. Don't allow it.
+    declared_types = None
+    if (
+        rule is not None
+        and rule.resolved_output_types is not None
+        and use_blocking_sequencer()
+    ):
+        declared_types = {t.type_def.name for t in rule.resolved_output_types}
+
     for artifact in artifacts:
         type_name = artifact.get("type")
         if type_name is None:
@@ -578,6 +597,12 @@ def get_type_check_failures(
                 f"Output artifact {artifact} is missing the required property: type"
             )
             continue
+        if declared_types is not None and type_name not in declared_types:
+            failures.append(
+                f"Output artifact {artifact} has type {type_name}, which is not listed in the output_types of rule {rule.name if rule else '?'} ({', '.join(sorted(declared_types))})"
+            )
+            continue
+
         type_def = type_defs_by_name.get(type_name)
 
         if type_def is None:
@@ -651,9 +676,12 @@ def main_loop(
             for transform, inputs in j.find_new_rule_executions(rule_name)
         ]
 
-    def notify_sequencer(origin: RuleExecutionToStart, success: bool) -> None:
+    def notify_sequencer(
+        origin: RuleExecutionToStart, success: bool, superseded: bool = False
+    ) -> None:
         to_start = sequencer.next(
-            RuleCompletion(origin, success, []), get_next_executions
+            RuleCompletion(origin, success, [], superseded=superseded),
+            get_next_executions,
         )
         # create pending rule executions in the db for those the sequencer says to start,
         # which is where the loop below picks them up.
@@ -664,14 +692,16 @@ def main_loop(
             execution.rule_execution_id = rule_exec.id
             origins[rule_exec.id] = execution
 
-    def rule_execution_finished(rule_execution_id: Any, success: bool) -> None:
+    def rule_execution_finished(
+        rule_execution_id: Any, success: bool, superseded: bool = False
+    ) -> None:
         origin = origins.pop(rule_execution_id, None)
         if origin is None:
             log.warning(
                 "Sequencer was not tracking rule execution %s", rule_execution_id
             )
             return
-        notify_sequencer(origin, success)
+        notify_sequencer(origin, success, superseded)
 
     # executions reattached from a previous invocation are already in progress
     for e in executing:
@@ -802,7 +832,7 @@ def main_loop(
                     timings.log(job.id, job.transform, "resolved_xrefs")
                     # the rule execution was replaced because its input artifact changed.
                     # Tell the sequencer so it re-evaluates the rules and creates the replacement
-                    rule_execution_finished(job.id, False)
+                    rule_execution_finished(job.id, False, superseded=True)
                     continue
 
                 timings.log(job.id, job.transform, "preprocess_inputs")
@@ -901,7 +931,9 @@ def main_loop(
 
                 if failure is None and completion is not None:
                     # check outputs have all the required fields (as defined by 'type')
-                    failure = get_type_check_failures(j, completion, type_defs_by_name)
+                    failure = get_type_check_failures(
+                        j, completion, type_defs_by_name, rules.get_rule(e.transform)
+                    )
 
                 if failure is not None:
                     job_id = j.record_completed(timestamp, e.id, dep.STATUS_FAILED, [])
@@ -1160,6 +1192,45 @@ def reconcile_rule_specifications(j: Jobs, latest_rules: Dict[str, str]):
     return stale_object_ids
 
 
+def _find_outputs_made_stale_by_new_artifacts(
+    j: Jobs,
+    rules: Rules,
+    new_objs: List[PropsType],
+    rule_specifications: Dict[str, str],
+):
+    """The outputs of rules with "all" inputs which have to be removed (and rerun) because of new artifacts
+    or new rules.
+
+    Without this, a rule which reruns because the list of artifacts it consumes grew would leave the
+    outputs of its earlier execution behind, with no record of where they came from, and so nothing
+    would ever clean them up."""
+    from conseq.static_analysis.new_artifacts import rules_invalidated_by_new_inputs
+
+    # The rules which were in the file the last time conseq ran are recorded. If nothing is recorded
+    # then we can't tell which rules are new (and every rule would look new), so don't try.
+    previous_rules = dict(j.get_rule_specifications())
+    new_rule_names = (
+        set(rule_specifications).difference(previous_rules)
+        if len(previous_rules) > 0
+        else set()
+    )
+
+    affected = rules_invalidated_by_new_inputs(list(rules), new_objs, new_rule_names)
+
+    stale = []
+    for transform, reasons in sorted(affected.items()):
+        outputs = j.find_rule_output_ids(transform)
+        if len(outputs) == 0:
+            continue
+        log.warning(
+            'Outputs of rule %s are out of date, because it has an "all" input and %s',
+            transform,
+            "; ".join(reasons),
+        )
+        stale.extend(outputs)
+    return stale
+
+
 def reconcile_db(
     j: Jobs,
     rule_specifications: Dict[str, str],
@@ -1167,7 +1238,14 @@ def reconcile_db(
     type_defs: Iterable[TypeDefStmt],
     force: Optional[bool] = None,
     print_missing_objs: bool = True,
+    rules: Optional[Rules] = None,
 ) -> None:
+    """
+    :param rules: the rules in the conseq file. If given, and CONSEQ_SEQ=blockers is set, rules with
+       "all" inputs are invalidated (along with everything derived from their outputs) if new
+       artifacts are going to be added, or new rules have been added to the file, which feed them
+       directly or through other rules.
+    """
     # rewrite the objects, expanding templates and marking this as one which was manually added from the config file
     update_rule_specs_in_db = True
     processed = []
@@ -1180,12 +1258,22 @@ def reconcile_db(
     new_objs, missing_objs = reconcile_add_if_missing(j, processed)
     invalidated_objs = reconcile_rule_specifications(j, rule_specifications)
 
-    missing_objs = set(invalidated_objs).union(missing_objs)
+    invalidated_objs = set(invalidated_objs)
+
+    if rules is not None and use_blocking_sequencer():
+        invalidated_objs.update(
+            _find_outputs_made_stale_by_new_artifacts(
+                j, rules, new_objs, rule_specifications
+            )
+        )
+
+    missing_objs = invalidated_objs.union(missing_objs)
 
     if len(missing_objs) > 0:
         if print_missing_objs:
             print(
-                "The following objects were not specified in the conseq file or were the result of a rule which has changed:"
+                "The following objects were not specified in the conseq file, were the result of a rule which has changed, "
+                'or were the result of a rule with an "all" input which new artifacts or rules feed:'
             )
             for obj in missing_objs:
                 print("   {}".format(obj))
@@ -1290,6 +1378,7 @@ def main(
         rules.objs,
         rules.types.values(),
         force=remove_unknown_artifacts,
+        rules=rules,
     )
 
     # handle the remember-executed statements

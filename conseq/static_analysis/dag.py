@@ -35,6 +35,9 @@ def artifact_satisfies_constraints(
 
     for pair in constraints.properties:
         if pair.name not in by_name:
+            if artifact.open:
+                # the artifact might have this property, so we can't rule it out
+                continue
             # the artifact doesn't have a property which the constraint requires. (If a value
             # might be present but isn't known statically, it's listed with the value UNKNOWN.)
             return False
