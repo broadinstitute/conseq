@@ -277,7 +277,7 @@ class Semantics(object):
         value = ast[3][0]
         assert isinstance(value, list) or isinstance(value, dict)
         if isinstance(value, list):
-            assert isinstance(value[0], dict)
+            assert len(value) == 0 or isinstance(value[0], dict)
         return (ast[1], value)
 
     def remember_executed_output(self, ast):
