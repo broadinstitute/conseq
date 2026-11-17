@@ -118,6 +118,57 @@ def test_nonzero_retcode(tmpdir):
     )
 
 
+def test_outputs_none_but_results_json_written_is_a_failure(tmpdir):
+    j = run_conseq(
+        tmpdir,
+        """
+    rule a:
+        outputs: none
+        run "python" with "import json; json.dump({'outputs': [{'type': 'x'}]}, open('results.json', 'w'))"
+    """,
+    )
+    assert [e.status for e in j.get_all_executions()] == ["failed"]
+    assert j.find_objs("public", {}) == []
+
+
+def test_outputs_none_without_results_json_succeeds(tmpdir):
+    j = run_conseq(
+        tmpdir,
+        """
+    rule a:
+        outputs: none
+        run "bash" with "echo hello"
+    """,
+    )
+    assert [e.status for e in j.get_all_executions()] == ["completed"]
+
+
+@pytest.mark.parametrize(
+    "outputs, write_results_first, expected_retcode",
+    [([], True, 1), ([], False, 0), ([{"type": "x"}], True, 0),],
+)
+def test_write_results_script(tmpdir, outputs, write_results_first, expected_retcode):
+    # the script the delegate clients run after the rule's commands
+    import json
+    import subprocess
+    import sys
+
+    from conseq.exec_client import write_results_script
+
+    tmpdir.join("write_results.py").write(write_results_script("a", outputs))
+    if write_results_first:
+        tmpdir.join("results.json").write('{"outputs": [{"type": "other"}]}')
+
+    proc = subprocess.run(
+        [sys.executable, "write_results.py"], cwd=str(tmpdir), capture_output=True
+    )
+    assert proc.returncode == expected_retcode
+    if expected_retcode == 0:
+        assert json.loads(tmpdir.join("results.json").read()) == {"outputs": outputs}
+    else:
+        assert b"outputs: none" in proc.stderr
+
+
 def test_non_key_values(tmpdir):
     j = run_conseq(
         tmpdir,

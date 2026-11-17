@@ -286,6 +286,11 @@ class ClientExecution:
         except FileNotFoundError:
             return ExecResult("No retcode file {}".format(retcode_file), None)
 
+        if self.outputs == [] and os.path.exists(self.results_path):
+            return ExecResult(
+                outputs_none_but_results_written_error(self.transform), None
+            )
+
         if self.outputs != None:
             results = {"outputs": self.outputs}
         else:
@@ -461,6 +466,35 @@ class DelegateExecution(ClientExecution):
         outputs = [_resolve_filenames(self.remote, o) for o in results["outputs"]]
 
         return ExecResult(None, outputs, cache_key=cache_key)
+
+
+def outputs_none_but_results_written_error(rule_name: Optional[str]) -> str:
+    return (
+        f"rule {rule_name} is declared with `outputs: none`, but it wrote a results.json "
+        "file. Either remove `outputs: none` or stop writing results.json"
+    )
+
+
+def write_results_script(rule_name: str, outputs: List[Any]) -> str:
+    """Python source which writes the rule's declared outputs to results.json.
+
+    Used by the delegate clients, where it runs after the rule's commands. If the rule
+    was declared with `outputs: none` but its commands wrote a results.json anyway, the
+    script fails instead of silently overwriting it.
+    """
+    script = "import json, os, sys\n"
+    if outputs == []:
+        script += (
+            "if os.path.exists('results.json'):\n"
+            "    sys.stderr.write({}+'\\n')\n"
+            "    sys.exit(1)\n"
+        ).format(repr(outputs_none_but_results_written_error(rule_name)))
+    script += (
+        "results = {}\n"
+        "with open('results.json', 'wt') as fd:\n"
+        "    fd.write(json.dumps(results))\n"
+    ).format(repr(dict(outputs=outputs)))
+    return script
 
 
 def write_wrapper_script(
@@ -1155,13 +1189,7 @@ class AsyncDelegateExecClient:
             source_and_dest += [(local_write_results_path, "write_results.py")]
             run_stmts += ["{} write_results.py".format(self.python_path)]
             with open(local_write_results_path, "wt") as fd:
-                fd.write(
-                    "import json\n"
-                    "results = {}\n"
-                    "fd = open('results.json', 'wt')\n"
-                    "fd.write(json.dumps(results))\n"
-                    "fd.close()\n".format(repr(dict(outputs=outputs)))
-                )
+                fd.write(write_results_script(name, outputs))
 
         write_wrapper_script(local_wrapper_path, None, prologue, run_stmts, None)
 
@@ -1385,13 +1413,7 @@ class DelegateExecClient:
             source_and_dest += [(local_write_results_path, "write_results.py")]
             run_stmts += ["{} write_results.py".format(self.python_path)]
             with open(local_write_results_path, "wt") as fd:
-                fd.write(
-                    "import json\n"
-                    "results = {}\n"
-                    "fd = open('results.json', 'wt')\n"
-                    "fd.write(json.dumps(results))\n"
-                    "fd.close()\n".format(repr(dict(outputs=outputs)))
-                )
+                fd.write(write_results_script(name, outputs))
 
         write_wrapper_script(local_wrapper_path, None, prologue, run_stmts, None)
 
